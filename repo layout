@@ -1,0 +1,53 @@
+mycosoft-mindex/
+  README.md
+  pyproject.toml
+  .env.example
+  docker-compose.yml
+  Dockerfile
+
+  mindex_api/
+    __init__.py
+    main.py
+    config.py
+    db.py
+    dependencies.py
+    models/           # (optional – if you later add SQLAlchemy models)
+      __init__.py
+    schemas/
+      __init__.py
+      taxon.py
+      telemetry.py
+      ip_assets.py
+      health.py
+    routers/
+      __init__.py
+      health.py
+      taxon.py
+      telemetry.py
+      ip_assets.py
+
+  migrations/
+    0001_init.sql     # The DDL I gave you earlier for MINDEX
+
+  mindex_etl/
+    __init__.py
+    config.py
+    db.py
+    taxon_canonicalizer.py
+    sources/
+      __init__.py
+      inat.py
+      mycobank.py
+      fungidb.py
+      mushroom_world.py
+      wikipedia.py
+    jobs/
+      sync_inat_taxa.py
+      sync_mycobank_taxa.py
+      sync_fungidb_genomes.py
+      backfill_traits.py
+
+  .github/
+    workflows/
+      build-and-deploy-azure.yml
+      platform-one-build.yml
