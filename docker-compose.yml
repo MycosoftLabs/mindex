@@ -1,0 +1,27 @@
+version: '3.9'
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: mindex
+      POSTGRES_USER: mindex
+      POSTGRES_PASSWORD: mindex
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+  api:
+    build: .
+    command: uvicorn mindex_api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      MINDEX_DB_HOST: db
+      MINDEX_DB_USER: mindex
+      MINDEX_DB_PASSWORD: mindex
+      MINDEX_DB_NAME: mindex
+      API_KEYS: local-dev-key
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+volumes:
+  postgres-data:

@@ -1,0 +1,46 @@
+name: platform-one-build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-hardened-image:
+    runs-on: ubuntu-latest
+    env:
+      IRON_BANK_REGISTRY: ${{ secrets.IRON_BANK_REGISTRY }}
+      IRON_BANK_USERNAME: ${{ secrets.IRON_BANK_USERNAME }}
+      IRON_BANK_PASSWORD: ${{ secrets.IRON_BANK_PASSWORD }}
+      IRON_BANK_BASE_IMAGE: ${{ secrets.IRON_BANK_BASE_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[dev]
+
+      - name: Run unit tests
+        run: pytest
+
+      - name: Authenticate to Iron Bank Registry
+        if: ${{ env.IRON_BANK_REGISTRY != '' }}
+        run: |
+          echo "${IRON_BANK_PASSWORD}" | docker login "${IRON_BANK_REGISTRY}" -u "${IRON_BANK_USERNAME}" --password-stdin
+
+      - name: Build hardened image
+        run: |
+          docker build \
+            --build-arg BASE_IMAGE=${IRON_BANK_BASE_IMAGE} \
+            -t ${IRON_BANK_REGISTRY}/mindex/mindex-api:${{ github.sha }} .
+
+      - name: Push hardened image
+        if: ${{ env.IRON_BANK_REGISTRY != '' }}
+        run: docker push ${IRON_BANK_REGISTRY}/mindex/mindex-api:${{ github.sha }}
