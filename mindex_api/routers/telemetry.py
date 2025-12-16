@@ -13,7 +13,7 @@ from ..dependencies import (
     pagination_params,
     require_api_key,
 )
-from ..schemas.telemetry import DeviceLatestSamplesResponse, DeviceListResponse
+from ..contracts.v1.telemetry import DeviceLatestSamplesResponse, DeviceListResponse
 
 telemetry_router = APIRouter(
     prefix="/telemetry",

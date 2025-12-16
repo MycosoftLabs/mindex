@@ -15,7 +15,7 @@ from ..dependencies import (
     pagination_params,
     require_api_key,
 )
-from ..schemas.observations import ObservationListResponse
+from ..contracts.v1.observations import ObservationListResponse
 
 router = APIRouter(
     prefix="/observations",

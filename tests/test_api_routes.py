@@ -83,7 +83,7 @@ def test_list_taxa_route(app):
         ]
     )
     client = TestClient(app)
-    resp = client.get("/taxa")
+    resp = client.get("/api/mindex/taxa")
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["data"][0]["canonical_name"] == "Agaricus testus"
@@ -115,7 +115,7 @@ def test_get_taxon_route(app):
         ]
     )
     client = TestClient(app)
-    resp = client.get(f"/taxa/{taxon_id}")
+    resp = client.get(f"/api/mindex/taxa/{taxon_id}")
     assert resp.status_code == 200
     assert resp.json()["canonical_name"] == "Agaricus testus"
 
@@ -149,7 +149,7 @@ def test_telemetry_latest_route(app):
         ]
     )
     client = TestClient(app)
-    resp = client.get("/telemetry/devices/latest")
+    resp = client.get("/api/mindex/telemetry/devices/latest")
     assert resp.status_code == 200
     assert resp.json()["data"][0]["sample_id"] == sample_id
 
@@ -181,6 +181,6 @@ def test_ip_assets_list_route(app):
     ]
     app.dependency_overrides[get_db_session] = _db_override(responses)
     client = TestClient(app)
-    resp = client.get("/ip/assets")
+    resp = client.get("/api/mindex/ip/assets")
     assert resp.status_code == 200
     assert resp.json()["data"][0]["id"] == asset_id

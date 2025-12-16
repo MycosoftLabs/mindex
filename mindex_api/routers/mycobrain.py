@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import json
@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session, require_api_key
-from ..schemas.mycobrain import (
+from ..contracts.v1.mycobrain import (
     DeviceCommandCreate,
     DeviceCommandResponse,
     MDPTelemetryIngestionRequest,

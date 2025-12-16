@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session
-from ..schemas.health import HealthResponse
+from ..contracts.v1.health import HealthResponse
 
 router = APIRouter(tags=["health"])
 

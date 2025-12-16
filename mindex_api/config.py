@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     api_log_level: str = "info"
+    api_prefix: str = "/api/mindex"
 
     api_cors_origins: List[AnyHttpUrl] = Field(default_factory=list)
     api_keys: List[str] = Field(

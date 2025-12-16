@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session, pagination_params, require_api_key, PaginationParams
-from ..schemas.taxon import TaxonListResponse, TaxonResponse
+from ..contracts.v1.taxon import TaxonListResponse, TaxonResponse
 
 router = APIRouter(
     prefix="/taxa",

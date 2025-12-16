@@ -8,7 +8,7 @@ from psycopg import Connection
 
 
 def normalize_name(name: str) -> str:
-    if not name:
+    if not name or not name.strip():
         raise ValueError("Taxon name cannot be empty")
     normalized = " ".join(name.strip().split())
     return normalized

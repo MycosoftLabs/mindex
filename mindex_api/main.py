@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,11 +16,12 @@ from .routers import (
 
 
 def create_app() -> FastAPI:
+    api_prefix = settings.api_prefix.rstrip("/")
     app = FastAPI(
         title=settings.api_title,
         version=settings.api_version,
-        docs_url='/docs',
-        openapi_url='/openapi.json',
+        docs_url=f"{api_prefix}/docs",
+        openapi_url=f"{api_prefix}/openapi.json",
     )
 
     if settings.api_cors_origins:
@@ -32,13 +33,14 @@ def create_app() -> FastAPI:
             allow_headers=['*'],
         )
 
-    app.include_router(health_router)
-    app.include_router(taxon_router)
-    app.include_router(telemetry_router)
-    app.include_router(devices_router)
-    app.include_router(observations_router)
-    app.include_router(ip_assets_router)
-    app.include_router(mycobrain_router)
+    # Public API boundary: everything lives under /api/mindex/...
+    app.include_router(health_router, prefix=api_prefix)
+    app.include_router(taxon_router, prefix=api_prefix)
+    app.include_router(telemetry_router, prefix=api_prefix)
+    app.include_router(devices_router, prefix=api_prefix)
+    app.include_router(observations_router, prefix=api_prefix)
+    app.include_router(ip_assets_router, prefix=api_prefix)
+    app.include_router(mycobrain_router, prefix=api_prefix)
 
     return app
 
