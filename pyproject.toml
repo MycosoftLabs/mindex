@@ -2,6 +2,9 @@
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["mindex_api*", "mindex_etl*"]
+
 [project]
 name = "mindex"
 version = "0.1.0"
