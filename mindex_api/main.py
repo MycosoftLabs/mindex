@@ -10,8 +10,11 @@ from .routers import (
     ip_assets_router,
     mycobrain_router,
     observations_router,
+    stats_router,
     taxon_router,
     telemetry_router,
+    wifisense_router,
+    drone_router,
 )
 
 
@@ -26,6 +29,8 @@ def create_app() -> FastAPI:
     - MycoBrain (MDP v1 device integration)
     - Observations (field observations)
     - IP Assets (blockchain anchoring)
+    - WiFi Sense (CSI-based sensing)
+    - MycoDRONE (autonomous deployment/recovery)
     """
     app = FastAPI(
         title=settings.api_title,
@@ -63,6 +68,11 @@ def create_app() -> FastAPI:
     # Data routers
     app.include_router(observations_router, prefix=prefix)
     app.include_router(ip_assets_router, prefix=prefix)
+    app.include_router(stats_router, prefix=prefix)
+    
+    # Feature routers (WiFi Sense and MycoDRONE)
+    app.include_router(wifisense_router, prefix=prefix)
+    app.include_router(drone_router, prefix=prefix)
 
     return app
 

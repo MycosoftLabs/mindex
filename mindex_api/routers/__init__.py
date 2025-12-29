@@ -4,6 +4,9 @@ from .telemetry import telemetry_router, devices_router
 from .observations import router as observations_router
 from .ip_assets import router as ip_assets_router
 from .mycobrain import mycobrain_router
+from .stats import router as stats_router
+from .wifisense import router as wifisense_router
+from .drone import router as drone_router
 
 __all__ = [
     "health_router",
@@ -13,4 +16,7 @@ __all__ = [
     "observations_router",
     "ip_assets_router",
     "mycobrain_router",
+    "stats_router",
+    "wifisense_router",
+    "drone_router",
 ]
