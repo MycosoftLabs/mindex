@@ -84,15 +84,55 @@ services:
       - mindex-network
     restart: unless-stopped
 
-  # Optional: API Gateway/Proxy to connect to mycosoft network
-  # Uncomment when integrating with full mycosoft ecosystem
-  # gateway:
-  #   image: nginx:alpine
-  #   networks:
-  #     - mindex-network
-  #     - mycosoft-network
-  #   depends_on:
-  #     - api
+  # ETL Worker - runs data sync jobs on a schedule
+  etl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mindex-etl
+    command: python -m mindex_etl.scheduler --interval 60
+    environment:
+      # Database (internal Docker network)
+      MINDEX_DB_HOST: db
+      MINDEX_DB_PORT: 5432
+      MINDEX_DB_USER: ${MINDEX_DB_USER:-mindex}
+      MINDEX_DB_PASSWORD: ${MINDEX_DB_PASSWORD:-mindex}
+      MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
+      DATABASE_URL: postgresql://${MINDEX_DB_USER:-mindex}:${MINDEX_DB_PASSWORD:-mindex}@db:5432/${MINDEX_DB_NAME:-mindex}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./mindex_etl:/app/mindex_etl:ro
+    networks:
+      - mindex-network
+    restart: unless-stopped
+    profiles:
+      - etl  # Only start with: docker compose --profile etl up
+
+  # One-time initial data load
+  etl-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mindex-etl-init
+    command: python -m mindex_etl.jobs.run_all --incremental --max-pages 20
+    environment:
+      MINDEX_DB_HOST: db
+      MINDEX_DB_PORT: 5432
+      MINDEX_DB_USER: ${MINDEX_DB_USER:-mindex}
+      MINDEX_DB_PASSWORD: ${MINDEX_DB_PASSWORD:-mindex}
+      MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
+      DATABASE_URL: postgresql://${MINDEX_DB_USER:-mindex}:${MINDEX_DB_PASSWORD:-mindex}@db:5432/${MINDEX_DB_NAME:-mindex}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./mindex_etl:/app/mindex_etl:ro
+    networks:
+      - mindex-network
+    profiles:
+      - init  # Only run with: docker compose --profile init up etl-init
 
 volumes:
   mindex-postgres-data:

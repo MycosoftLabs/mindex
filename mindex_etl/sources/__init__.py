@@ -6,4 +6,6 @@ __all__ = [
     "fungidb",
     "mushroom_world",
     "wikipedia",
+    "gbif",
+    "index_fungorum",
 ]

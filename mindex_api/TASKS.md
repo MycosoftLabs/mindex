@@ -146,21 +146,95 @@ These can be internal-only endpoints (secured later).
 
 ---
 
-## 7. Integration with NatureOS & MYCA
+## 7. MycoBrain Integration
+
+### MDP v1 Protocol
+
+- [x] Implement `mindex_api/protocols/mdp_v1.py`:
+  - [x] COBS encode/decode
+  - [x] CRC16-CCITT calculation and validation
+  - [x] MDP frame encoding/decoding
+  - [x] NDJSON telemetry parsing
+  - [x] CommandBuilder helpers
+
+### Mycorrhizae Protocol
+
+- [x] Implement `mindex_api/protocols/mycorrhizae.py`:
+  - [x] Channel types (device, aggregate, computed)
+  - [x] Message format and serialization
+  - [x] Pub/sub routing
+  - [x] Default channels initialization
+
+### Database Schema
+
+- [x] Create `migrations/0002_mycobrain.sql`:
+  - [x] `mycobrain.device` - Extended device registry
+  - [x] `mycobrain.mdp_frame` - Raw frame logging
+  - [x] `mycobrain.command_queue` - Bi-directional commands
+  - [x] `mycobrain.bme688_reading` - BME688 sensor data
+  - [x] `mycobrain.analog_reading` - Analog channel data
+  - [x] `mycobrain.automation_rule` - Threshold automation
+  - [x] `mycobrain.natureos_widget` - Widget configs
+  - [x] `mycobrain.mycorrhizae_subscription` - Protocol subscriptions
+
+### API Endpoints
+
+- [x] Implement `mindex_api/routers/mycobrain.py`:
+  - [x] Device registration and management
+  - [x] API key generation for devices
+  - [x] Telemetry ingestion (single and batch)
+  - [x] Command queue operations
+  - [x] MOSFET, interval, reboot, OTA shortcuts
+  - [x] Mycorrhizae channel listing and publishing
+  - [x] SSE streaming for real-time updates
+
+### Schemas
+
+- [x] Implement `mindex_api/schemas/mycobrain.py`:
+  - [x] Device CRUD models
+  - [x] Telemetry payload models
+  - [x] Command models
+  - [x] Automation rule models
+  - [x] NatureOS/Mycorrhizae integration models
+
+### Configuration
+
+- [x] Update `mindex_api/config.py`:
+  - [x] MycoBrain device settings
+  - [x] MDP protocol settings
+  - [x] Mycorrhizae protocol settings
+  - [x] NatureOS integration settings
+  - [x] MAS agent settings
+
+### Documentation
+
+- [x] Create `docs/MYCOBRAIN_INTEGRATION.md`:
+  - [x] Architecture overview
+  - [x] MDP v1 protocol specification
+  - [x] API reference
+  - [x] MAS agent integration guide
+  - [x] Troubleshooting guide
+
+---
+
+## 8. Integration with NatureOS & MYCA
 
 - [ ] Define a simple internal client library (`mindex_client.py`) for other services:
   - [ ] `get_taxon(id)`
   - [ ] `search_taxa(q)`
   - [ ] `get_latest_telemetry(device_id)`
-- [ ] Document how NatureOS backend calls MINDEX API.
+  - [x] `get_device(id)` (via MycoBrain router)
+  - [x] `ingest_telemetry(payload)` (via MycoBrain router)
+  - [x] `queue_command(device_id, command)` (via MycoBrain router)
+- [x] Document how NatureOS backend calls MINDEX API (in MYCOBRAIN_INTEGRATION.md)
 - [ ] Document how MYCA agents should write:
   - [ ] New traits
   - [ ] New IP assets
-  - [ ] New telemetry streams/samples
+  - [x] New telemetry streams/samples (in MYCOBRAIN_INTEGRATION.md)
 
 ---
 
-## 8. Testing & validation
+## 9. Testing & validation
 
 - [x] Add unit tests for:
   - [x] Taxon canonicalization
@@ -168,3 +242,22 @@ These can be internal-only endpoints (secured later).
   - [x] Basic API routes
 - [x] Add a `pytest` job in CI.
 - [ ] Add a `pre-commit` config for black/isort/mypy (optional).
+- [ ] Add MycoBrain integration tests:
+  - [ ] MDP frame encode/decode roundtrip
+  - [ ] COBS encoding edge cases
+  - [ ] CRC16 validation
+  - [ ] Telemetry ingestion API
+  - [ ] Command queue operations
+  - [ ] Mycorrhizae pub/sub
+
+---
+
+## 10. Notion Knowledge Base
+
+- [ ] Create "MycoBrain Knowledge Base" database in Notion:
+  - [ ] Hardware specifications (schematics, pin mappings, BOM)
+  - [ ] Firmware documentation (Side-A, Side-B, Gateway)
+  - [ ] Protocol reference (MDP v1, Mycorrhizae)
+  - [ ] Integration guides (MINDEX, NatureOS, MAS)
+  - [ ] Troubleshooting FAQ
+- [ ] Link Notion pages to GitHub issues for tracking

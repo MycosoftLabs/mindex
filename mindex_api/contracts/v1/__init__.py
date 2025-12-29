@@ -13,6 +13,8 @@ from .ip_assets import (
     SolanaBindingRequest,
 )
 from .mycobrain import (
+    CommandCreateRequest,
+    CommandResponse,
     DeviceCommandCreate,
     DeviceCommandResponse,
     MDPTelemetryIngestionRequest,
@@ -20,7 +22,9 @@ from .mycobrain import (
     MDPTelemetryPayload,
     MycoBrainDeviceCreate,
     MycoBrainDeviceResponse,
-    MycoBrainStatusResponse,
+    TelemetryIngestRequest,
+    TelemetryIngestResponse,
+    TelemetryPayload,
 )
 from .observations import Observation, ObservationListResponse
 from .taxon import TaxonBase, TaxonListResponse, TaxonResponse, TaxonTrait
@@ -59,7 +63,12 @@ __all__ = [
     # mycobrain
     "MycoBrainDeviceCreate",
     "MycoBrainDeviceResponse",
-    "MycoBrainStatusResponse",
+    "TelemetryPayload",
+    "TelemetryIngestRequest",
+    "TelemetryIngestResponse",
+    "CommandCreateRequest",
+    "CommandResponse",
+    # mycobrain aliases for backward compatibility
     "MDPTelemetryPayload",
     "MDPTelemetryIngestionRequest",
     "MDPTelemetryIngestionResponse",
