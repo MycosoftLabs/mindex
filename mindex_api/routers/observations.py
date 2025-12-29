@@ -71,15 +71,32 @@ async def list_observations(
     ),
 ) -> ObservationListResponse:
     bbox_params = _parse_bbox(bbox)
-    base_where = """
-        FROM obs.observation o
-        WHERE (:taxon_id::uuid IS NULL OR o.taxon_id = :taxon_id)
-          AND (:start IS NULL OR o.observed_at >= :start)
-          AND (:end IS NULL OR o.observed_at <= :end)
-    """
-    data_query = _build_query(
-        bool(bbox_params),
-        f"""
+
+    # Build dynamic WHERE clause to avoid asyncpg NULL parameter issues
+    where_clauses = []
+    params: dict = {
+        "limit": pagination.limit,
+        "offset": pagination.offset,
+    }
+
+    if taxon_id:
+        where_clauses.append("o.taxon_id = :taxon_id")
+        params["taxon_id"] = str(taxon_id)
+    if start:
+        where_clauses.append("o.observed_at >= :start")
+        params["start"] = start
+    if end:
+        where_clauses.append("o.observed_at <= :end")
+        params["end"] = end
+    if bbox_params:
+        where_clauses.append(
+            "ST_Intersects(o.location::geometry, ST_MakeEnvelope(:min_lon, :min_lat, :max_lon, :max_lat, 4326))"
+        )
+        params.update(bbox_params)
+
+    where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+    data_query = f"""
         SELECT
             o.id,
             o.taxon_id,
@@ -92,27 +109,15 @@ async def list_observations(
             o.notes,
             o.metadata,
             ST_AsGeoJSON(o.location::geometry) AS location_geojson
-        {base_where}
+        FROM obs.observation o
+        WHERE {where_sql}
         ORDER BY o.observed_at DESC
         LIMIT :limit OFFSET :offset
-        """,
-    )
-    count_query = _build_query(
-        bool(bbox_params),
-        f"""
-        SELECT count(*) {base_where}
-        """,
-    )
-
-    params = {
-        "taxon_id": str(taxon_id) if taxon_id else None,
-        "start": start,
-        "end": end,
-        "limit": pagination.limit,
-        "offset": pagination.offset,
-    }
-    if bbox_params:
-        params.update(bbox_params)
+    """
+    count_query = f"""
+        SELECT count(*) FROM obs.observation o
+        WHERE {where_sql}
+    """
 
     result = await db.execute(text(data_query), params)
     count_result = await db.execute(text(count_query), params)

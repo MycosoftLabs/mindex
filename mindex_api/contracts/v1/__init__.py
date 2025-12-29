@@ -1,7 +1,7 @@
 """MINDEX public API DTOs (versioned)."""
 
 from .common import GeoJSON, PaginationMeta, TimestampedModel
-from .health import HealthResponse
+from .health import HealthResponse, VersionResponse
 from .ip_assets import (
     BitcoinOrdinal,
     HypergraphAnchor,
@@ -33,6 +33,7 @@ __all__ = [
     "TimestampedModel",
     # health
     "HealthResponse",
+    "VersionResponse",
     # taxa
     "TaxonTrait",
     "TaxonBase",

@@ -9,8 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session
-from ..contracts.v1.health import HealthResponse
-from ..schemas.health import VersionResponse
+from ..contracts.v1.health import HealthResponse, VersionResponse
 from ..config import settings
 
 router = APIRouter(tags=["health"])

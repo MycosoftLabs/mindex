@@ -1,6 +1,6 @@
 """Versioned contract DTOs: health."""
 
-from ...schemas.health import HealthResponse
+from ...schemas.health import HealthResponse, VersionResponse
 
-__all__ = ["HealthResponse"]
+__all__ = ["HealthResponse", "VersionResponse"]
 

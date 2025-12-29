@@ -24,16 +24,25 @@ async def list_taxa(
     q: Optional[str] = Query(None, description="Free-text search across canonical/common names."),
     rank: Optional[str] = Query(None, description="Exact rank filter."),
 ) -> TaxonListResponse:
-    q_pattern = f"%{q}%" if q else None
-    filters = {
-        "q_pattern": q_pattern,
-        "rank": rank,
+    # Build dynamic WHERE clause to avoid asyncpg NULL parameter issues
+    where_clauses = []
+    params: dict = {
         "limit": pagination.limit,
         "offset": pagination.offset,
     }
 
+    if q:
+        q_pattern = f"%{q}%"
+        where_clauses.append("(canonical_name ILIKE :q_pattern OR common_name ILIKE :q_pattern)")
+        params["q_pattern"] = q_pattern
+    if rank:
+        where_clauses.append("rank = :rank")
+        params["rank"] = rank
+
+    where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
     stmt = text(
-        """
+        f"""
         SELECT
             id,
             canonical_name,
@@ -46,22 +55,20 @@ async def list_taxa(
             created_at,
             updated_at
         FROM core.taxon
-        WHERE (:q_pattern IS NULL OR canonical_name ILIKE :q_pattern OR common_name ILIKE :q_pattern)
-          AND (:rank IS NULL OR rank = :rank)
+        WHERE {where_sql}
         ORDER BY canonical_name
         LIMIT :limit OFFSET :offset
         """
     )
     count_stmt = text(
-        """
+        f"""
         SELECT count(*) FROM core.taxon
-        WHERE (:q_pattern IS NULL OR canonical_name ILIKE :q_pattern OR common_name ILIKE :q_pattern)
-          AND (:rank IS NULL OR rank = :rank)
+        WHERE {where_sql}
         """
     )
 
-    result = await db.execute(stmt, filters)
-    count_result = await db.execute(count_stmt, filters)
+    result = await db.execute(stmt, params)
+    count_result = await db.execute(count_stmt, params)
     total = count_result.scalar_one()
 
     rows = [dict(row) for row in result.mappings().all()]

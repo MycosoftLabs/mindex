@@ -1,27 +1,98 @@
 version: '3.9'
+
+# MINDEX Standalone Docker Compose
+# ================================
+# This compose file runs MINDEX with its own PostgreSQL database.
+# For integration with the full Mycosoft ecosystem, use docker-compose.mycosoft.yml
+# at C:\Users\admin2\Desktop\MYCOSOFT\CODE\docker-compose.mycosoft.yml
+#
+# Usage:
+#   docker compose up -d              # Start MINDEX standalone
+#   docker compose up -d --build      # Rebuild and start
+#   docker compose logs -f api        # Watch API logs
+#   docker compose down -v            # Stop and remove volumes
+
+networks:
+  mindex-network:
+    driver: bridge
+
 services:
   db:
     image: postgis/postgis:16-3.4
+    container_name: mindex-postgres
     environment:
-      POSTGRES_DB: mindex
-      POSTGRES_USER: mindex
-      POSTGRES_PASSWORD: mindex
+      POSTGRES_DB: ${MINDEX_DB_NAME:-mindex}
+      POSTGRES_USER: ${MINDEX_DB_USER:-mindex}
+      POSTGRES_PASSWORD: ${MINDEX_DB_PASSWORD:-mindex}
     ports:
-      - "5432:5432"
+      - "${MINDEX_DB_PORT:-5432}:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - mindex-postgres-data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MINDEX_DB_USER:-mindex} -d ${MINDEX_DB_NAME:-mindex}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mindex-network
+    restart: unless-stopped
+
   api:
-    build: .
-    command: uvicorn mindex_api.main:app --host 0.0.0.0 --port 8000
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-}
+    container_name: mindex-api
+    command: uvicorn mindex_api.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
+      # Database
       MINDEX_DB_HOST: db
-      MINDEX_DB_USER: mindex
-      MINDEX_DB_PASSWORD: mindex
-      MINDEX_DB_NAME: mindex
-      API_KEYS: local-dev-key
+      MINDEX_DB_PORT: 5432
+      MINDEX_DB_USER: ${MINDEX_DB_USER:-mindex}
+      MINDEX_DB_PASSWORD: ${MINDEX_DB_PASSWORD:-mindex}
+      MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
+      
+      # API Configuration
+      API_TITLE: "MINDEX API"
+      API_VERSION: "0.1.0"
+      API_PREFIX: "/api/mindex"
+      API_KEYS: '["${MINDEX_API_KEY:-local-dev-key}"]'
+      
+      # CORS - Allow NatureOS and other local services
+      API_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002","http://127.0.0.1:3000","http://natureos-web:3000"]'
+      
+      # Git SHA for version endpoint
+      GIT_SHA: ${GIT_SHA:-}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
-      - "8000:8000"
+      - "${MINDEX_API_PORT:-8000}:8000"
+    volumes:
+      # Hot reload for development
+      - ./mindex_api:/app/mindex_api:ro
+      - ./mindex_etl:/app/mindex_etl:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/mindex/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mindex-network
+    restart: unless-stopped
+
+  # Optional: API Gateway/Proxy to connect to mycosoft network
+  # Uncomment when integrating with full mycosoft ecosystem
+  # gateway:
+  #   image: nginx:alpine
+  #   networks:
+  #     - mindex-network
+  #     - mycosoft-network
+  #   depends_on:
+  #     - api
+
 volumes:
-  postgres-data:
+  mindex-postgres-data:

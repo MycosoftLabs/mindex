@@ -94,8 +94,21 @@ async def list_devices(
     db: AsyncSession = Depends(get_db_session),
     status_filter: Optional[str] = None,
 ) -> DeviceListResponse:
+    # Build dynamic WHERE clause to avoid asyncpg NULL parameter issues
+    where_clauses = []
+    params: dict = {
+        "limit": pagination.limit,
+        "offset": pagination.offset,
+    }
+
+    if status_filter:
+        where_clauses.append("status = :status")
+        params["status"] = status_filter
+
+    where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
     stmt = text(
-        """
+        f"""
         SELECT
             id,
             name,
@@ -107,24 +120,18 @@ async def list_devices(
             updated_at,
             ST_AsGeoJSON(location::geometry) AS location_geojson
         FROM telemetry.device
-        WHERE (:status IS NULL OR status = :status)
+        WHERE {where_sql}
         ORDER BY created_at DESC
         LIMIT :limit OFFSET :offset
         """
     )
     count_stmt = text(
-        """
+        f"""
         SELECT count(*)
         FROM telemetry.device
-        WHERE (:status IS NULL OR status = :status)
+        WHERE {where_sql}
         """
     )
-
-    params = {
-        "status": status_filter,
-        "limit": pagination.limit,
-        "offset": pagination.offset,
-    }
 
     result = await db.execute(stmt, params)
     count_result = await db.execute(count_stmt, params)
