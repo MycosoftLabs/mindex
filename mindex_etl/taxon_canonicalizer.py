@@ -89,21 +89,22 @@ def link_external_id(
     external_id: str,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
+    """
+    Link an external ID to a taxon.
+    
+    Uses ON CONFLICT to handle duplicate (source, external_id) entries.
+    If a link already exists for this (source, external_id), it updates the taxon_id
+    to the new value (last writer wins).
+    """
     metadata = metadata or {}
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT 1 FROM core.taxon_external_id
-            WHERE taxon_id = %s AND source = %s AND external_id = %s
-            """,
-            (taxon_id, source, external_id),
-        )
-        if cur.fetchone():
-            return
-        cur.execute(
-            """
             INSERT INTO core.taxon_external_id (taxon_id, source, external_id, metadata)
             VALUES (%s, %s, %s, %s::jsonb)
+            ON CONFLICT (source, external_id) DO UPDATE
+            SET taxon_id = EXCLUDED.taxon_id,
+                metadata = EXCLUDED.metadata
             """,
             (taxon_id, source, external_id, json.dumps(metadata)),
         )

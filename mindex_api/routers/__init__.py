@@ -7,6 +7,7 @@ from .mycobrain import mycobrain_router
 from .stats import router as stats_router
 from .wifisense import router as wifisense_router
 from .drone import router as drone_router
+from .images import router as images_router
 
 __all__ = [
     "health_router",
@@ -19,4 +20,5 @@ __all__ = [
     "stats_router",
     "wifisense_router",
     "drone_router",
+    "images_router",
 ]

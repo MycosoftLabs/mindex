@@ -51,7 +51,7 @@ class ETLScheduler:
         next_run = self.last_run[job_name] + timedelta(hours=interval_hours)
         return datetime.now() >= next_run
 
-    def run_scheduled_jobs(self, max_pages: Optional[int] = 10) -> Dict[str, int]:
+    def run_scheduled_jobs(self, max_pages: Optional[int] = 100) -> Dict[str, int]:
         """Run all scheduled jobs that are due."""
         from .jobs.run_all import create_job_registry
 
@@ -118,8 +118,8 @@ def main() -> None:
     parser.add_argument(
         "--max-pages",
         type=int,
-        default=10,
-        help="Max pages per source per run (default: 10)",
+        default=100,
+        help="Max pages per source per run (default: 100)",
     )
     args = parser.parse_args()
 

@@ -12,8 +12,14 @@ from datetime import datetime
 from typing import Dict, Generator, Optional
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
+from ..checkpoint import CheckpointManager
 from ..config import settings
 from ..db import db_session
 from ..taxon_canonicalizer import upsert_taxon
@@ -21,7 +27,12 @@ from ..taxon_canonicalizer import upsert_taxon
 FUNGI_TAXON_ID = 47170  # iNaturalist Fungi taxon ID
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+@retry(
+    stop=stop_after_attempt(10),
+    wait=wait_exponential(multiplier=2, min=4, max=300),
+    retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
+    reraise=True,
+)
 def _fetch_observations(
     client: httpx.Client,
     page: int,
@@ -29,7 +40,9 @@ def _fetch_observations(
     quality_grade: str = "research",
     updated_since: Optional[str] = None,
 ) -> dict:
-    """Fetch observations from iNaturalist API."""
+    """Fetch observations from iNaturalist API with exponential backoff retry."""
+    import time
+    
     params = {
         "taxon_id": FUNGI_TAXON_ID,
         "quality_grade": quality_grade,
@@ -43,14 +56,33 @@ def _fetch_observations(
     if updated_since:
         params["updated_since"] = updated_since
 
-    response = client.get(
-        f"{settings.inat_base_url}/observations",
-        params=params,
-        timeout=settings.http_timeout,
-        headers={"User-Agent": "mindex-etl/0.1"},
-    )
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = client.get(
+            f"{settings.inat_base_url}/observations",
+            params=params,
+            timeout=settings.http_timeout,
+            headers={"User-Agent": "mindex-etl/0.1"},
+        )
+        
+        # Handle rate limiting specifically
+        if response.status_code == 403:
+            wait_time = 60
+            print(f"Rate limited (403) on page {page}, waiting {wait_time}s...", flush=True)
+            time.sleep(wait_time)
+            response.raise_for_status()
+        elif response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", 60))
+            print(f"Rate limited (429) on page {page}, waiting {retry_after}s...", flush=True)
+            time.sleep(retry_after)
+            response.raise_for_status()
+        else:
+            response.raise_for_status()
+            
+        return response.json()
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (403, 429):
+            raise
+        raise
 
 
 def iter_observations(
@@ -59,7 +91,7 @@ def iter_observations(
     max_pages: Optional[int] = None,
     quality_grade: str = "research",
     updated_since: Optional[str] = None,
-    delay_seconds: float = 0.5,
+    delay_seconds: float = 0.7,  # Increased to respect rate limits
 ) -> Generator[Dict, None, None]:
     """Iterate through iNaturalist fungal observations."""
     with httpx.Client() as client:
@@ -129,9 +161,13 @@ def sync_inat_observations(
     *,
     max_pages: Optional[int] = None,
     quality_grade: str = "research",
+    start_page: int = 1,
+    checkpoint_manager: Optional[CheckpointManager] = None,
 ) -> int:
-    """Sync iNaturalist observations into MINDEX database."""
+    """Sync iNaturalist observations into MINDEX database with checkpoint support."""
     inserted = 0
+    checkpoint_interval = 10  # Save checkpoint every 10 pages
+    page = start_page
 
     with db_session() as conn:
         for obs in iter_observations(max_pages=max_pages, quality_grade=quality_grade):
@@ -216,11 +252,24 @@ def sync_inat_observations(
                             json.dumps(obs.get("photos", [])),
                             obs.get("notes"),
                             json.dumps(obs.get("metadata", {})),
-                        ),
-                    )
+                    ),
+                )
 
             inserted += 1
-
+            
+            # Save checkpoint periodically
+            if checkpoint_manager and inserted % (100 * checkpoint_interval) == 0:
+                checkpoint_manager.save(page, records_processed=inserted)
+                print(f"Checkpoint saved: page {page}, {inserted} observations", flush=True)
+            
+            # Track current page (approximate)
+            if inserted % 100 == 0:
+                page += 1
+    
+    # Final checkpoint
+    if checkpoint_manager:
+        checkpoint_manager.save(page, records_processed=inserted, completed=True)
+    
     return inserted
 
 

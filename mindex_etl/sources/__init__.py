@@ -8,4 +8,8 @@ __all__ = [
     "wikipedia",
     "gbif",
     "index_fungorum",
+    "theyeasts",
+    "fusarium",
+    "master_downloader",
+    "multi_image",
 ]

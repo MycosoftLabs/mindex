@@ -29,9 +29,23 @@ class ETLSettings(BaseSettings):
     http_retries: int = 3
     rate_limit_delay: float = 0.5  # Delay between API calls
 
+    # Local data storage for scraping (use local first, then NAS)
+    local_data_dir: str = Field(
+        default="C:/Users/admin2/Desktop/MYCOSOFT/DATA/mindex_scrape",
+        description="Local directory for scraped data downloads"
+    )
+    nas_data_dir: str = Field(
+        default="\\\\192.168.1.50\\mindex",
+        description="NAS directory for large data storage"
+    )
+
     # iNaturalist
     inat_base_url: str = "https://api.inaturalist.org/v1"
-    inat_rate_limit: float = 0.5  # Respect iNat API rate limits
+    inat_api_token: str = Field(
+        default="eyJhbGciOiJIUzUxMiJ9.eyJ1c2VyX2lkIjoxMDAxOTc2OSwiZXhwIjoxNzY1OTE1MDY2fQ.JXV3lLOyuuXeItfNUagixJCtKN3SI20_em1sl2gKFFDppHBNJXy79x6I6jJbiPG1a6n_-cj1JgysSmuKlbDKVg",
+        description="iNaturalist API JWT token for authenticated requests"
+    )
+    inat_rate_limit: float = 0.3  # Faster with API token (3 req/sec)
 
     # MycoBank
     mycobank_base_url: str = "https://www.mycobank.org/Services/Generic/SearchService.svc/rest"
@@ -69,6 +83,7 @@ class ETLSettings(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
+        "extra": "ignore",  # Ignore extra environment variables
     }
 
 

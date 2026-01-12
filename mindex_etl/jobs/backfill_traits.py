@@ -27,7 +27,13 @@ def _insert_trait(conn, taxon_id, trait_name: str, value_text: str, source: str,
 def backfill_traits(*, max_pages: int | None = None, enrich_wikipedia: bool = True) -> int:
     processed = 0
     with db_session() as conn:
-        for record in mushroom_world.iter_mushroom_world_species(max_pages=max_pages):
+        for result in mushroom_world.iter_mushroom_world_species(max_pages=max_pages):
+            # iter_mushroom_world_species yields (mapped_taxon, source, external_id) tuples
+            if isinstance(result, tuple):
+                record, _, _ = result
+            else:
+                record = result
+            
             taxon_name = record.get("canonical_name")
             if not taxon_name:
                 continue

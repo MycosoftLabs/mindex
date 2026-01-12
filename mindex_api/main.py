@@ -7,6 +7,7 @@ from .config import settings
 from .routers import (
     devices_router,
     health_router,
+    images_router,
     ip_assets_router,
     mycobrain_router,
     observations_router,
@@ -73,6 +74,9 @@ def create_app() -> FastAPI:
     # Feature routers (WiFi Sense and MycoDRONE)
     app.include_router(wifisense_router, prefix=prefix)
     app.include_router(drone_router, prefix=prefix)
+    
+    # Image management router
+    app.include_router(images_router, prefix=prefix)
 
     return app
 

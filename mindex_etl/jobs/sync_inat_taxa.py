@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 import argparse
+from typing import Optional
 
+from ..checkpoint import CheckpointManager
 from ..db import db_session
 from ..sources import inat
 from ..taxon_canonicalizer import link_external_id, upsert_taxon
 
 
-def sync_inat_taxa(*, per_page: int = 100, max_pages: int | None = None) -> int:
+def sync_inat_taxa(
+    *,
+    per_page: int = 100,
+    max_pages: int | None = None,
+    start_page: int = 1,
+    checkpoint_manager: Optional[CheckpointManager] = None,
+) -> int:
+    """Sync iNaturalist taxa with checkpoint support."""
     created = 0
+    checkpoint_interval = 10  # Save checkpoint every 10 pages
+    
     with db_session() as conn:
+        page = start_page
         for taxon_payload, source, external_id in inat.iter_fungi_taxa(
             per_page=per_page,
             max_pages=max_pages,
@@ -23,6 +35,20 @@ def sync_inat_taxa(*, per_page: int = 100, max_pages: int | None = None) -> int:
                 metadata={"source": source},
             )
             created += 1
+            
+            # Save checkpoint periodically
+            if checkpoint_manager and created % (per_page * checkpoint_interval) == 0:
+                checkpoint_manager.save(page, records_processed=created)
+                print(f"Checkpoint saved: page {page}, {created} records", flush=True)
+            
+            # Track current page (approximate)
+            if created % per_page == 0:
+                page += 1
+    
+    # Final checkpoint
+    if checkpoint_manager:
+        checkpoint_manager.save(page, records_processed=created, completed=True)
+    
     return created
 
 

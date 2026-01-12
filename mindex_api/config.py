@@ -1,6 +1,8 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 
-from pydantic import AnyHttpUrl, Field
+import json
+
+from pydantic import AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -21,13 +23,48 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/mindex"
 
     api_cors_origins: List[AnyHttpUrl] = Field(default_factory=list)
-    api_keys: List[str] = Field(
-        default_factory=list,
-        description="Allowed API keys for protected endpoints.",
-    )
-    default_page_size: int = 25
-    max_page_size: int = 100
+    # NOTE: pydantic-settings is strict about parsing list env vars (expects JSON).
+    # We accept either:
+    # - a JSON list string: '["k1","k2"]'
+    # - a single string: 'k1'
+    # - a comma-separated string: 'k1,k2'
+    # The Union[str, List[str]] avoids SettingsError when API_KEYS is provided as a plain string.
+    api_keys: Union[List[str], str] = Field(default_factory=list, description="Allowed API keys for protected endpoints.")
+    # Pagination defaults
+    # NOTE: The website Explorer/Database wants to browse hundreds at a time.
+    # The old max_page_size=100 caused the UI to "mysteriously" cap at 100 for every letter.
+    default_page_size: int = 100
+    max_page_size: int = 1000
     telemetry_latest_limit: int = 100
+
+    @field_validator("api_keys", mode="before")
+    @classmethod
+    def parse_api_keys(cls, v):
+        """
+        Allow API_KEYS to be provided as:
+        - JSON list: ["k1","k2"]
+        - single string: "k1"
+        - comma-separated: "k1,k2"
+        """
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            raw = v.strip()
+            if raw == "":
+                return []
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    return parsed if isinstance(parsed, list) else [str(parsed)]
+                except Exception:
+                    # fall back to comma-separated
+                    pass
+            if "," in raw:
+                return [p.strip() for p in raw.split(",") if p.strip()]
+            return [raw]
+        return v
 
     # Integrations
     hypergraph_endpoint: Optional[AnyHttpUrl] = None

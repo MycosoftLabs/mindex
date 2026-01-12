@@ -57,6 +57,9 @@ def create_job_registry() -> Dict[str, ETLJob]:
     from .backfill_traits import backfill_traits
     from .sync_inat_observations import sync_inat_observations
     from .sync_gbif_occurrences import sync_gbif_occurrences
+    from .sync_theyeasts_taxa import sync_theyeasts_taxa
+    from .sync_fusarium_taxa import sync_fusarium_taxa
+    from .sync_mushroom_world_taxa import sync_mushroom_world_taxa
 
     return {
         "inat_taxa": ETLJob(
@@ -64,14 +67,35 @@ def create_job_registry() -> Dict[str, ETLJob]:
             source="iNaturalist",
             run_func=sync_inat_taxa,
             priority=10,
-            description="Sync fungal taxonomy from iNaturalist API",
+            description="Sync fungal taxonomy from iNaturalist API (~26,616 species)",
         ),
         "mycobank": ETLJob(
             name="mycobank",
             source="MycoBank",
             run_func=sync_mycobank_taxa,
-            priority=20,
-            description="Sync taxa and synonyms from MycoBank",
+            priority=15,
+            description="Sync taxa and synonyms from MycoBank (~545,007 species)",
+        ),
+        "theyeasts": ETLJob(
+            name="theyeasts",
+            source="TheYeasts.org",
+            run_func=sync_theyeasts_taxa,
+            priority=25,
+            description="Sync yeast species from TheYeasts.org (~3,502 species)",
+        ),
+        "fusarium": ETLJob(
+            name="fusarium",
+            source="Fusarium.org",
+            run_func=sync_fusarium_taxa,
+            priority=26,
+            description="Sync Fusarium species from Fusarium.org (~408 species)",
+        ),
+        "mushroom_world": ETLJob(
+            name="mushroom_world",
+            source="Mushroom.World",
+            run_func=sync_mushroom_world_taxa,
+            priority=27,
+            description="Sync mushroom species from Mushroom.World (~1,000+ species)",
         ),
         "fungidb": ETLJob(
             name="fungidb",
@@ -99,7 +123,7 @@ def create_job_registry() -> Dict[str, ETLJob]:
             source="GBIF",
             run_func=sync_gbif_occurrences,
             priority=60,
-            description="Sync occurrence records from GBIF",
+            description="Sync occurrence records from GBIF (~50,000+ occurrences)",
         ),
     }
 
