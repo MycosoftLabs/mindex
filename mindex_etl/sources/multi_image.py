@@ -52,6 +52,11 @@ class ImageResult:
     def best_url(self) -> str:
         """Return the best available URL (prefer medium for web display)."""
         return self.medium_url or self.url
+    
+    @property
+    def hq_url(self) -> str:
+        """Return the highest quality URL (for HQ ingestion - always original)."""
+        return self.original_url or self.medium_url or self.url
 
 
 class MultiSourceImageFetcher:

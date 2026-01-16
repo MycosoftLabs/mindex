@@ -107,3 +107,6 @@ class ImageConfig(BaseSettings):
 
 # Global config instance
 config = ImageConfig()
+
+# Alias for compatibility
+settings = config
