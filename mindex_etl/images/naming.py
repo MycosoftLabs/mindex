@@ -165,3 +165,31 @@ def get_storage_path(
                 A/  (first letter of genus)
                     Amanita/
                         inat/
+    
+    Args:
+        base_dir: Base directory for image storage
+        source: Image source (inat, wiki, flickr, etc.)
+        species_name: Scientific name of the species
+        image_type: Type of image (field, lab, microscope, etc.)
+    
+    Returns:
+        Path object for the storage location
+    """
+    base = Path(base_dir)
+    
+    # Image type directory
+    type_dir = base / image_type
+    
+    # Species organization (by first letter of genus)
+    if species_name:
+        species_safe = sanitize_species_name(species_name)
+        first_letter = species_safe[0].upper() if species_safe else "X"
+        genus = species_safe.split("_")[0] if "_" in species_safe else species_safe
+        path = type_dir / first_letter / genus / source.lower()
+    else:
+        path = type_dir / "Unknown" / source.lower()
+    
+    # Create directory if it doesn't exist
+    path.mkdir(parents=True, exist_ok=True)
+    
+    return path
