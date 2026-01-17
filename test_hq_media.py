@@ -60,11 +60,11 @@ print("TEST 3: ImageQualityAnalyzer")
 print("-" * 40)
 try:
     analyzer = ImageQualityAnalyzer()
-    print("✓ ImageQualityAnalyzer instantiated")
+    print("??? ImageQualityAnalyzer instantiated")
     print(f"  - min_hq_long_edge: {analyzer.min_hq_long_edge}px")
     print(f"  - hq_score_threshold: {analyzer.hq_score_threshold}")
 except Exception as e:
-    print(f"✗ ImageQualityAnalyzer test failed: {e}")
+    print(f"??? ImageQualityAnalyzer test failed: {e}")
 print()
 
 # Test 4: Test ImageDerivativeGenerator
@@ -72,13 +72,13 @@ print("TEST 4: ImageDerivativeGenerator")
 print("-" * 40)
 try:
     generator = ImageDerivativeGenerator()
-    print("✓ ImageDerivativeGenerator instantiated")
+    print("??? ImageDerivativeGenerator instantiated")
     print(f"  - Available sizes: {list(DERIVATIVE_SIZES.keys())}")
     for size, (w, h, crop) in DERIVATIVE_SIZES.items():
         crop_str = "square crop" if crop else "aspect ratio"
         print(f"    - {size}: {w}x{h} ({crop_str})")
 except Exception as e:
-    print(f"✗ ImageDerivativeGenerator test failed: {e}")
+    print(f"??? ImageDerivativeGenerator test failed: {e}")
 print()
 
 # Test 5: Test multi_image.py hq_url property
@@ -95,14 +95,14 @@ try:
         original_url="https://example.com/original.jpg",
     )
     
-    print("✓ ImageResult created")
+    print("??? ImageResult created")
     print(f"  - url: {img.url}")
     print(f"  - best_url: {img.best_url}")
     print(f"  - hq_url: {img.hq_url}")
     assert img.hq_url == "https://example.com/original.jpg", "hq_url should prefer original"
-    print("✓ hq_url correctly prefers original_url")
+    print("??? hq_url correctly prefers original_url")
 except Exception as e:
-    print(f"✗ Multi-source test failed: {e}")
+    print(f"??? Multi-source test failed: {e}")
 print()
 
 # Test 6: Test HQ ingestion worker import
@@ -114,7 +114,7 @@ try:
         Checkpoint,
         IngestionStats
     )
-    print("✓ HQ Ingestion Worker modules imported")
+    print("??? HQ Ingestion Worker modules imported")
     
     # Test checkpoint
     checkpoint = Checkpoint()
@@ -122,7 +122,7 @@ try:
     checkpoint.processed_taxon_ids.add("test-id")
     print(f"  - Checkpoint created: {len(checkpoint.processed_taxon_ids)} processed")
 except Exception as e:
-    print(f"✗ HQ Ingestion Worker test failed: {e}")
+    print(f"??? HQ Ingestion Worker test failed: {e}")
 print()
 
 # Test 7: Test config
@@ -131,12 +131,12 @@ print("-" * 40)
 try:
     from mindex_etl.images.config import settings, ImageConfig
     
-    print("✓ Config loaded")
+    print("??? Config loaded")
     print(f"  - local_image_dir: {settings.local_image_dir}")
     print(f"  - inat_base_url: {settings.inat_base_url}")
     print(f"  - similarity_threshold: {settings.similarity_threshold}")
 except Exception as e:
-    print(f"✗ Config test failed: {e}")
+    print(f"??? Config test failed: {e}")
 print()
 
 # Test 8: Live test - fetch images from iNaturalist (if network available)
@@ -151,15 +151,15 @@ async def test_live_api():
             images = await fetcher.fetch_inat_images("Amanita muscaria", limit=3)
             
             if images:
-                print(f"✓ Found {len(images)} images from iNaturalist")
+                print(f"??? Found {len(images)} images from iNaturalist")
                 for i, img in enumerate(images[:2], 1):
                     print(f"  {i}. Score: {img.quality_score:.0f}")
                     print(f"     URL: {img.url[:60]}...")
                     print(f"     HQ URL: {(img.hq_url or 'N/A')[:60]}...")
             else:
-                print("⚠ No images found (API may be rate limited)")
+                print("??? No images found (API may be rate limited)")
     except Exception as e:
-        print(f"⚠ Live API test skipped: {e}")
+        print(f"??? Live API test skipped: {e}")
 
 asyncio.run(test_live_api())
 print()
@@ -173,3 +173,4 @@ print()
 print("To run full ingestion:")
 print("  python -m mindex_etl.jobs.hq_media_ingestion --limit 10 --dry-run")
 print()
+
