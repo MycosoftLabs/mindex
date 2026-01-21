@@ -58,7 +58,7 @@ services:
       API_TITLE: "MINDEX API"
       API_VERSION: "0.1.0"
       API_PREFIX: "/api/mindex"
-      API_KEYS: '["${MINDEX_API_KEY:-local-dev-key}"]'
+      API_KEYS: '["${MINDEX_API_KEY:-change-me}"]'
       
       # CORS - Allow NatureOS and other local services
       API_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002","http://127.0.0.1:3000","http://natureos-web:3000"]'

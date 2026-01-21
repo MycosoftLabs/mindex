@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     mindex_db_host: str = "localhost"
     mindex_db_port: int = 5432
     mindex_db_user: str = "mindex"
-    mindex_db_password: str = "mindex"
+    mindex_db_password: str = "change-me"
     mindex_db_name: str = "mindex"
 
     # API

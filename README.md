@@ -122,7 +122,7 @@ See the [Website Repository](https://github.com/MycosoftLabs/website) for CREP d
 ## ⚙️ Configuration
 
 ```env
-DATABASE_URL=postgresql://mindex:password@localhost:5432/mindex
+DATABASE_URL=postgresql://mindex:YOUR_PASSWORD@localhost:5432/mindex
 REDIS_URL=redis://localhost:6379
 ```
 

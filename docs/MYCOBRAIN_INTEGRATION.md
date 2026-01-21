@@ -175,8 +175,8 @@ Response:
 {
   "device_id": "...",
   "serial_number": "MCB-2024-001234",
-  "api_key": "mcb_AbCdEf123456789...",
-  "api_key_prefix": "mcb_AbCdEf12",
+  "api_key": "mcb_EXAMPLE_KEY...",
+  "api_key_prefix": "mcb_EXAMPLE",
   "created_at": "2024-12-15T10:30:00Z"
 }
 ```
@@ -515,7 +515,7 @@ class MycoBrainAgent:
 ```bash
 # .env for MAS Agent
 MAS_MINDEX_API_URL=https://api.mindex.mycosoft.org
-MAS_MINDEX_API_KEY=mcb_AbCdEf123...
+MAS_MINDEX_API_KEY=mcb_EXAMPLE_KEY...
 MAS_DEVICE_SERIAL_PORT=/dev/ttyUSB0
 MAS_LORA_FREQUENCY_MHZ=915.0
 ```
@@ -748,5 +748,4 @@ crc_ok = crc16_ccitt(decoded[:-2]) == int.from_bytes(decoded[-2:], 'big')
 ---
 
 *Last updated: December 2024 • MINDEX v0.2.0 • MycoBrain Integration*
-
 

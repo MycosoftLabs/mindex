@@ -2,7 +2,7 @@
 
 **Status**: ✅ Integrated into NatureOS API Gateway  
 **API Gateway**: `http://localhost:3000/api/natureos/mindex`  
-**Direct API**: `http://localhost:8000/api/mindex` (requires `X-API-Key: local-dev-key`)
+**Direct API**: `http://localhost:8000/api/mindex` (requires `X-API-Key: your-api-key`)
 
 ## What You Need to Know
 
@@ -73,7 +73,7 @@ curl http://localhost:8000/api/mindex/health
 
 # Test stats endpoint
 curl http://localhost:8000/api/mindex/stats \
-  -H "X-API-Key: local-dev-key"
+  -H "X-API-Key: your-api-key"
 ```
 
 ## Questions?

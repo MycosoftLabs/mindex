@@ -199,10 +199,10 @@ CREATE TABLE bio.taxon_trait (
 
 ```env
 # Database
-DATABASE_URL=postgresql://mindex:password@postgres:5432/mindex
+DATABASE_URL=postgresql://mindex:YOUR_PASSWORD@postgres:5432/mindex
 
 # API
-API_KEYS=local-dev-key,production-key
+API_KEYS=your-api-key,your-prod-key
 HTTP_TIMEOUT=30
 
 # ETL

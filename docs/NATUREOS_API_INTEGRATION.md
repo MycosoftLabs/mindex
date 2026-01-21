@@ -96,7 +96,7 @@ Add to NatureOS `.env.local`:
 ```bash
 # MINDEX API Configuration
 MINDEX_API_BASE_URL=http://localhost:8000/api/mindex
-MINDEX_API_KEY=local-dev-key
+MINDEX_API_KEY=your-api-key
 ```
 
 ## API Explorer

@@ -24,7 +24,7 @@ Add MINDEX as a new tab in NatureOS with:
 ## Quick Integration Steps
 
 ### 1. API Client (5 minutes)
-Create `lib/integrations/mindex.ts` with HTTP client pointing to `http://localhost:8000/api/mindex` using `X-API-Key: local-dev-key` header.
+Create `lib/integrations/mindex.ts` with HTTP client pointing to `http://localhost:8000/api/mindex` using `X-API-Key: your-api-key` header.
 
 ### 2. Stats Endpoint (Already Added ✅)
 The `/api/mindex/stats` endpoint is now available and returns:
@@ -114,7 +114,7 @@ GET /api/mindex/observations?limit=100
 Add to NatureOS `.env.local`:
 ```bash
 MINDEX_API_BASE_URL=http://localhost:8000/api/mindex
-MINDEX_API_KEY=local-dev-key
+MINDEX_API_KEY=your-api-key
 ```
 
 ## Testing
@@ -127,7 +127,7 @@ MINDEX_API_KEY=local-dev-key
 2. **Test stats endpoint**:
    ```bash
    curl http://localhost:8000/api/mindex/stats \
-     -H "X-API-Key: local-dev-key"
+     -H "X-API-Key: your-api-key"
    ```
 
 3. **View API docs**:

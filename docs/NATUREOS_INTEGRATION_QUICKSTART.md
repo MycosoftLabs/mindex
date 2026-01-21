@@ -11,7 +11,7 @@ MINDEX is a fungal database API running at `localhost:8000/api/mindex`. Integrat
 ## API Quick Reference
 
 **Base URL**: `http://localhost:8000/api/mindex`  
-**Auth Header**: `X-API-Key: local-dev-key`
+**Auth Header**: `X-API-Key: your-api-key`
 
 ### Key Endpoints
 
@@ -42,7 +42,7 @@ GET /stats                     // Database stats + ETL status
 ```typescript
 const mindexClient = createHttpClient({
   baseUrl: 'http://localhost:8000/api/mindex',
-  headers: { 'X-API-Key': 'local-dev-key' },
+  headers: { 'X-API-Key': 'your-api-key' },
 });
 ```
 

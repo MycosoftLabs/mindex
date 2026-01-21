@@ -177,7 +177,7 @@ Keep ledger-specific logic inside `mindex_api/ledger/` so routers remain thin.
 ## 10. Operational guardrails
 
 - **Never commit secrets** (.env, API keys, certificates). `.env.example` is safe; `.env` is gitignored.
-- **API keys**: For local dev, `docker-compose` sets `API_KEYS=local-dev-key`. Rotate keys per environment.
+- **API keys**: For local dev, `docker-compose` sets `API_KEYS` from `MINDEX_API_KEY` (default `change-me`). Rotate keys per environment.
 - **Pagination**: Always enforce `settings.max_page_size` to prevent runaway queries.
 - **Geo columns**: Observations/telemetry store PostGIS geography; always use SRID 4326.
 - **Ledger writes**: Validate that `ip_asset_id` exists before writing ledger rows (router already enforces this).
@@ -389,7 +389,7 @@ Keep ledger-specific logic inside `mindex_api/ledger/` so routers remain thin.
 ## 10. Operational guardrails
 
 - **Never commit secrets** (.env, API keys, certificates). `.env.example` is safe; `.env` is gitignored.
-- **API keys**: For local dev, `docker-compose` sets `API_KEYS=local-dev-key`. Rotate keys per environment.
+- **API keys**: For local dev, `docker-compose` sets `API_KEYS` from `MINDEX_API_KEY` (default `change-me`). Rotate keys per environment.
 - **Pagination**: Always enforce `settings.max_page_size` to prevent runaway queries.
 - **Geo columns**: Observations/telemetry store PostGIS geography; always use SRID 4326.
 - **Ledger writes**: Validate that `ip_asset_id` exists before writing ledger rows (router already enforces this).

@@ -186,11 +186,11 @@ If the container stops unexpectedly:
 ```powershell
 # Get taxa
 curl.exe "http://localhost:8000/api/mindex/taxa?limit=10" `
-  -H "X-API-Key: local-dev-key"
+  -H "X-API-Key: your-api-key"
 
 # Get observations
 curl.exe "http://localhost:8000/api/mindex/observations?limit=10" `
-  -H "X-API-Key: local-dev-key"
+  -H "X-API-Key: your-api-key"
 ```
 
 ### Via Database

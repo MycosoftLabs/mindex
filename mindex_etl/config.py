@@ -12,7 +12,7 @@ def _get_default_db_url() -> str:
     host = os.getenv("MINDEX_DB_HOST", "localhost")
     port = os.getenv("MINDEX_DB_PORT", "5434")  # Docker uses 5434 by default
     user = os.getenv("MINDEX_DB_USER", "mindex")
-    password = os.getenv("MINDEX_DB_PASSWORD", "mindex")
+    password = os.getenv("MINDEX_DB_PASSWORD", "change-me")
     name = os.getenv("MINDEX_DB_NAME", "mindex")
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"
 

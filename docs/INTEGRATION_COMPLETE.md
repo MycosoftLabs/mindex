@@ -87,7 +87,7 @@ const data = await stats.json();
 
 // ❌ Don't do this - Direct API calls bypass gateway
 const stats = await fetch('http://localhost:8000/api/mindex/stats', {
-  headers: { 'X-API-Key': 'local-dev-key' }
+  headers: { 'X-API-Key': 'your-api-key' }
 });
 ```
 

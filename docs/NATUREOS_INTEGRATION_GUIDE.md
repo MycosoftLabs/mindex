@@ -33,7 +33,7 @@ http://localhost:3000/api/natureos/mindex
 ```
 http://localhost:8000/api/mindex
 ```
-- Requires `X-API-Key: local-dev-key` header
+- Requires `X-API-Key: your-api-key` header
 - Direct access (bypasses gateway)
 
 ### Authentication
@@ -46,7 +46,7 @@ http://localhost:8000/api/mindex
 All requests require the `X-API-Key` header:
 ```typescript
 headers: {
-  "X-API-Key": "local-dev-key"  // Development key
+  "X-API-Key": "your-api-key"  // Example key
 }
 ```
 
@@ -682,7 +682,7 @@ Add to `.env.local` in NatureOS:
 ```bash
 # MINDEX API Configuration
 MINDEX_API_BASE_URL=http://localhost:8000/api/mindex
-MINDEX_API_KEY=local-dev-key
+MINDEX_API_KEY=your-api-key
 ```
 
 ## Data Flow
