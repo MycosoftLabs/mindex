@@ -8,6 +8,9 @@ from .stats import router as stats_router
 from .wifisense import router as wifisense_router
 from .drone import router as drone_router
 from .images import router as images_router
+from .compounds import router as compounds_router
+from .fci import router as fci_router
+from .knowledge import knowledge_router
 
 __all__ = [
     "health_router",
@@ -21,4 +24,7 @@ __all__ = [
     "wifisense_router",
     "drone_router",
     "images_router",
+    "compounds_router",
+    "fci_router",
+    "knowledge_router",
 ]

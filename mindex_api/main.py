@@ -5,10 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .routers import (
+    compounds_router,
     devices_router,
     health_router,
     images_router,
     ip_assets_router,
+    knowledge_router,
     mycobrain_router,
     observations_router,
     stats_router,
@@ -77,6 +79,12 @@ def create_app() -> FastAPI:
     
     # Image management router
     app.include_router(images_router, prefix=prefix)
+    
+    # Chemistry / Compounds router (ChemSpider integration)
+    app.include_router(compounds_router, prefix=prefix)
+
+    # Knowledge router (categories, knowledge graph for MYCA world model)
+    app.include_router(knowledge_router, prefix=prefix)
 
     return app
 
