@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..db import get_session
+from ..dependencies import get_db_session, require_api_key
 from ..schemas.compound import (
     BiologicalActivityResponse,
     ChemSpiderEnrichRequest,
@@ -50,7 +50,7 @@ async def list_compounds(
     chemical_class: Optional[str] = None,
     compound_type: Optional[str] = None,
     search: Optional[str] = None,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ):
     """
     List all compounds with optional filtering.
@@ -138,7 +138,7 @@ async def list_compounds(
 @router.get("/{compound_id}", response_model=CompoundResponse)
 async def get_compound(
     compound_id: UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ):
     """Get a single compound by ID with full details."""
     query = text("""
@@ -209,7 +209,7 @@ async def get_compound(
 @router.post("", response_model=CompoundResponse, status_code=status.HTTP_201_CREATED)
 async def create_compound(
     compound: CompoundCreate,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ):
     """Create a new compound."""
     query = text("""
@@ -273,7 +273,7 @@ async def search_compounds(
     request: CompoundSearchRequest,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ):
     """Search compounds with advanced filters."""
     where_clauses = []
@@ -374,7 +374,7 @@ async def search_compounds(
 @router.get("/for-taxon/{taxon_id}", response_model=TaxonCompoundsResponse)
 async def get_compounds_for_taxon(
     taxon_id: UUID,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ):
     """Get all compounds associated with a specific taxon."""
     # Get taxon info
@@ -435,7 +435,7 @@ async def get_compounds_for_taxon(
 @router.post("/taxon-link", response_model=TaxonCompoundResponse, status_code=status.HTTP_201_CREATED)
 async def link_compound_to_taxon(
     link: TaxonCompoundCreate,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ):
     """Create a link between a taxon and a compound."""
     query = text("""
@@ -500,7 +500,7 @@ async def link_compound_to_taxon(
 @router.post("/enrich", response_model=ChemSpiderEnrichResponse)
 async def enrich_compound_from_chemspider(
     request: ChemSpiderEnrichRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ):
     """
     Enrich a compound with data from ChemSpider.
@@ -719,7 +719,7 @@ async def search_chemspider(
 
 @router.get("/activities", response_model=List[BiologicalActivityResponse])
 async def list_biological_activities(
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ):
     """List all available biological activities."""
     query = text("SELECT id, name, category, description FROM bio.biological_activity ORDER BY category, name")
