@@ -1,5 +1,22 @@
-﻿.cursor/
+.cursor/
 .env
 .venv/
 __pycache__/
 *.pyc
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Pytest cache
+.pytest_cache/
+
+# Python build artifacts
+*.egg-info/
+build/
+dist/
+
+# Test output
+test_output.txt
