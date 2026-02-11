@@ -9,9 +9,11 @@ from .wifisense import router as wifisense_router
 from .drone import router as drone_router
 from .images import router as images_router
 from .knowledge import knowledge_router
+from .genetics import router as genetics_router
+from .compounds import router as compounds_router
+from .unified_search import router as unified_search_router
 
-# TODO: Fix these routers - they have import issues
-# from .compounds import router as compounds_router
+# TODO: Fix FCI router - has import issues
 # from .fci import router as fci_router
 
 __all__ = [
@@ -27,6 +29,8 @@ __all__ = [
     "drone_router",
     "images_router",
     "knowledge_router",
-    # "compounds_router",  # TODO: Fix import issues
+    "genetics_router",
+    "compounds_router",
+    "unified_search_router",
     # "fci_router",  # TODO: Fix import issues
 ]

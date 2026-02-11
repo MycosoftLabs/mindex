@@ -126,12 +126,9 @@ async def list_compounds(
     
     return CompoundListResponse(
         data=compounds,
-        pagination=PaginationMeta(
-            total=total_count,
-            page=skip // limit + 1 if limit > 0 else 1,
-            page_size=limit,
-            pages=(total_count + limit - 1) // limit if limit > 0 else 1,
-        ),
+        limit=limit,
+        offset=skip,
+        total=total_count,
     )
 
 

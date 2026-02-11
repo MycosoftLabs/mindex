@@ -5,7 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .routers import (
+    compounds_router,
     devices_router,
+    genetics_router,
     health_router,
     images_router,
     ip_assets_router,
@@ -15,12 +17,13 @@ from .routers import (
     stats_router,
     taxon_router,
     telemetry_router,
+    unified_search_router,
     wifisense_router,
     drone_router,
 )
 
 # TODO: Re-enable after fixing import issues
-# from .routers import compounds_router, fci_router
+# from .routers import fci_router
 
 
 def create_app() -> FastAPI:
@@ -85,8 +88,16 @@ def create_app() -> FastAPI:
     # Knowledge router (categories, knowledge graph for MYCA world model)
     app.include_router(knowledge_router, prefix=prefix)
     
+    # Genetics router (GenBank sequences, DNA/RNA data)
+    app.include_router(genetics_router, prefix=prefix)
+    
+    # Compounds router (chemical compounds, ChemSpider integration)
+    app.include_router(compounds_router, prefix=prefix)
+    
+    # Unified search router (cross-table search for species, compounds, genetics)
+    app.include_router(unified_search_router, prefix=prefix)
+    
     # TODO: Re-enable after fixing import issues
-    # app.include_router(compounds_router, prefix=prefix)
     # app.include_router(fci_router, prefix=prefix)
 
     return app
