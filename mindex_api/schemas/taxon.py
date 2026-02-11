@@ -22,7 +22,7 @@ class TaxonBase(TimestampedModel):
     canonical_name: str
     rank: str
     common_name: Optional[str] = None
-    authority: Optional[str] = None
+    author: Optional[str] = None
     description: Optional[str] = None
     source: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
