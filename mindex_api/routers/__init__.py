@@ -12,6 +12,7 @@ from .knowledge import knowledge_router
 from .genetics import router as genetics_router
 from .compounds import router as compounds_router
 from .unified_search import router as unified_search_router
+from .research import router as research_router
 
 # TODO: Fix FCI router - has import issues
 # from .fci import router as fci_router
@@ -32,5 +33,6 @@ __all__ = [
     "genetics_router",
     "compounds_router",
     "unified_search_router",
+    "research_router",
     # "fci_router",  # TODO: Fix import issues
 ]

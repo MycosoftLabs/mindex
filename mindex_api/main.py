@@ -20,6 +20,7 @@ from .routers import (
     unified_search_router,
     wifisense_router,
     drone_router,
+    research_router,
 )
 
 # TODO: Re-enable after fixing import issues
@@ -96,6 +97,9 @@ def create_app() -> FastAPI:
     
     # Unified search router (cross-table search for species, compounds, genetics)
     app.include_router(unified_search_router, prefix=prefix)
+    
+    # Research router (OpenAlex integration for research papers)
+    app.include_router(research_router, prefix=prefix)
     
     # TODO: Re-enable after fixing import issues
     # app.include_router(fci_router, prefix=prefix)
