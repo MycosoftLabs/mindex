@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -9,7 +9,7 @@ from .common import PaginationMeta, TimestampedModel
 
 
 class TaxonTrait(BaseModel):
-    id: UUID
+    id: Union[int, UUID]
     trait_name: str
     value_text: Optional[str] = None
     value_numeric: Optional[float] = None
@@ -18,7 +18,7 @@ class TaxonTrait(BaseModel):
 
 
 class TaxonBase(TimestampedModel):
-    id: UUID
+    id: Union[int, UUID]
     canonical_name: str
     rank: str
     common_name: Optional[str] = None
