@@ -102,12 +102,14 @@ class AggressiveETLRunner:
         total = 0
         
         # Try each source with timeout, skip if failing
+        # Prioritize GBIF (very reliable) over iNat (often down)
         taxonomy_sources = [
-            ("inat_taxa", ".jobs.sync_inat_taxa", "sync_inat_taxa"),
-            ("mycobank", ".jobs.sync_mycobank_taxa", "sync_mycobank_taxa"),
+            ("gbif_species", ".jobs.sync_gbif_occurrences", "sync_gbif_occurrences"),  # GBIF is reliable
+            ("mycobank", ".jobs.sync_mycobank_taxa", "sync_mycobank_taxa"),  # MycoBank (545k species)
             ("theyeasts", ".jobs.sync_theyeasts_taxa", "sync_theyeasts_taxa"),
             ("fusarium", ".jobs.sync_fusarium_taxa", "sync_fusarium_taxa"),
             ("mushroom_world", ".jobs.sync_mushroom_world_taxa", "sync_mushroom_world_taxa"),
+            ("inat_taxa", ".jobs.sync_inat_taxa", "sync_inat_taxa"),  # iNat last (often down)
         ]
         
         for name, module_path, func_name in taxonomy_sources:
@@ -147,9 +149,10 @@ class AggressiveETLRunner:
         """Run observation/occurrence sources - skip failing ones."""
         total = 0
         
+        # Prioritize GBIF (reliable) over iNat (often down)
         observation_sources = [
-            ("inat_obs", ".jobs.sync_inat_observations", "sync_inat_observations"),
-            ("gbif_occ", ".jobs.sync_gbif_occurrences", "sync_gbif_occurrences"),
+            ("gbif_occ", ".jobs.sync_gbif_occurrences", "sync_gbif_occurrences"),  # GBIF first
+            ("inat_obs", ".jobs.sync_inat_observations", "sync_inat_observations"),  # iNat last
         ]
         
         for name, module_path, func_name in observation_sources:

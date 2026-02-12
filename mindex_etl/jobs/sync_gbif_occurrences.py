@@ -86,13 +86,10 @@ def sync_gbif_occurrences(*, max_pages: Optional[int] = None) -> int:
             # Parse and normalize date
             observed_at = _parse_date(obs.get("observed_at"))
 
-            # Insert observation
+            # Insert observation using lat/lng columns (no PostGIS required)
             with conn.cursor() as cur:
-                location_sql = "NULL"
-                location_params = []
-                if obs.get("lat") and obs.get("lng"):
-                    location_sql = "ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography"
-                    location_params = [obs["lng"], obs["lat"]]
+                lat = obs.get("lat")
+                lng = obs.get("lng")
 
                 # Check if exists
                 cur.execute(
@@ -102,15 +99,15 @@ def sync_gbif_occurrences(*, max_pages: Optional[int] = None) -> int:
                 if cur.fetchone():
                     continue  # Already exists
 
-                # Insert with NULL for invalid dates
-                insert_sql = f"""
+                # Insert with lat/lng columns (no PostGIS)
+                insert_sql = """
                     INSERT INTO obs.observation (
                         taxon_id, source, source_id, observer, observed_at,
-                        location, accuracy_m, media, notes, metadata
+                        latitude, longitude, accuracy_m, media, notes, metadata
                     )
                     VALUES (
                         %s, %s, %s, %s, %s::timestamptz,
-                        {location_sql}, %s, %s::jsonb, %s, %s::jsonb
+                        %s, %s, %s, %s::jsonb, %s, %s::jsonb
                     )
                 """
                 cur.execute(
@@ -121,7 +118,8 @@ def sync_gbif_occurrences(*, max_pages: Optional[int] = None) -> int:
                         obs["source_id"],
                         obs.get("observer"),
                         observed_at,
-                        *location_params,
+                        lat,
+                        lng,
                         obs.get("accuracy_m"),
                         json.dumps(obs.get("photos", [])),
                         obs.get("notes"),
@@ -129,6 +127,9 @@ def sync_gbif_occurrences(*, max_pages: Optional[int] = None) -> int:
                     ),
                 )
                 inserted += 1
+                
+                if inserted % 500 == 0:
+                    print(f"GBIF: Inserted {inserted} occurrences...", flush=True)
 
     return inserted
 
