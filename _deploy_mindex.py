@@ -32,26 +32,37 @@ def main():
     stdin, stdout, stderr = ssh.exec_command(f"ls -la {MINDEX_DIR}/Dockerfile* 2>/dev/null || echo 'No Dockerfile found'", timeout=30)
     print(stdout.read().decode())
     
-    print("\n3. Restarting with docker compose...")
-    stdin, stdout, stderr = ssh.exec_command(f"cd {MINDEX_DIR} && docker compose restart mindex-api 2>&1", timeout=120)
-    out = stdout.read().decode()
-    err = stderr.read().decode()
+    print("\n3. Rebuilding API image and bringing up...")
+    stdin, stdout, stderr = ssh.exec_command(
+        f"cd {MINDEX_DIR} && docker-compose build --no-cache api 2>&1",
+        timeout=300
+    )
+    out, err = stdout.read().decode(), stderr.read().decode()
     print(out)
     if err:
         print(f"stderr: {err}")
-    
+    stdin, stdout, stderr = ssh.exec_command(f"cd {MINDEX_DIR} && docker-compose up -d --no-recreate api 2>&1", timeout=120)
+    out, err = stdout.read().decode(), stderr.read().decode()
+    print(out)
+    if err:
+        print(f"stderr: {err}")
+    # If compose failed, try restarting existing container (bind-mounted code already updated by git pull)
+    if "Error" in out or "error" in err.lower():
+        print("\n3b. Trying docker restart mindex-api (code already updated via bind mount)...")
+        stdin, stdout, stderr = ssh.exec_command("docker restart mindex-api 2>&1", timeout=60)
+        print(stdout.read().decode())
     time.sleep(5)
-    
-    print("\n4. Checking container status...")
+
+    print("\n5. Checking container status...")
     stdin, stdout, stderr = ssh.exec_command("docker ps --format '{{.Names}}: {{.Status}}' | grep -i mindex", timeout=30)
     print(stdout.read().decode())
     
-    print("\n5. Checking what's running on port 8000...")
+    print("\n6. Checking what's running on port 8000...")
     stdin, stdout, stderr = ssh.exec_command("curl -s http://localhost:8000/ | head -10", timeout=30)
     result = stdout.read().decode()
     print(result if result else "No response on port 8000")
     
-    print("\n6. Checking mindex-api logs...")
+    print("\n7. Checking mindex-api logs...")
     stdin, stdout, stderr = ssh.exec_command("docker logs mindex-mindex-api-1 --tail 20 2>&1 || docker logs mindex-api --tail 20 2>&1", timeout=30)
     print(stdout.read().decode())
     

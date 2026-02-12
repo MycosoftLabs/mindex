@@ -83,6 +83,16 @@ router = APIRouter(
     dependencies=[Depends(require_api_key)],
 )
 
+async def _genetic_sequence_table_exists(db: AsyncSession) -> bool:
+    """
+    Return True if bio.genetic_sequence exists.
+
+    MINDEX environments can drift; this prevents 500s when the genetics
+    schema/migrations have not been applied yet.
+    """
+    result = await db.execute(text("SELECT to_regclass('bio.genetic_sequence')"))
+    return result.scalar_one_or_none() is not None
+
 
 # =============================================================================
 # ENDPOINTS
@@ -108,6 +118,16 @@ async def list_genetic_sequences(
     - **species**: Filter by species name (partial match)
     - **min_length/max_length**: Filter by sequence length range
     """
+    if not await _genetic_sequence_table_exists(db):
+        return GeneticSequenceListResponse(
+            data=[],
+            pagination={
+                "limit": pagination.limit,
+                "offset": pagination.offset,
+                "total": 0,
+            },
+        )
+
     # Build dynamic WHERE clause
     where_clauses = []
     params: dict = {
@@ -215,6 +235,9 @@ async def get_gene_statistics(
     
     Returns count of sequences, species, and length statistics for each gene.
     """
+    if not await _genetic_sequence_table_exists(db):
+        return []
+
     stmt = text("""
         SELECT
             gene,
@@ -251,6 +274,12 @@ async def get_genetic_sequence(
     db: AsyncSession = Depends(get_db_session),
 ) -> GeneticSequenceResponse:
     """Get a single genetic sequence by ID."""
+    if not await _genetic_sequence_table_exists(db):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Genetic sequences are not available in this environment",
+        )
+
     stmt = text("""
         SELECT
             id,

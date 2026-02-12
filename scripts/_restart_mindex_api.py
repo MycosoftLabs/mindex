@@ -31,9 +31,8 @@ print("  Connected")
 print("\n[2] Pulling latest code...")
 run_cmd(ssh, "cd /home/mycosoft/mindex && git fetch origin && git reset --hard origin/main")
 
-print("\n[3] Remove any leftover API container...")
-run_cmd(ssh, "docker stop mindex-api 2>/dev/null || true", show=False)
-run_cmd(ssh, "docker rm mindex-api 2>/dev/null || true", show=False)
+print("\n[3] Remove any leftover API container and free port 8000...")
+run_cmd(ssh, "docker rm -f mindex-api 2>/dev/null; true", show=False)
 print("  Cleaned up")
 
 print("\n[4] Building new image...")
@@ -44,6 +43,15 @@ print("\n[5] Get network name...")
 output = run_cmd(ssh, "docker network ls --filter name=mindex --format '{{.Name}}'")
 network = output.strip().split('\n')[0] if output.strip() else "bridge"
 print(f"  Using network: {network}")
+
+print("\n[5b] Free port 8000 (kill host uvicorn if any)...")
+pids_out = run_cmd(ssh, "fuser 8000/tcp 2>/dev/null || true", show=False)
+pids = " ".join(p for p in pids_out.strip().split() if p.isdigit())
+if pids:
+    run_cmd(ssh, "kill -9 " + pids + " 2>/dev/null; true", show=False)
+run_cmd(ssh, "fuser -k 8000/tcp 2>/dev/null; true", show=False)
+run_cmd(ssh, "echo '%s' | sudo -S fuser -k 8000/tcp 2>/dev/null; true" % VM_PASS.replace("'", "'\"'\"'"), show=False)
+time.sleep(2)
 
 print("\n[6] Starting API container connected to existing infra...")
 run_cmd(ssh, f"""docker run -d \\
@@ -56,7 +64,7 @@ run_cmd(ssh, f"""docker run -d \\
     -e MINDEX_DB_USER=mycosoft \\
     -e MINDEX_DB_PASSWORD=mycosoft_mindex_2026 \\
     -e MINDEX_DB_NAME=mindex \\
-    -e API_CORS_ORIGINS='["*"]' \\
+    -e API_CORS_ORIGINS='[\"http://localhost:3000\",\"http://localhost:3010\",\"http://192.168.0.187:3000\",\"http://192.168.0.172:3010\"]' \\
     mindex-api:latest 2>&1""")
 print("  Container started")
 
