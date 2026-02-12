@@ -20,13 +20,19 @@ def upsert_taxon(
     canonical_name: str,
     rank: str,
     common_name: Optional[str] = None,
-    authority: Optional[str] = None,
+    authority: Optional[str] = None,  # Maps to 'author' column in DB
     description: Optional[str] = None,
     source: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
-) -> UUID:
+) -> int:
+    """
+    Upsert a taxon record.
+    
+    Note: The 'authority' parameter maps to the 'author' column in the database.
+    """
     metadata = metadata or {}
     canonical = normalize_name(canonical_name)
+    
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -39,9 +45,10 @@ def upsert_taxon(
         row = cur.fetchone()
         if row:
             taxon_id = row["id"]
+            # Update existing record
             updates = {
                 "common_name": common_name,
-                "authority": authority,
+                "author": authority,  # DB column is 'author', not 'authority'
                 "description": description,
                 "source": source,
                 "metadata": json.dumps(metadata) if metadata else None,
@@ -56,11 +63,12 @@ def upsert_taxon(
                 )
             return taxon_id
 
-        columns = ["canonical_name", "rank", "metadata"]
-        values = [canonical, rank, json.dumps(metadata)]
+        # Insert new record - scientific_name is required, canonical_name is optional
+        columns = ["scientific_name", "canonical_name", "rank", "metadata"]
+        values = [canonical, canonical, rank, json.dumps(metadata)]
         optional_fields = {
             "common_name": common_name,
-            "authority": authority,
+            "author": authority,  # DB column is 'author', not 'authority'
             "description": description,
             "source": source,
         }
