@@ -75,11 +75,17 @@ async def get_statistics(db: AsyncSession = Depends(get_db)):
     """))
     stats["observations_by_source"] = {row[0]: row[1] for row in result.fetchall()}
     
-    # Observations with location
-    result = await db.execute(text("""
-        SELECT count(*) FROM obs.observation WHERE location IS NOT NULL
-    """))
-    stats["observations_with_location"] = result.scalar() or 0
+    # Observations with location (support both PostGIS location and lat/lng columns)
+    try:
+        result = await db.execute(text("""
+            SELECT count(*) FROM obs.observation WHERE location IS NOT NULL
+        """))
+        stats["observations_with_location"] = result.scalar() or 0
+    except Exception:
+        result = await db.execute(text("""
+            SELECT count(*) FROM obs.observation WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        """))
+        stats["observations_with_location"] = result.scalar() or 0
     
     # Observations with images
     result = await db.execute(text("""
@@ -112,13 +118,19 @@ async def get_statistics(db: AsyncSession = Depends(get_db)):
             "latest": None,
         }
     
-    # Genome records
-    result = await db.execute(text("SELECT count(*) FROM bio.genome"))
-    stats["genome_records"] = result.scalar() or 0
-    
-    # Trait records
-    result = await db.execute(text("SELECT count(*) FROM bio.taxon_trait"))
-    stats["trait_records"] = result.scalar() or 0
+    # Genome records (bio schema may not exist on all deployments)
+    try:
+        result = await db.execute(text("SELECT count(*) FROM bio.genome"))
+        stats["genome_records"] = result.scalar() or 0
+    except Exception:
+        stats["genome_records"] = 0
+
+    # Trait records (bio schema may not exist on all deployments)
+    try:
+        result = await db.execute(text("SELECT count(*) FROM bio.taxon_trait"))
+        stats["trait_records"] = result.scalar() or 0
+    except Exception:
+        stats["trait_records"] = 0
     
     # Synonym records
     result = await db.execute(text("SELECT count(*) FROM core.taxon_synonym"))

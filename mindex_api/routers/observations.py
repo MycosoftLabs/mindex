@@ -44,20 +44,6 @@ def _parse_bbox(bbox: Optional[str]) -> Optional[dict]:
     }
 
 
-def _build_query(include_bbox: bool, base: str) -> str:
-    bbox_clause = (
-        """
-        AND ST_Intersects(
-            o.location::geometry,
-            ST_MakeEnvelope(:min_lon, :min_lat, :max_lon, :max_lat, 4326)
-        )
-        """
-        if include_bbox
-        else ""
-    )
-    return base + bbox_clause
-
-
 @router.get("", response_model=ObservationListResponse)
 async def list_observations(
     pagination: PaginationParams = Depends(pagination_params),
@@ -90,12 +76,14 @@ async def list_observations(
         params["end"] = end
     if bbox_params:
         where_clauses.append(
-            "ST_Intersects(o.location::geometry, ST_MakeEnvelope(:min_lon, :min_lat, :max_lon, :max_lat, 4326))"
+            "o.latitude IS NOT NULL AND o.longitude IS NOT NULL "
+            "AND o.latitude BETWEEN :min_lat AND :max_lat AND o.longitude BETWEEN :min_lon AND :max_lon"
         )
         params.update(bbox_params)
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
 
+    # Support both PostGIS (location) and plain lat/lng schema
     data_query = f"""
         SELECT
             o.id,
@@ -108,7 +96,8 @@ async def list_observations(
             o.media,
             o.notes,
             o.metadata,
-            ST_AsGeoJSON(o.location::geometry) AS location_geojson
+            o.latitude,
+            o.longitude
         FROM obs.observation o
         WHERE {where_sql}
         ORDER BY o.observed_at DESC
@@ -126,8 +115,12 @@ async def list_observations(
     observations = []
     for row in result.mappings().all():
         data = dict(row)
-        loc = data.pop("location_geojson", None)
-        data["location"] = json.loads(loc) if loc else None
+        lat = data.pop("latitude", None)
+        lng = data.pop("longitude", None)
+        if lat is not None and lng is not None:
+            data["location"] = {"type": "Point", "coordinates": [float(lng), float(lat)]}
+        else:
+            data["location"] = None
         observations.append(data)
 
     return ObservationListResponse(
