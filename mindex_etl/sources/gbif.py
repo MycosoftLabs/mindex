@@ -18,7 +18,7 @@ GBIF_API = "https://api.gbif.org/v1"
 FUNGI_KINGDOM_KEY = 5  # GBIF key for Kingdom Fungi
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 def _fetch_species_page(
     client: httpx.Client,
     offset: int,
@@ -34,8 +34,8 @@ def _fetch_species_page(
             "offset": offset,
             "limit": limit,
         },
-        timeout=settings.http_timeout,
-        headers={"User-Agent": "mindex-etl/0.1"},
+        timeout=60,  # Longer timeout for GBIF
+        headers={"User-Agent": "MINDEX-ETL/1.0 (Mycosoft Fungal Database; contact@mycosoft.org)"},
     )
     resp.raise_for_status()
     return resp.json()

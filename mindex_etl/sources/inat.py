@@ -76,9 +76,14 @@ def save_to_local(data: list, filename: str, subdir: str = "inat") -> str:
     return str(filepath)
 
 
+class ServiceDowntimeError(Exception):
+    """Raised when service is in maintenance/downtime mode."""
+    pass
+
+
 @retry(
-    stop=stop_after_attempt(10),
-    wait=wait_exponential(multiplier=2, min=4, max=300),
+    stop=stop_after_attempt(3),  # Reduced from 10 - fail faster
+    wait=wait_exponential(multiplier=2, min=2, max=30),  # Max 30s wait, not 300s
     retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
     reraise=True,
 )
@@ -102,14 +107,22 @@ def _fetch_page(client: httpx.Client, page: int, per_page: int, rank: str = None
         headers=get_auth_headers(),
     )
     
+    # Fail immediately on service downtime - don't retry
+    if response.status_code == 503:
+        response_text = response.text.lower() if response.text else ""
+        if "downtime" in response_text or "maintenance" in response_text:
+            raise ServiceDowntimeError(f"iNaturalist is in maintenance mode (503 downtime)")
+        # Other 503 errors - might be temporary, raise for retry
+        response.raise_for_status()
+    
     # Handle rate limiting
     if response.status_code == 403:
-        wait_time = 30  # Shorter wait with token
+        wait_time = 10  # Shorter wait
         print(f"Rate limited (403) on page {page}, waiting {wait_time}s...", flush=True)
         time.sleep(wait_time)
         response.raise_for_status()
     elif response.status_code == 429:
-        retry_after = int(response.headers.get("Retry-After", 30))
+        retry_after = min(int(response.headers.get("Retry-After", 30)), 60)  # Max 60s
         print(f"Rate limited (429) on page {page}, waiting {retry_after}s...", flush=True)
         time.sleep(retry_after)
         response.raise_for_status()
