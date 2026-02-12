@@ -82,6 +82,7 @@ async def get_statistics(db: AsyncSession = Depends(get_db)):
         """))
         stats["observations_with_location"] = result.scalar() or 0
     except Exception:
+        await db.rollback()
         result = await db.execute(text("""
             SELECT count(*) FROM obs.observation WHERE latitude IS NOT NULL AND longitude IS NOT NULL
         """))
