@@ -1,0 +1,178 @@
+"""
+PubChem Compound Sync Job
+=========================
+Sync fungal compounds and mycotoxins from PubChem into MINDEX.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from typing import Optional
+
+from ..db import db_session
+from ..sources import pubchem
+
+
+def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
+    """Sync fungal compounds from PubChem into MINDEX database."""
+    inserted = 0
+    updated = 0
+    
+    print(f"Starting PubChem compound sync (max_results={max_results})...")
+    
+    with db_session() as conn:
+        for compound in pubchem.iter_fungal_compounds(limit=100, max_results=max_results, delay_seconds=0.5):
+            cid = compound.get("pubchem_cid")
+            if not cid:
+                continue
+                
+            with conn.cursor() as cur:
+                # Check if exists - using bio.compound schema
+                cur.execute(
+                    "SELECT id FROM bio.compound WHERE pubchem_id = %s",
+                    (cid,),
+                )
+                existing = cur.fetchone()
+                
+                if existing:
+                    # Update existing
+                    cur.execute(
+                        """
+                        UPDATE bio.compound SET
+                            name = COALESCE(%s, name),
+                            formula = %s,
+                            molecular_weight = %s,
+                            smiles = %s,
+                            inchi = %s,
+                            inchikey = %s,
+                            metadata = %s::jsonb,
+                            updated_at = now()
+                        WHERE pubchem_id = %s
+                        """,
+                        (
+                            compound.get("name"),
+                            compound.get("molecular_formula"),
+                            compound.get("molecular_weight"),
+                            compound.get("canonical_smiles"),
+                            compound.get("inchi"),
+                            compound.get("inchi_key"),
+                            json.dumps({
+                                "xlogp": compound.get("xlogp"),
+                                "tpsa": compound.get("tpsa"),
+                                "complexity": compound.get("complexity"),
+                                "synonyms": compound.get("synonyms", []),
+                            }),
+                            cid,
+                        ),
+                    )
+                    updated += 1
+                else:
+                    # Insert new - using bio.compound schema
+                    cur.execute(
+                        """
+                        INSERT INTO bio.compound (
+                            pubchem_id, name, formula, molecular_weight,
+                            smiles, inchi, inchikey, source, metadata
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                        ON CONFLICT (pubchem_id) DO NOTHING
+                        """,
+                        (
+                            cid,
+                            compound.get("name"),
+                            compound.get("molecular_formula"),
+                            compound.get("molecular_weight"),
+                            compound.get("canonical_smiles"),
+                            compound.get("inchi"),
+                            compound.get("inchi_key"),
+                            "pubchem",
+                            json.dumps({
+                                "xlogp": compound.get("xlogp"),
+                                "tpsa": compound.get("tpsa"),
+                                "complexity": compound.get("complexity"),
+                                "synonyms": compound.get("synonyms", []),
+                            }),
+                        ),
+                    )
+                    inserted += 1
+                    
+            if (inserted + updated) % 100 == 0:
+                print(f"PubChem: {inserted} inserted, {updated} updated...", flush=True)
+                
+    print(f"\nPubChem compound sync complete:")
+    print(f"  Inserted: {inserted}")
+    print(f"  Updated: {updated}")
+    
+    return inserted + updated
+
+
+def sync_mycotoxins(*, max_results: Optional[int] = None) -> int:
+    """Sync known mycotoxins from PubChem into MINDEX database."""
+    inserted = 0
+    
+    print(f"Starting mycotoxin sync (max_results={max_results})...")
+    
+    with db_session() as conn:
+        for compound in pubchem.iter_mycotoxins(limit=100, max_results=max_results, delay_seconds=0.5):
+            cid = compound.get("pubchem_cid")
+            if not cid:
+                continue
+                
+            with conn.cursor() as cur:
+                # Using bio.compound schema with compound_type for mycotoxin class
+                cur.execute(
+                    """
+                    INSERT INTO bio.compound (
+                        pubchem_id, name, formula, molecular_weight,
+                        smiles, inchi, inchikey, compound_type, source, metadata
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    ON CONFLICT (pubchem_id) DO UPDATE SET
+                        compound_type = COALESCE(EXCLUDED.compound_type, bio.compound.compound_type),
+                        updated_at = now()
+                    """,
+                    (
+                        cid,
+                        compound.get("common_name") or compound.get("name"),
+                        compound.get("molecular_formula"),
+                        compound.get("molecular_weight"),
+                        compound.get("canonical_smiles"),
+                        compound.get("inchi"),
+                        compound.get("inchi_key"),
+                        "mycotoxin",
+                        "pubchem",
+                        json.dumps({
+                            "common_name": compound.get("common_name"),
+                            "xlogp": compound.get("xlogp"),
+                            "tpsa": compound.get("tpsa"),
+                        }),
+                    ),
+                )
+                if cur.rowcount > 0:
+                    inserted += 1
+                    
+            if inserted % 50 == 0:
+                print(f"Mycotoxins: {inserted} synced...", flush=True)
+                
+    print(f"\nMycotoxin sync complete: {inserted} compounds")
+    return inserted
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Sync PubChem fungal compounds")
+    parser.add_argument("--max-results", type=int, default=None)
+    parser.add_argument("--mycotoxins-only", action="store_true", help="Only sync mycotoxins")
+    args = parser.parse_args()
+
+    if args.mycotoxins_only:
+        total = sync_mycotoxins(max_results=args.max_results)
+    else:
+        total = sync_pubchem_compounds(max_results=args.max_results)
+        # Also sync mycotoxins
+        total += sync_mycotoxins(max_results=args.max_results)
+        
+    print(f"Synced {total} PubChem records")
+
+
+if __name__ == "__main__":
+    main()

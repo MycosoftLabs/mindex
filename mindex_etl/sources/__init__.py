@@ -13,4 +13,7 @@ __all__ = [
     "master_downloader",
     "multi_image",
     "chemspider",
+    "genbank",
+    "pubchem",
+    "aggressive_scraper",
 ]

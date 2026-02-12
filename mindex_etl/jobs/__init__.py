@@ -14,4 +14,7 @@ __all__ = [
     "sync_mushroom_world_taxa",
     "publications",
     "run_all",
+    "sync_genbank_genomes",
+    "sync_pubchem_compounds",
+    "sync_chemspider_compounds",
 ]
