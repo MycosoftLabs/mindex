@@ -71,6 +71,15 @@ class ETLSettings(BaseSettings):
     # MycoPortal (for North American fungi)
     mycoportal_base_url: str = "https://mycoportal.org/api"
 
+    # ChemSpider (RSC Compounds API)
+    chemspider_base_url: str = "https://api.rsc.org/compounds/v1"
+    chemspider_api_key: Optional[str] = Field(
+        default=None,
+        description="ChemSpider/RSC API key for compound lookups"
+    )
+    chemspider_rate_limit: float = 0.6  # ~100 requests/minute
+    chemspider_cache_ttl: int = 86400  # 24 hours cache
+
     # Batch sizes
     batch_size: int = 100
     max_concurrent_requests: int = 5

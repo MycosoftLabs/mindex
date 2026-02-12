@@ -34,12 +34,18 @@ class ETLScheduler:
 
         # Schedule configuration (job_name -> interval_hours)
         self.schedule = {
+            # Core taxonomy sources
             "inat_taxa": 24,           # Daily
             "mycobank": 168,           # Weekly
             "fungidb": 168,            # Weekly
             "traits": 168,             # Weekly
             "inat_obs": 6,             # Every 6 hours
             "gbif": 24,                # Daily
+            # Additional data sources (from remediation plan)
+            "hq_media": 12,            # Every 12 hours - high quality images
+            "publications": 48,        # Every 2 days - research publications
+            "chemspider": 168,         # Weekly - chemical compounds
+            "genetics": 168,           # Weekly - genetic sequences from GenBank
         }
 
     def should_run(self, job_name: str) -> bool:

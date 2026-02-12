@@ -2,7 +2,7 @@ from typing import List, Optional, Union
 
 import json
 
-from pydantic import AnyHttpUrl, Field, field_validator
+from pydantic import AliasChoices, AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -29,7 +29,12 @@ class Settings(BaseSettings):
     # - a single string: 'k1'
     # - a comma-separated string: 'k1,k2'
     # The Union[str, List[str]] avoids SettingsError when API_KEYS is provided as a plain string.
-    api_keys: Union[List[str], str] = Field(default_factory=list, description="Allowed API keys for protected endpoints.")
+    # Accept either the historical env var `API_KEYS` or the clearer `MINDEX_API_KEY(S)`.
+    api_keys: Union[List[str], str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("API_KEYS", "MINDEX_API_KEYS", "MINDEX_API_KEY"),
+        description="Allowed API keys for protected endpoints.",
+    )
     # Pagination defaults
     # NOTE: The website Explorer/Database wants to browse hundreds at a time.
     # The old max_page_size=100 caused the UI to "mysteriously" cap at 100 for every letter.

@@ -60,7 +60,7 @@ class CompoundResult(BaseModel):
 
 
 class GeneticsResult(BaseModel):
-    id: int
+    id: UUID
     accession: str
     species_name: str
     gene: Optional[str] = None

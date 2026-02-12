@@ -7,6 +7,7 @@ API endpoints for genetic sequence data (GenBank, NCBI, etc.).
 from __future__ import annotations
 
 from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -22,7 +23,7 @@ from ..dependencies import get_db_session, pagination_params, require_api_key, P
 
 class GeneticSequenceResponse(BaseModel):
     """Response model for a genetic sequence."""
-    id: int
+    id: UUID
     accession: str
     species_name: Optional[str] = None
     gene: Optional[str] = None
@@ -247,7 +248,7 @@ async def get_gene_statistics(
 
 @router.get("/{sequence_id}", response_model=GeneticSequenceResponse)
 async def get_genetic_sequence(
-    sequence_id: int,
+    sequence_id: UUID,
     db: AsyncSession = Depends(get_db_session),
 ) -> GeneticSequenceResponse:
     """Get a single genetic sequence by ID."""
@@ -425,7 +426,7 @@ async def create_genetic_sequence(
 
 @router.delete("/{sequence_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_genetic_sequence(
-    sequence_id: int,
+    sequence_id: UUID,
     db: AsyncSession = Depends(get_db_session),
 ):
     """Delete a genetic sequence by ID."""

@@ -51,6 +51,7 @@ class ETLJob:
 
 def create_job_registry() -> Dict[str, ETLJob]:
     """Create registry of all available ETL jobs."""
+    import asyncio
     from .sync_inat_taxa import sync_inat_taxa
     from .sync_mycobank_taxa import sync_mycobank_taxa
     from .sync_fungidb_genomes import sync_fungidb_genomes
@@ -60,6 +61,40 @@ def create_job_registry() -> Dict[str, ETLJob]:
     from .sync_theyeasts_taxa import sync_theyeasts_taxa
     from .sync_fusarium_taxa import sync_fusarium_taxa
     from .sync_mushroom_world_taxa import sync_mushroom_world_taxa
+    from .sync_chemspider_compounds import run_full_sync as chemspider_sync
+    from .publications import run_publications_etl
+    from .hq_media_ingestion import HQMediaIngestionPipeline
+    
+    # Wrapper for async publications job
+    def run_publications_sync(**kwargs) -> int:
+        max_pages = kwargs.get("max_pages", 10)
+        try:
+            result = asyncio.run(run_publications_etl(max_pubs_per_source=max_pages * 50))
+            return result.get("total_publications", 0)
+        except Exception as e:
+            logger.error(f"Publications sync failed: {e}")
+            return 0
+    
+    # Wrapper for async HQ media job  
+    def run_hq_media_sync(**kwargs) -> int:
+        max_pages = kwargs.get("max_pages", 100)
+        try:
+            pipeline = HQMediaIngestionPipeline()
+            asyncio.run(pipeline.run(limit=max_pages, sources=None))
+            return pipeline.stats.get("total_images", 0) if hasattr(pipeline, "stats") else 0
+        except Exception as e:
+            logger.error(f"HQ media sync failed: {e}")
+            return 0
+    
+    # Wrapper for chemspider sync
+    def run_chemspider_sync(**kwargs) -> int:
+        max_pages = kwargs.get("max_pages")
+        try:
+            result = chemspider_sync(limit=max_pages * 10 if max_pages else None)
+            return result.get("total_compounds", 0)
+        except Exception as e:
+            logger.error(f"ChemSpider sync failed: {e}")
+            return 0
 
     return {
         "inat_taxa": ETLJob(
@@ -124,6 +159,28 @@ def create_job_registry() -> Dict[str, ETLJob]:
             run_func=sync_gbif_occurrences,
             priority=60,
             description="Sync occurrence records from GBIF (~50,000+ occurrences)",
+        ),
+        # Additional jobs from remediation plan
+        "hq_media": ETLJob(
+            name="hq_media",
+            source="iNat/GBIF/Wikipedia",
+            run_func=run_hq_media_sync,
+            priority=70,
+            description="Ingest high-quality fungal images with derivatives",
+        ),
+        "publications": ETLJob(
+            name="publications",
+            source="PubMed/GBIF/SemanticScholar",
+            run_func=run_publications_sync,
+            priority=80,
+            description="Sync mycological research publications",
+        ),
+        "chemspider": ETLJob(
+            name="chemspider",
+            source="ChemSpider",
+            run_func=run_chemspider_sync,
+            priority=90,
+            description="Sync fungal compound data from ChemSpider",
         ),
     }
 

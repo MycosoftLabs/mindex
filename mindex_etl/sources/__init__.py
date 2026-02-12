@@ -12,4 +12,5 @@ __all__ = [
     "fusarium",
     "master_downloader",
     "multi_image",
+    "chemspider",
 ]
