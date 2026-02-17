@@ -514,22 +514,6 @@ class AggressiveETLRunner:
             logger.info(f"CYCLE {cycle} - Starting at {datetime.now().isoformat()}")
             logger.info(f"{'='*70}")
             
-            # Phase 1: Taxonomy from all sources
-            logger.info("\n[PHASE 1] TAXONOMY - ALL SOURCES (GBIF, MycoBank, iNat, etc)")
-            taxa_count = self.run_taxonomy_batch()
-            self.stats["total_records"] += taxa_count
-            
-            if not self.running:
-                break
-                
-            # Phase 2: Geographic observations
-            logger.info("\n[PHASE 2] OBSERVATIONS - GBIF + iNaturalist")
-            obs_count = self.run_observations_batch()
-            self.stats["total_records"] += obs_count
-            
-            if not self.running:
-                break
-                
             # Phase 3: Genetic data
             logger.info("\n[PHASE 3] GENOMES & SEQUENCES - FungiDB + GenBank")
             genome_count = self.run_genomes_batch()
@@ -550,6 +534,24 @@ class AggressiveETLRunner:
             logger.info("\n[PHASE 5] PUBLICATIONS - PubMed")
             pub_count = self.run_publications_batch()
             self.stats["total_records"] += pub_count
+            
+            if not self.running:
+                break
+
+            # Phase 1: Taxonomy from all sources
+            # Run AFTER chemistry/genetics/publications so those tables start filling immediately,
+            # even if taxonomy takes a long time per cycle.
+            logger.info("\n[PHASE 1] TAXONOMY - ALL SOURCES (GBIF, MycoBank, iNat, etc)")
+            taxa_count = self.run_taxonomy_batch()
+            self.stats["total_records"] += taxa_count
+            
+            if not self.running:
+                break
+                
+            # Phase 2: Geographic observations
+            logger.info("\n[PHASE 2] OBSERVATIONS - GBIF + iNaturalist")
+            obs_count = self.run_observations_batch()
+            self.stats["total_records"] += obs_count
             
             if not self.running:
                 break
