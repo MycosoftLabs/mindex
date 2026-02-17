@@ -13,6 +13,7 @@ Publications are indexed in MINDEX for full-text search and species linking.
 
 import asyncio
 import hashlib
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -65,6 +66,40 @@ class PublicationsETL:
             "updated": 0,
             "errors": 0,
         }
+
+    async def ensure_schema(self) -> None:
+        """
+        Ensure required tables exist.
+
+        VM 189 currently lacks `core.publications` in some deployments, so the ETL
+        must be able to create it before inserting.
+        """
+        await self.session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+        await self.session.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS core.publications (
+                    id VARCHAR(64) PRIMARY KEY,
+                    source VARCHAR(50) NOT NULL,
+                    external_id VARCHAR(255) NOT NULL,
+                    title TEXT NOT NULL,
+                    authors JSONB DEFAULT '[]'::jsonb,
+                    year INTEGER,
+                    abstract TEXT,
+                    url TEXT,
+                    doi VARCHAR(255),
+                    metadata JSONB DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    CONSTRAINT publications_source_external_id_unique UNIQUE (source, external_id)
+                )
+                """
+            )
+        )
+        await self.session.execute(text("CREATE INDEX IF NOT EXISTS idx_publications_source ON core.publications(source)"))
+        await self.session.execute(text("CREATE INDEX IF NOT EXISTS idx_publications_year ON core.publications(year)"))
+        await self.session.execute(text("CREATE INDEX IF NOT EXISTS idx_publications_doi ON core.publications(doi)"))
+        await self.session.commit()
 
     async def close(self):
         await self.http_client.aclose()
@@ -206,8 +241,8 @@ class PublicationsETL:
                         id, source, external_id, title, authors, year,
                         abstract, url, doi, metadata, created_at, updated_at
                     ) VALUES (
-                        :id, :source, :external_id, :title, :authors, :year,
-                        :abstract, :url, :doi, :metadata, NOW(), NOW()
+                        :id, :source, :external_id, :title, :authors::jsonb, :year,
+                        :abstract, :url, :doi, :metadata::jsonb, NOW(), NOW()
                     )
                     ON CONFLICT (id) DO UPDATE SET
                         title = EXCLUDED.title,
@@ -222,17 +257,17 @@ class PublicationsETL:
                     "source": pub["source"],
                     "external_id": pub["external_id"],
                     "title": pub.get("title", "Untitled"),
-                    "authors": pub.get("authors", []),
+                    "authors": json.dumps(pub.get("authors", [])),
                     "year": pub.get("year"),
                     "abstract": pub.get("abstract"),
                     "url": pub.get("url"),
                     "doi": pub.get("doi"),
-                    "metadata": {
+                    "metadata": json.dumps({
                         "venue": pub.get("venue"),
                         "citation_count": pub.get("citation_count"),
                         "topics": pub.get("topics"),
                         "countries": pub.get("countries"),
-                    },
+                    }),
                 },
             )
             
@@ -253,6 +288,7 @@ class PublicationsETL:
         sources: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Run the publications ETL job."""
+        await self.ensure_schema()
         terms = search_terms or FUNGI_SEARCH_TERMS
         enabled_sources = sources or ["gbif", "semantic_scholar"]
         
