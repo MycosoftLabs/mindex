@@ -112,7 +112,13 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                     )
                     inserted += 1
                     
-            if (inserted + updated) % 500 == 0:
+            total = inserted + updated
+            if total and total % 200 == 0:
+                # This job can run a long time; commit in small batches so results
+                # show up immediately and we don't hold one massive transaction.
+                conn.commit()
+
+            if total and total % 500 == 0:
                 print(f"GenBank: {inserted} inserted, {updated} updated...", flush=True)
                 
     print(f"\nGenBank genome sync complete:")
@@ -163,7 +169,10 @@ def sync_genbank_its_sequences(*, max_pages: Optional[int] = None) -> int:
                 if cur.rowcount > 0:
                     inserted += 1
                     
-            if inserted % 500 == 0:
+            if inserted and inserted % 200 == 0:
+                conn.commit()
+
+            if inserted and inserted % 500 == 0:
                 print(f"GenBank ITS: {inserted} inserted...", flush=True)
                 
     print(f"\nGenBank ITS sync complete: {inserted} sequences")

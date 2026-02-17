@@ -120,7 +120,9 @@ def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
                     )
                     inserted += 1
                     
-            if (inserted + updated) % 100 == 0:
+            total = inserted + updated
+            if total and total % 100 == 0:
+                conn.commit()
                 print(f"PubChem: {inserted} inserted, {updated} updated...", flush=True)
                 
     print(f"\nPubChem compound sync complete:")
@@ -205,7 +207,8 @@ def sync_mycotoxins(*, max_results: Optional[int] = None) -> int:
                     )
                     inserted += 1
                     
-            if inserted % 50 == 0:
+            if inserted and inserted % 50 == 0:
+                conn.commit()
                 print(f"Mycotoxins: {inserted} synced...", flush=True)
                 
     print(f"\nMycotoxin sync complete: {inserted} compounds")
