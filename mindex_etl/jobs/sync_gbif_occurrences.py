@@ -40,98 +40,108 @@ def _parse_date(date_str: Optional[str]) -> Optional[str]:
         return None
 
 
-def sync_gbif_occurrences(*, max_pages: Optional[int] = None) -> int:
+def sync_gbif_occurrences(
+    *,
+    max_pages: Optional[int] = None,
+    sync_species: bool = True,
+    sync_occurrences: bool = True,
+) -> int:
     """Sync GBIF occurrences into MINDEX database."""
-    inserted = 0
+    species_processed = 0
+    occ_inserted = 0
 
     with db_session() as conn:
         # First sync species
-        for species in gbif.iter_gbif_species(max_pages=max_pages):
-            taxon_id = upsert_taxon(conn, **species)
-            gbif_key = species.get("metadata", {}).get("gbif_key")
-            if gbif_key:
-                link_external_id(
-                    conn,
-                    taxon_id=taxon_id,
-                    source="gbif",
-                    external_id=str(gbif_key),
-                    metadata={"source": "gbif"},
-                )
+        if sync_species:
+            for species in gbif.iter_gbif_species(max_pages=max_pages):
+                taxon_id = upsert_taxon(conn, **species)
+                species_processed += 1
+                gbif_key = species.get("metadata", {}).get("gbif_key")
+                if gbif_key:
+                    link_external_id(
+                        conn,
+                        taxon_id=taxon_id,
+                        source="gbif",
+                        external_id=str(gbif_key),
+                        metadata={"source": "gbif"},
+                    )
 
         # Then sync occurrences
-        for obs in gbif.iter_gbif_occurrences(max_pages=max_pages):
-            taxon_name = obs.get("taxon_name")
-            if not taxon_name:
-                continue
+        if sync_occurrences:
+            for obs in gbif.iter_gbif_occurrences(max_pages=max_pages):
+                taxon_name = obs.get("taxon_name")
+                if not taxon_name:
+                    continue
 
-            # Upsert taxon
-            taxon_id = upsert_taxon(
-                conn,
-                canonical_name=taxon_name,
-                rank=obs.get("taxon_rank", "species"),
-                source="gbif",
-            )
-
-            # Link GBIF key
-            gbif_key = obs.get("taxon_gbif_key")
-            if gbif_key:
-                link_external_id(
+                # Upsert taxon
+                taxon_id = upsert_taxon(
                     conn,
-                    taxon_id=taxon_id,
+                    canonical_name=taxon_name,
+                    rank=obs.get("taxon_rank", "species"),
                     source="gbif",
-                    external_id=str(gbif_key),
-                    metadata={"source": "gbif"},
                 )
 
-            # Parse and normalize date
-            observed_at = _parse_date(obs.get("observed_at"))
-
-            # Insert observation using lat/lng columns (no PostGIS required)
-            with conn.cursor() as cur:
-                lat = obs.get("lat")
-                lng = obs.get("lng")
-
-                # Check if exists
-                cur.execute(
-                    "SELECT 1 FROM obs.observation WHERE source = %s AND source_id = %s",
-                    (obs["source"], obs["source_id"]),
-                )
-                if cur.fetchone():
-                    continue  # Already exists
-
-                # Insert with lat/lng columns (no PostGIS)
-                insert_sql = """
-                    INSERT INTO obs.observation (
-                        taxon_id, source, source_id, observer, observed_at,
-                        latitude, longitude, accuracy_m, media, notes, metadata
+                # Link GBIF key
+                gbif_key = obs.get("taxon_gbif_key")
+                if gbif_key:
+                    link_external_id(
+                        conn,
+                        taxon_id=taxon_id,
+                        source="gbif",
+                        external_id=str(gbif_key),
+                        metadata={"source": "gbif"},
                     )
-                    VALUES (
-                        %s, %s, %s, %s, %s::timestamptz,
-                        %s, %s, %s, %s::jsonb, %s, %s::jsonb
-                    )
-                """
-                cur.execute(
-                    insert_sql,
-                    (
-                        taxon_id,
-                        obs["source"],
-                        obs["source_id"],
-                        obs.get("observer"),
-                        observed_at,
-                        lat,
-                        lng,
-                        obs.get("accuracy_m"),
-                        json.dumps(obs.get("photos", [])),
-                        obs.get("notes"),
-                        json.dumps(obs.get("metadata", {})),
-                    ),
-                )
-                inserted += 1
-                
-                if inserted % 500 == 0:
-                    print(f"GBIF: Inserted {inserted} occurrences...", flush=True)
 
-    return inserted
+                # Parse and normalize date
+                observed_at = _parse_date(obs.get("observed_at"))
+
+                # Insert observation using lat/lng columns (no PostGIS required)
+                with conn.cursor() as cur:
+                    lat = obs.get("lat")
+                    lng = obs.get("lng")
+
+                    # Check if exists
+                    cur.execute(
+                        "SELECT 1 FROM obs.observation WHERE source = %s AND source_id = %s",
+                        (obs["source"], obs["source_id"]),
+                    )
+                    if cur.fetchone():
+                        continue  # Already exists
+
+                    # Insert with lat/lng columns (no PostGIS)
+                    insert_sql = """
+                        INSERT INTO obs.observation (
+                            taxon_id, source, source_id, observer, observed_at,
+                            latitude, longitude, accuracy_m, media, notes, metadata
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, %s::timestamptz,
+                            %s, %s, %s, %s::jsonb, %s, %s::jsonb
+                        )
+                    """
+                    cur.execute(
+                        insert_sql,
+                        (
+                            taxon_id,
+                            obs["source"],
+                            obs["source_id"],
+                            obs.get("observer"),
+                            observed_at,
+                            lat,
+                            lng,
+                            obs.get("accuracy_m"),
+                            json.dumps(obs.get("photos", [])),
+                            obs.get("notes"),
+                            json.dumps(obs.get("metadata", {})),
+                        ),
+                    )
+                    occ_inserted += 1
+
+                    if occ_inserted % 500 == 0:
+                        print(f"GBIF: Inserted {occ_inserted} occurrences...", flush=True)
+
+    # Return a single number for orchestration/logging
+    return species_processed + occ_inserted
 
 
 def main() -> None:

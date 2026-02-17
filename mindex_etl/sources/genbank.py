@@ -80,6 +80,8 @@ def _parse_genbank_xml(xml_content: str) -> List[Dict]:
     try:
         root = ET.fromstring(xml_content)
         for gbseq in root.findall(".//GBSeq"):
+            seq_elem = gbseq.find("GBSeq_sequence")
+            sequence = (seq_elem.text or "").replace(" ", "").replace("\n", "") if seq_elem is not None else ""
             record = {
                 "accession": gbseq.findtext("GBSeq_primary-accession", ""),
                 "locus": gbseq.findtext("GBSeq_locus", ""),
@@ -91,6 +93,7 @@ def _parse_genbank_xml(xml_content: str) -> List[Dict]:
                 "create_date": gbseq.findtext("GBSeq_create-date", ""),
                 "update_date": gbseq.findtext("GBSeq_update-date", ""),
                 "sequence_length": int(gbseq.findtext("GBSeq_length", "0") or "0"),
+                "sequence": sequence,
             }
             
             # Get source features
@@ -133,6 +136,7 @@ def map_genbank_to_genome(record: dict) -> dict:
         "definition": record.get("definition"),
         "country": record.get("country"),
         "host": record.get("host"),
+        "sequence": record.get("sequence", ""),
         "metadata": {
             "locus": record.get("locus"),
             "create_date": record.get("create_date"),
@@ -140,6 +144,54 @@ def map_genbank_to_genome(record: dict) -> dict:
             "taxonomy": record.get("taxonomy"),
         },
     }
+
+
+def fetch_record_by_accession(accession: str) -> Optional[Dict]:
+    """
+    Fetch a single GenBank record by accession OR numeric GI/UID from NCBI.
+    Returns full record including sequence, or None if not found.
+    Used for on-demand ingest into MINDEX when a user requests detail.
+
+    Handles both:
+    - Text accessions: MK033196.1, AF123456, etc.  → search by [Accession] field
+    - Numeric GI/UIDs: 1072298629, 123456789       → direct efetch by UID
+    """
+    if not accession or not accession.strip():
+        return None
+    accession = accession.strip()
+    with httpx.Client() as client:
+        if accession.isdigit():
+            # Numeric GI/UID: fetch directly without esearch (no [Accession] query needed)
+            time.sleep(0.34)  # NCBI rate limit
+            xml_content = _efetch(client, "nucleotide", [accession], rettype="gb", retmode="xml")
+            records = _parse_genbank_xml(xml_content)
+            if not records:
+                return None
+            # Return whichever record NCBI gave us; don't enforce numeric equality
+            return map_genbank_to_genome(records[0])
+        else:
+            # Text accession: search by [Accession] field, then fetch by UID
+            result = _esearch(
+                client,
+                "nucleotide",
+                f"{accession}[Accession]",
+                retstart=0,
+                retmax=1,
+            )
+            esearch_result = result.get("esearchresult", {})
+            ids = esearch_result.get("idlist", [])
+            if not ids:
+                # Try without [Accession] field tag as last resort
+                result = _esearch(client, "nucleotide", accession, retstart=0, retmax=1)
+                ids = result.get("esearchresult", {}).get("idlist", [])
+                if not ids:
+                    return None
+            time.sleep(0.34)  # NCBI rate limit
+            xml_content = _efetch(client, "nucleotide", ids, rettype="gb", retmode="xml")
+            records = _parse_genbank_xml(xml_content)
+            if not records:
+                return None
+            return map_genbank_to_genome(records[0])
 
 
 def iter_fungal_genomes(

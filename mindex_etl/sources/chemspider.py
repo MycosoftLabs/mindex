@@ -87,14 +87,19 @@ def save_to_local(data: Any, filename: str, subdir: str = "chemspider") -> str:
 
 def map_chemspider_compound(record: dict) -> dict:
     """Map ChemSpider record to MINDEX compound format."""
+    chemspider_id = record.get("id")
+    name = record.get("commonName") or record.get("name")
+    if not name:
+        # `bio.compound.name` is NOT NULL; fall back to a deterministic external identifier.
+        name = f"chemspider:{chemspider_id}" if chemspider_id is not None else "chemspider:unknown"
     return {
-        "name": record.get("commonName") or record.get("name"),
+        "name": name,
         "formula": record.get("formula"),
         "molecular_weight": record.get("molecularWeight") or record.get("monoisotopicMass"),
         "smiles": record.get("smiles"),
         "inchi": record.get("inchi"),
         "inchikey": record.get("inchiKey"),
-        "chemspider_id": record.get("id"),
+        "chemspider_id": chemspider_id,
         "source": "chemspider",
         "metadata": {
             "datasources_count": record.get("dataSourcesCount"),

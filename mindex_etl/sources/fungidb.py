@@ -12,9 +12,11 @@ Note: The FungiDB API endpoint may change. This module tries multiple approaches
 from __future__ import annotations
 
 import logging
-from typing import Dict, Generator, Optional
+import re
+from typing import Dict, Generator, Optional, List
 
 import httpx
+from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 from ..config import settings
@@ -27,6 +29,71 @@ FUNGIDB_ENDPOINTS = [
     "https://fungidb.org/fungidb/service/record-types/dataset/searches/AllDatasets/reports/standard",
     "https://veupathdb.org/veupathdb/service/record-types/organism/searches/OrganismsByText/reports/standard",
 ]
+
+FUNGIDB_DOWNLOADS_INDEX = "https://fungidb.org/common/downloads/Current_Release/"
+
+
+def _parse_directory_listing(html: str) -> List[str]:
+    """
+    Parse a simple Apache-style directory index into a list of subdirectory names.
+    We use this as a robust fallback when the JSON API endpoints change.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    dirs: List[str] = []
+    for a in soup.select("a[href]"):
+        href = a.get("href") or ""
+        if not href.endswith("/"):
+            continue
+        if href in ("../", "/"):
+            continue
+        # Ignore obvious non-organism folders
+        if href.lower().startswith(("index", "readme")):
+            continue
+        # Directory names are usually safe ASCII; keep only simple tokens
+        name = href.strip("/").strip()
+        if not name:
+            continue
+        if not re.match(r"^[A-Za-z0-9_.-]+$", name):
+            continue
+        dirs.append(name)
+    # De-dupe while preserving order
+    seen = set()
+    out: List[str] = []
+    for d in dirs:
+        if d in seen:
+            continue
+        seen.add(d)
+        out.append(d)
+    return out
+
+
+def _iter_download_release_dirs(client: httpx.Client, limit: int = 500) -> Generator[Dict, None, None]:
+    """
+    FungiDB provides public genome downloads under Current_Release/.
+    This yields lightweight genome metadata records based on the release directory listing.
+    """
+    resp = client.get(
+        FUNGIDB_DOWNLOADS_INDEX,
+        timeout=60,
+        headers={"User-Agent": "MINDEX-ETL/1.0 (Mycosoft; contact@mycosoft.org)"},
+    )
+    resp.raise_for_status()
+    dirs = _parse_directory_listing(resp.text)
+    if not dirs:
+        return
+    for d in dirs[:limit]:
+        base_url = f"{FUNGIDB_DOWNLOADS_INDEX}{d}/"
+        yield {
+            "taxon_name": d,  # best-effort; can be canonicalized later
+            "accession": d,
+            "assembly_level": None,
+            "release_date": None,
+            "source": "fungidb",
+            "metadata": {
+                "download_base_url": base_url,
+                "source_api": "downloads_index",
+            },
+        }
 
 
 @retry(
@@ -138,6 +205,13 @@ def iter_fungidb_genomes(
                     },
                 }
             return
+
+        # Final fallback: scrape the public Current_Release downloads index
+        logger.info("Trying public downloads index fallback...")
+        fallback_limit = page_size * (max_pages or 5)
+        for record in _iter_download_release_dirs(client, limit=fallback_limit):
+            yield record
+        return
         
         # All APIs failed, return empty
         logger.warning("FungiDB: All API endpoints unavailable. Skipping this source.")

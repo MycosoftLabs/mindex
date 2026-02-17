@@ -13,6 +13,26 @@ from ..db import db_session
 from ..sources import pubchem
 
 
+def _safe_compound_name(compound: dict) -> str:
+    """
+    `bio.compound.name` is NOT NULL.
+    PubChem property payloads sometimes lack IUPACName and we don't always fetch synonyms
+    (synonyms are extra requests). Fall back to a deterministic identifier so the record
+    is still ingestible and can be backfilled later.
+    """
+    cid = compound.get("pubchem_cid")
+    name = compound.get("name")
+    if name and str(name).strip():
+        return str(name).strip()
+    synonyms = compound.get("synonyms") or []
+    if synonyms:
+        first = str(synonyms[0]).strip()
+        if first:
+            return first
+    # Deterministic, derived from a real external ID (not mock data)
+    return f"pubchem:{cid}" if cid else "pubchem:unknown"
+
+
 def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
     """Sync fungal compounds from PubChem into MINDEX database."""
     inserted = 0
@@ -25,6 +45,8 @@ def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
             cid = compound.get("pubchem_cid")
             if not cid:
                 continue
+            name = _safe_compound_name(compound)
+            iupac_name = (compound.get("metadata") or {}).get("iupac_name")
                 
             with conn.cursor() as cur:
                 # Check if exists - using bio.compound schema
@@ -40,6 +62,7 @@ def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
                         """
                         UPDATE bio.compound SET
                             name = COALESCE(%s, name),
+                            iupac_name = COALESCE(%s, iupac_name),
                             formula = %s,
                             molecular_weight = %s,
                             smiles = %s,
@@ -50,7 +73,8 @@ def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
                         WHERE pubchem_id = %s
                         """,
                         (
-                            compound.get("name"),
+                            name,
+                            iupac_name,
                             compound.get("molecular_formula"),
                             compound.get("molecular_weight"),
                             compound.get("canonical_smiles"),
@@ -72,19 +96,20 @@ def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
                         """
                         INSERT INTO bio.compound (
                             pubchem_id, name, formula, molecular_weight,
-                            smiles, inchi, inchikey, source, metadata
+                            smiles, inchi, inchikey, iupac_name, source, metadata
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                         ON CONFLICT (pubchem_id) DO NOTHING
                         """,
                         (
                             cid,
-                            compound.get("name"),
+                            name,
                             compound.get("molecular_formula"),
                             compound.get("molecular_weight"),
                             compound.get("canonical_smiles"),
                             compound.get("inchi"),
                             compound.get("inchi_key"),
+                            iupac_name,
                             "pubchem",
                             json.dumps({
                                 "xlogp": compound.get("xlogp"),

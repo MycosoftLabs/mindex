@@ -41,6 +41,21 @@ def sync_mycobank_taxa(*, prefixes: Iterable[str] | None = None) -> int:
     return inserted
 
 
+def sync_mycobank_taxa_compat(
+    *,
+    max_pages: int | None = None,  # accepted for scheduler/runner compatibility (ignored)
+    prefixes: Iterable[str] | None = None,
+    **kwargs,
+) -> int:
+    """
+    Backwards/runner compatible wrapper.
+    The aggressive runner calls MycoBank jobs with `max_pages` during its probe run.
+    """
+    _ = max_pages
+    _ = kwargs
+    return sync_mycobank_taxa(prefixes=prefixes)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync MycoBank taxa into MINDEX")
     parser.add_argument(

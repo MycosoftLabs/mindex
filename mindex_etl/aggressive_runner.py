@@ -64,6 +64,8 @@ class AggressiveETLRunner:
     
     def __init__(self):
         self.running = True
+        # Per-source cooldowns (epoch seconds). Used to avoid hammering services during outages.
+        self._cooldowns: Dict[str, float] = {}
         self.stats = {
             "total_records": 0,
             "taxa_synced": 0,
@@ -80,6 +82,16 @@ class AggressiveETLRunner:
             "sources_failed": [],
             "start_time": datetime.now().isoformat(),
         }
+
+    def _reset_cycle_source_lists(self) -> None:
+        """
+        Keep numeric counters cumulative, but reset per-cycle source lists so:
+        - We don't permanently mark sources as failed after a transient blip
+        - We don't trigger the fallback scraper every cycle forever
+        """
+        self.stats["sources_attempted"] = []
+        self.stats["sources_succeeded"] = []
+        self.stats["sources_failed"] = []
         
     def signal_handler(self, signum, frame):
         logger.info("Received shutdown signal, finishing current jobs...")
@@ -88,10 +100,30 @@ class AggressiveETLRunner:
     def run_job_safe(self, job_name: str, job_func: Callable, **kwargs) -> int:
         """Run a job with error handling and rate limit detection."""
         try:
+            cooldown_until = self._cooldowns.get(job_name)
+            if cooldown_until and time.time() < cooldown_until:
+                remaining = int(cooldown_until - time.time())
+                logger.info(f"[{job_name}] Cooldown active, skipping for {remaining}s")
+                return -3
+
             logger.info(f"[{job_name}] Starting aggressive sync...")
             self.stats["sources_attempted"].append(job_name)
             start = time.time()
-            count = job_func(**kwargs)
+            raw = job_func(**kwargs)
+            # Some legacy jobs return a stats dict instead of an int.
+            # Normalize so the orchestrator can log + make decisions.
+            count = raw
+            if isinstance(raw, dict):
+                for key in ("total_processed", "total_records", "total", "inserted", "synced", "count"):
+                    if key in raw and isinstance(raw.get(key), (int, float)):
+                        count = int(raw.get(key) or 0)
+                        break
+                else:
+                    # If dict contains no obvious counter, treat as 0 records.
+                    count = 0
+            elif not isinstance(raw, (int, float)):
+                # Anything else: treat as 0 so we don't crash formatting.
+                count = 0
             elapsed = time.time() - start
             logger.info(f"[{job_name}] Completed: {count:,} records in {elapsed:.1f}s")
             if job_name not in self.stats["sources_succeeded"]:
@@ -99,6 +131,8 @@ class AggressiveETLRunner:
             return count
         except ServiceDowntimeError as e:
             logger.warning(f"[{job_name}] Service down (503) - skipping")
+            # Back off hard on downtime to prevent error spam and wasted cycles.
+            self._cooldowns[job_name] = time.time() + (6 * 60 * 60)  # 6 hours
             if job_name not in self.stats["sources_failed"]:
                 self.stats["sources_failed"].append(job_name)
             return -3  # Service down
@@ -111,6 +145,7 @@ class AggressiveETLRunner:
                 return -2  # Signal rate limit
             elif "503" in error_str or "downtime" in error_str:
                 logger.warning(f"[{job_name}] Service down - skipping")
+                self._cooldowns[job_name] = time.time() + (6 * 60 * 60)  # 6 hours
                 if job_name not in self.stats["sources_failed"]:
                     self.stats["sources_failed"].append(job_name)
                 return -3  # Service down
@@ -148,10 +183,10 @@ class AggressiveETLRunner:
         # Prioritize by reliability: GBIF > MycoBank > TheYeasts > Fusarium > iNat
         taxonomy_sources = [
             # GBIF - Very reliable, massive dataset
-            ("gbif_species", ".jobs.sync_gbif_occurrences", "sync_gbif_occurrences", {"max_pages": None}),
+            ("gbif_species", ".jobs.sync_gbif_occurrences", "sync_gbif_occurrences", {"max_pages": None, "sync_species": True, "sync_occurrences": False}),
             
             # MycoBank - 545,000+ fungal species
-            ("mycobank", ".jobs.sync_mycobank_taxa", "sync_mycobank_taxa", {"max_pages": None}),
+            ("mycobank", ".jobs.sync_mycobank_taxa", "sync_mycobank_taxa_compat", {"max_pages": None}),
             
             # TheYeasts.org - Comprehensive yeast database  
             ("theyeasts", ".jobs.sync_theyeasts_taxa", "sync_theyeasts_taxa", {"max_pages": None}),
@@ -176,7 +211,7 @@ class AggressiveETLRunner:
                 
                 # Quick test - try with small batch first
                 logger.info(f"[{name}] Testing connection with small batch...")
-                test_count = self.run_job_safe(f"{name}_test", sync_func, max_pages=3)
+                test_count = self.run_job_safe(f"{name}_test", sync_func, max_pages=3, **{k: v for k, v in kwargs.items() if k in {"sync_species", "sync_occurrences"}})
                 
                 if test_count == -3:  # Service down
                     logger.warning(f"[{name}] Service down, skipping")
@@ -212,7 +247,7 @@ class AggressiveETLRunner:
         
         # GBIF first (reliable), then iNat
         observation_sources = [
-            ("gbif_occ", ".jobs.sync_gbif_occurrences", "sync_gbif_occurrences", {"max_pages": None}),
+            ("gbif_occ", ".jobs.sync_gbif_occurrences", "sync_gbif_occurrences", {"max_pages": None, "sync_species": False, "sync_occurrences": True}),
             ("inat_obs", ".jobs.sync_inat_observations", "sync_inat_observations", {"max_pages": 100}),
         ]
         
@@ -233,7 +268,7 @@ class AggressiveETLRunner:
                     for batch_num in range(1, 20):  # Up to 20 additional batches
                         if not self.running:
                             break
-                        batch_count = self.run_job_safe(f"{name}_batch{batch_num}", sync_func, max_pages=100)
+                        batch_count = self.run_job_safe(f"{name}_batch{batch_num}", sync_func, max_pages=100, **{k: v for k, v in kwargs.items() if k in {"sync_species", "sync_occurrences"}})
                         if batch_count > 0:
                             total += batch_count
                         elif batch_count < 0:
@@ -315,7 +350,7 @@ class AggressiveETLRunner:
         # ChemSpider
         try:
             from .jobs.sync_chemspider_compounds import sync_chemspider_compounds
-            count = self.run_job_safe("chemspider", sync_chemspider_compounds, max_results=2000)
+            count = self.run_job_safe("chemspider", sync_chemspider_compounds, max_results=1000)
             if count > 0:
                 total += count
                 self.stats["compounds_synced"] += count
@@ -336,8 +371,9 @@ class AggressiveETLRunner:
             from .jobs.publications import run_publications_etl
             
             logger.info("[publications] Starting aggressive sync...")
-            result = asyncio.run(run_publications_etl(max_pubs_per_source=10000))
-            pub_count = result.get("total_publications", 0)
+            # `run_publications_etl` expects `max_per_term`.
+            result = asyncio.run(run_publications_etl(max_per_term=250))
+            pub_count = int(result.get("inserted", 0) or 0)
             logger.info(f"[publications] Completed: {pub_count:,} records")
             total += pub_count
             self.stats["publications_synced"] += pub_count
@@ -403,76 +439,11 @@ class AggressiveETLRunner:
     
     def run_web_scraping_fallback(self) -> int:
         """Fallback to aggressive web scraping when APIs fail."""
-        total = 0
-        
-        try:
-            from .sources.aggressive_scraper import (
-                WikipediaFungiScraper, 
-                PubMedFungiScraper,
-                IndexFungorumScraper,
-                MycoPortalScraper,
-            )
-            
-            # Wikipedia scraping
-            logger.info("[web_scrape] Starting Wikipedia fungi scrape...")
-            try:
-                wiki_scraper = WikipediaFungiScraper()
-                wiki_count = 0
-                
-                for species in wiki_scraper.scrape_all_fungi(max_species=10000):
-                    if not self.running:
-                        break
-                    wiki_count += 1
-                    # TODO: Insert into database
-                    if wiki_count % 500 == 0:
-                        logger.info(f"[web_scrape] Wikipedia: {wiki_count} species...")
-                        
-                total += wiki_count
-                logger.info(f"[web_scrape] Wikipedia complete: {wiki_count} species")
-            except Exception as e:
-                logger.error(f"[web_scrape] Wikipedia failed: {e}")
-            
-            # Index Fungorum scraping
-            logger.info("[web_scrape] Starting Index Fungorum scrape...")
-            try:
-                if_scraper = IndexFungorumScraper()
-                if_count = 0
-                
-                for record in if_scraper.scrape_species_list(max_pages=100):
-                    if not self.running:
-                        break
-                    if_count += 1
-                    if if_count % 500 == 0:
-                        logger.info(f"[web_scrape] Index Fungorum: {if_count} records...")
-                        
-                total += if_count
-                logger.info(f"[web_scrape] Index Fungorum complete: {if_count} records")
-            except Exception as e:
-                logger.error(f"[web_scrape] Index Fungorum failed: {e}")
-            
-            # PubMed scraping
-            logger.info("[web_scrape] Starting PubMed fungi papers scrape...")
-            try:
-                pubmed_scraper = PubMedFungiScraper()
-                pubmed_count = 0
-                
-                for paper in pubmed_scraper.search_papers(max_results=10000):
-                    if not self.running:
-                        break
-                    pubmed_count += 1
-                    if pubmed_count % 500 == 0:
-                        logger.info(f"[web_scrape] PubMed: {pubmed_count} papers...")
-                        
-                total += pubmed_count
-                self.stats["publications_synced"] += pubmed_count
-                logger.info(f"[web_scrape] PubMed complete: {pubmed_count} papers")
-            except Exception as e:
-                logger.error(f"[web_scrape] PubMed failed: {e}")
-            
-        except ImportError as e:
-            logger.error(f"[web_scrape] Failed to import scrapers: {e}")
-            
-        return total
+        # Disabled for now:
+        # - It currently does not persist results to MINDEX (TODOs)
+        # - It can generate huge volumes of requests with zero stored output
+        logger.info("[web_scrape] Fallback scrapers disabled (no DB persistence yet).")
+        return 0
     
     def log_stats(self):
         """Log current statistics."""
@@ -538,6 +509,7 @@ class AggressiveETLRunner:
         cycle = 0
         while self.running:
             cycle += 1
+            self._reset_cycle_source_lists()
             logger.info(f"\n{'='*70}")
             logger.info(f"CYCLE {cycle} - Starting at {datetime.now().isoformat()}")
             logger.info(f"{'='*70}")
@@ -598,11 +570,10 @@ class AggressiveETLRunner:
             if not self.running:
                 break
             
-            # Phase 8: Web Scraping Fallback (always run if there were failures)
-            if self.stats["sources_failed"] or self.stats["rate_limit_hits"] > 0:
-                logger.info("\n[PHASE 8] WEB SCRAPING FALLBACK - Wikipedia, Index Fungorum, PubMed")
-                scrape_count = self.run_web_scraping_fallback()
-                self.stats["total_records"] += scrape_count
+            # Phase 8 disabled (see `run_web_scraping_fallback`)
+            if self.stats["sources_failed"]:
+                logger.info("\n[PHASE 8] WEB SCRAPING FALLBACK - DISABLED")
+                self.run_web_scraping_fallback()
             
             # Log stats
             self.log_stats()

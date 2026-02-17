@@ -33,47 +33,32 @@ from ..sources.chemspider import (
 )
 
 
-# Known compound-species associations (curated list)
-SPECIES_COMPOUNDS: Dict[str, List[str]] = {
-    # Psilocybe species
-    "Psilocybe cubensis": ["psilocybin", "psilocin", "baeocystin", "norbaeocystin"],
-    "Psilocybe semilanceata": ["psilocybin", "psilocin", "baeocystin"],
-    "Psilocybe azurescens": ["psilocybin", "psilocin", "baeocystin"],
-    "Psilocybe cyanescens": ["psilocybin", "psilocin", "baeocystin"],
-    
-    # Lion's Mane
-    "Hericium erinaceus": ["hericenone A", "hericenone B", "hericenone C", "erinacine A", "erinacine B"],
-    
-    # Reishi
-    "Ganoderma lucidum": ["ganoderic acid A", "ganoderic acid B", "lucidenic acid", "beta-glucan"],
-    
-    # Cordyceps
-    "Cordyceps militaris": ["cordycepin", "adenosine", "polysaccharides"],
-    "Cordyceps sinensis": ["cordycepin", "adenosine"],
-    
-    # Turkey Tail
-    "Trametes versicolor": ["polysaccharide-K", "polysaccharopeptide", "beta-glucan"],
-    
-    # Chaga
-    "Inonotus obliquus": ["betulinic acid", "inotodiol", "melanin"],
-    
-    # Shiitake
-    "Lentinula edodes": ["lentinan", "eritadenine", "beta-glucan"],
-    
-    # Maitake
-    "Grifola frondosa": ["grifolan", "D-fraction", "beta-glucan"],
-    
-    # Amanita (toxic)
-    "Amanita muscaria": ["muscimol", "ibotenic acid", "muscarine"],
-    "Amanita phalloides": ["alpha-amanitin", "phalloidin"],
-    
-    # Oyster mushrooms
-    "Pleurotus ostreatus": ["lovastatin", "ergothioneine", "pleuran"],
-    
-    # Other medicinal
-    "Agaricus blazei": ["blazein", "beta-glucan"],
-    "Grifola umbellata": ["polysaccharides", "ergosterol"],
-}
+DEFAULT_SEARCH_TERMS: List[str] = [
+    # Broad terms / classes
+    "mycotoxin",
+    "fungal toxin",
+    "ergot alkaloid",
+    # High-signal known fungal metabolites / toxins (still used as SEARCH TERMS, not "seed data")
+    "aflatoxin",
+    "ochratoxin",
+    "fumonisin",
+    "zearalenone",
+    "trichothecene",
+    "patulin",
+    "citrinin",
+    "gliotoxin",
+    "psilocybin",
+    "psilocin",
+    "muscimol",
+    "ibotenic acid",
+    "alpha-amanitin",
+    "phalloidin",
+    "cordycepin",
+    "lovastatin",
+    "cyclosporine",
+    "penicillin",
+    "griseofulvin",
+]
 
 
 def get_db_connection():
@@ -169,195 +154,75 @@ def link_taxon_compound(
             return False
 
 
-def sync_compound_from_chemspider(
-    client: ChemSpiderClient,
-    conn,
-    compound_name: str,
-) -> Optional[UUID]:
+def sync_chemspider_compounds(
+    *,
+    max_results: Optional[int] = None,
+    search_terms: Optional[List[str]] = None,
+) -> int:
     """
-    Sync a single compound from ChemSpider.
-    Returns the compound ID if successful.
-    """
-    # Check if already in database by name
-    existing = find_compound_by_name(conn, compound_name)
-    if existing and existing.get("chemspider_id"):
-        return existing["id"]
-    
-    # Search in ChemSpider
-    try:
-        compound_data = client.search_fungal_compound(compound_name, save_locally=True)
-        
-        if not compound_data:
-            print(f"  Compound '{compound_name}' not found in ChemSpider")
-            return None
-        
-        # Insert or update in database
-        compound_id = insert_compound(conn, compound_data)
-        print(f"  Synced: {compound_name} (CS{compound_data.get('chemspider_id')})")
-        
-        return compound_id
-        
-    except ChemSpiderError as e:
-        print(f"  ChemSpider error for '{compound_name}': {e}")
-        return None
-    except Exception as e:
-        print(f"  Error syncing '{compound_name}': {e}")
-        return None
+    Ingest fungal-related compounds from ChemSpider into `bio.compound`.
 
+    Important:
+    - This job DOES NOT hardcode species→compound associations (no-mock-data policy).
+    - It only ingests real compound records returned by the ChemSpider API.
+    - Taxon linking should be done later using evidence-backed relationships (papers, annotations).
+    """
+    terms = search_terms or DEFAULT_SEARCH_TERMS
+    api_key = settings.chemspider_api_key or os.getenv("CHEMSPIDER_API_KEY")
+    if not api_key:
+        raise ChemSpiderError("CHEMSPIDER_API_KEY not configured")
 
-def sync_species_compounds(
-    client: ChemSpiderClient,
-    conn,
-    species_name: str,
-    compounds: List[str],
-) -> Tuple[int, int]:
-    """
-    Sync compounds for a species.
-    Returns (compounds_synced, links_created).
-    """
-    # Find the taxon
-    taxon = find_taxon_by_name(conn, species_name)
-    if not taxon:
-        print(f"  Species '{species_name}' not found in MINDEX")
-        return 0, 0
-    
-    taxon_id = taxon["id"]
-    compounds_synced = 0
-    links_created = 0
-    
-    for compound_name in compounds:
-        # Sync compound from ChemSpider
-        compound_id = sync_compound_from_chemspider(client, conn, compound_name)
-        
-        if compound_id:
-            compounds_synced += 1
-            
-            # Create link
-            if link_taxon_compound(conn, taxon_id, compound_id):
-                links_created += 1
-    
-    return compounds_synced, links_created
+    synced = 0
+    with ChemSpiderClient(api_key) as client, get_db_connection() as conn:
+        for term in terms:
+            if max_results and synced >= max_results:
+                break
+            try:
+                # ChemSpider search-by-name supports broader matching than exact compound names.
+                remaining = (max_results - synced) if max_results else 100
+                results = client.search_by_name(term, max_results=min(remaining, 100), get_details=True)
+                if not results:
+                    continue
+
+                for rec in results:
+                    if max_results and synced >= max_results:
+                        break
+                    mapped = map_chemspider_compound(rec)
+                    cs_id = mapped.get("chemspider_id")
+                    if cs_id is None:
+                        continue
+                    existed = find_compound_by_chemspider_id(conn, int(cs_id))
+                    insert_compound(conn, mapped)
+                    synced += 1
+                    if synced % 50 == 0:
+                        print(f"ChemSpider: {synced} compounds synced...", flush=True)
+                    # Lightweight rate limiting between inserts
+                    time.sleep(0.05)
+
+            except Exception as e:
+                print(f"ChemSpider term '{term}' failed: {e}", flush=True)
+                continue
+
+        conn.commit()
+
+    return synced
 
 
 def run_full_sync(limit: Optional[int] = None) -> Dict:
     """
-    Run a full sync of all known fungal compounds.
+    Deprecated: previously used hardcoded species/compound maps.
+    Use `sync_chemspider_compounds()` instead for API-driven ingest.
     """
-    print("=" * 60)
-    print("CHEMSPIDER FULL SYNC")
-    print("=" * 60)
-    
-    stats = {
-        "started_at": datetime.now().isoformat(),
-        "species_processed": 0,
-        "compounds_synced": 0,
-        "links_created": 0,
-        "errors": [],
-    }
-    
-    # Check API key
-    api_key = settings.chemspider_api_key or os.getenv("CHEMSPIDER_API_KEY")
-    if not api_key:
-        print("ERROR: CHEMSPIDER_API_KEY not configured")
-        stats["errors"].append("CHEMSPIDER_API_KEY not configured")
-        return stats
-    
-    with ChemSpiderClient(api_key) as client, get_db_connection() as conn:
-        species_list = list(SPECIES_COMPOUNDS.items())
-        if limit:
-            species_list = species_list[:limit]
-        
-        for species_name, compounds in species_list:
-            print(f"\nProcessing: {species_name}")
-            print(f"  Compounds: {', '.join(compounds)}")
-            
-            try:
-                synced, linked = sync_species_compounds(client, conn, species_name, compounds)
-                stats["compounds_synced"] += synced
-                stats["links_created"] += linked
-                stats["species_processed"] += 1
-                
-            except Exception as e:
-                error_msg = f"Error processing {species_name}: {e}"
-                print(f"  {error_msg}")
-                stats["errors"].append(error_msg)
-            
-            # Rate limiting
-            time.sleep(1)
-        
-        conn.commit()
-    
-    stats["completed_at"] = datetime.now().isoformat()
-    
-    print("\n" + "=" * 60)
-    print("SYNC COMPLETE")
-    print(f"  Species processed: {stats['species_processed']}")
-    print(f"  Compounds synced: {stats['compounds_synced']}")
-    print(f"  Links created: {stats['links_created']}")
-    print(f"  Errors: {len(stats['errors'])}")
-    print("=" * 60)
-    
-    return stats
+    synced = sync_chemspider_compounds(max_results=limit)
+    return {"started_at": datetime.now().isoformat(), "completed_at": datetime.now().isoformat(), "compounds_synced": synced}
 
 
 def run_incremental_sync() -> Dict:
     """
-    Run an incremental sync (only new species without compounds).
+    Run an incremental sync (API-driven compound ingest).
     """
-    print("=" * 60)
-    print("CHEMSPIDER INCREMENTAL SYNC")
-    print("=" * 60)
-    
-    stats = {
-        "started_at": datetime.now().isoformat(),
-        "species_checked": 0,
-        "compounds_synced": 0,
-        "links_created": 0,
-    }
-    
-    api_key = settings.chemspider_api_key or os.getenv("CHEMSPIDER_API_KEY")
-    if not api_key:
-        print("ERROR: CHEMSPIDER_API_KEY not configured")
-        return stats
-    
-    with ChemSpiderClient(api_key) as client, get_db_connection() as conn:
-        # Find species without any compound links
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT t.id, t.canonical_name
-                FROM core.taxon t
-                WHERE t.rank = 'species'
-                AND NOT EXISTS (
-                    SELECT 1 FROM bio.taxon_compound tc WHERE tc.taxon_id = t.id
-                )
-                LIMIT 50
-            """)
-            species_without_compounds = cur.fetchall()
-        
-        for taxon in species_without_compounds:
-            species_name = taxon["canonical_name"]
-            
-            # Check if we have known compounds for this species
-            if species_name in SPECIES_COMPOUNDS:
-                print(f"\nProcessing: {species_name}")
-                compounds = SPECIES_COMPOUNDS[species_name]
-                
-                synced, linked = sync_species_compounds(client, conn, species_name, compounds)
-                stats["compounds_synced"] += synced
-                stats["links_created"] += linked
-            
-            stats["species_checked"] += 1
-            time.sleep(0.5)
-        
-        conn.commit()
-    
-    stats["completed_at"] = datetime.now().isoformat()
-    
-    print("\n" + "=" * 60)
-    print(f"Incremental sync complete: {stats['compounds_synced']} compounds synced")
-    print("=" * 60)
-    
-    return stats
+    synced = sync_chemspider_compounds(max_results=200)
+    return {"started_at": datetime.now().isoformat(), "completed_at": datetime.now().isoformat(), "compounds_synced": synced}
 
 
 def main():

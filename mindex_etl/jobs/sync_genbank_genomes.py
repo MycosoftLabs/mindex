@@ -13,6 +13,19 @@ from ..db import db_session
 from ..sources import genbank
 
 
+def _map_sequence_type(molecule_type: Optional[str]) -> str:
+    """
+    `bio.genetic_sequence.sequence_type` expects a short classifier.
+    GenBank moltype strings are often verbose ("genomic DNA", "mRNA", etc).
+    """
+    mt = (molecule_type or "").strip().lower()
+    if "rna" in mt:
+        return "rna"
+    if "protein" in mt or "aa" in mt:
+        return "protein"
+    return "dna"
+
+
 def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
     """Sync GenBank fungal genome records into MINDEX database."""
     inserted = 0
@@ -33,6 +46,8 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                     (accession,),
                 )
                 existing = cur.fetchone()
+                seq_value = genome.get("sequence") or ""
+                seq_type = _map_sequence_type(genome.get("molecule_type"))
                 
                 if existing:
                     # Update existing
@@ -46,6 +61,7 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                             definition = %s,
                             taxonomy = %s,
                             metadata = %s::jsonb,
+                            sequence = %s,
                             updated_at = now()
                         WHERE accession = %s
                         """,
@@ -53,10 +69,11 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                             genome.get("organism"),
                             genome.get("organism"),  # species_name same as organism
                             genome.get("sequence_length"),
-                            genome.get("molecule_type") or "dna",
+                            seq_type,
                             genome.get("definition"),
                             genome.get("metadata", {}).get("taxonomy"),
                             json.dumps(genome.get("metadata", {})),
+                            seq_value,
                             accession,
                         ),
                     )
@@ -79,11 +96,11 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                             genome.get("organism"),
                             genome.get("organism"),  # species_name
                             genome.get("sequence_length"),
-                            genome.get("molecule_type") or "dna",
+                            seq_type,
                             genome.get("definition"),
                             genome.get("metadata", {}).get("taxonomy"),
                             json.dumps(genome.get("metadata", {})),
-                            "",  # Empty sequence - we'd need to fetch full sequence separately
+                            seq_value,
                         ),
                     )
                     inserted += 1
@@ -109,6 +126,7 @@ def sync_genbank_its_sequences(*, max_pages: Optional[int] = None) -> int:
             accession = seq.get("accession")
             if not accession:
                 continue
+            seq_value = seq.get("sequence") or ""
                 
             with conn.cursor() as cur:
                 # Using bio.genetic_sequence schema with gene field
@@ -116,9 +134,9 @@ def sync_genbank_its_sequences(*, max_pages: Optional[int] = None) -> int:
                     """
                     INSERT INTO bio.genetic_sequence (
                         accession, source, gene, organism, species_name,
-                        sequence_length, definition, metadata, sequence
+                        sequence_length, sequence_type, definition, taxonomy, metadata, sequence
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                     ON CONFLICT (accession) DO NOTHING
                     """,
                     (
@@ -128,9 +146,11 @@ def sync_genbank_its_sequences(*, max_pages: Optional[int] = None) -> int:
                         seq.get("organism"),
                         seq.get("organism"),  # species_name
                         seq.get("sequence_length"),
+                        _map_sequence_type(seq.get("molecule_type")),
                         seq.get("definition"),
+                        seq.get("metadata", {}).get("taxonomy"),
                         json.dumps(seq.get("metadata", {})),
-                        "",  # Empty sequence placeholder
+                        seq_value,
                     ),
                 )
                 if cur.rowcount > 0:
