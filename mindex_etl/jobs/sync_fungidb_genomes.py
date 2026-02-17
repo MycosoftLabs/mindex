@@ -21,40 +21,58 @@ def sync_fungidb_genomes(*, max_pages: int | None = None) -> int:
                 rank="species",
                 source="fungidb",
             )
+            accession = record.get("accession")
+            if not accession:
+                continue
+
+            # Avoid relying on a unique constraint existing on the target database.
+            # Some deployments may not have the expected `uq_genome_source_accession` index.
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    INSERT INTO bio.genome (
-                        taxon_id,
-                        source,
-                        accession,
-                        assembly_level,
-                        release_date,
-                        metadata
-                    )
-                    VALUES (
-                        %s,
-                        'fungidb',
-                        %s,
-                        %s,
-                        %s::date,
-                        %s::jsonb
-                    )
-                    ON CONFLICT (source, accession) DO UPDATE SET
-                        taxon_id = EXCLUDED.taxon_id,
-                        assembly_level = EXCLUDED.assembly_level,
-                        release_date = EXCLUDED.release_date,
-                        metadata = EXCLUDED.metadata
-                    """,
-                    (
-                        taxon_id,
-                        record.get("accession"),
-                        record.get("assembly_level"),
-                        record.get("release_date"),
-                        json.dumps(record.get("metadata", {})),
-                    ),
+                    "SELECT id FROM bio.genome WHERE source = 'fungidb' AND accession = %s",
+                    (accession,),
                 )
-            inserted += 1
+                existing = cur.fetchone()
+                if existing:
+                    cur.execute(
+                        """
+                        UPDATE bio.genome SET
+                            taxon_id = %s,
+                            assembly_level = %s,
+                            release_date = %s::date,
+                            metadata = %s::jsonb
+                        WHERE source = 'fungidb' AND accession = %s
+                        """,
+                        (
+                            taxon_id,
+                            record.get("assembly_level"),
+                            record.get("release_date"),
+                            json.dumps(record.get("metadata", {})),
+                            accession,
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO bio.genome (
+                            taxon_id,
+                            source,
+                            accession,
+                            assembly_level,
+                            release_date,
+                            metadata
+                        )
+                        VALUES (%s, 'fungidb', %s, %s, %s::date, %s::jsonb)
+                        """,
+                        (
+                            taxon_id,
+                            accession,
+                            record.get("assembly_level"),
+                            record.get("release_date"),
+                            json.dumps(record.get("metadata", {})),
+                        ),
+                    )
+                    inserted += 1
     return inserted
 
 

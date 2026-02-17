@@ -594,6 +594,21 @@ class AggressiveETLRunner:
 
 def main():
     """Entry point for aggressive ETL runner."""
+    # Prevent multiple concurrent runners on the VM (easy to accidentally start twice).
+    # On Linux, use an advisory file lock; if already locked, exit cleanly.
+    try:
+        import fcntl  # type: ignore
+
+        lock_f = open("/tmp/mindex_aggressive_runner.lock", "w", encoding="utf-8")
+        try:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            logger.error("Another aggressive runner instance is already running. Exiting.")
+            return
+    except Exception:
+        # Non-Linux platforms (or restricted env) just proceed.
+        lock_f = None
+
     runner = AggressiveETLRunner()
     # Run with 2 minute delay between cycles - very aggressive
     runner.run_forever(cycle_delay_minutes=2)
