@@ -304,13 +304,14 @@ class AggressiveETLRunner:
             from .jobs.sync_genbank_genomes import sync_genbank_genomes, sync_genbank_its_sequences
             
             # Full genome records
-            count = self.run_job_safe("genbank_genomes", sync_genbank_genomes, max_pages=50)
+            # Keep per-cycle runtime bounded so we reach PubChem/publications quickly.
+            count = self.run_job_safe("genbank_genomes", sync_genbank_genomes, max_pages=5)
             if count > 0:
                 total += count
                 self.stats["genomes_synced"] += count
                 
             # ITS barcode sequences (most important for fungi identification)
-            count = self.run_job_safe("genbank_its", sync_genbank_its_sequences, max_pages=50)
+            count = self.run_job_safe("genbank_its", sync_genbank_its_sequences, max_pages=5)
             if count > 0:
                 total += count
                 self.stats["sequences_synced"] += count
