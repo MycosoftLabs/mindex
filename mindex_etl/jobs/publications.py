@@ -22,7 +22,7 @@ import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mindex_api.db import get_async_session
+from mindex_api.db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +294,7 @@ async def run_publications_etl(
     search_terms: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Entry point for publications ETL job."""
-    async for session in get_async_session():
+    async for session in get_db():
         etl = PublicationsETL(session)
         return await etl.run(
             search_terms=search_terms,

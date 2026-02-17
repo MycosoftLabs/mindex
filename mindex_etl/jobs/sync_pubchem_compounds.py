@@ -51,7 +51,7 @@ def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
             with conn.cursor() as cur:
                 # Check if exists - using bio.compound schema
                 cur.execute(
-                    "SELECT id FROM bio.compound WHERE pubchem_id = %s",
+                    "SELECT id FROM bio.compound WHERE pubchem_id = %s LIMIT 1",
                     (cid,),
                 )
                 existing = cur.fetchone()
@@ -99,7 +99,6 @@ def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
                             smiles, inchi, inchikey, iupac_name, source, metadata
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-                        ON CONFLICT (pubchem_id) DO NOTHING
                         """,
                         (
                             cid,
@@ -144,36 +143,66 @@ def sync_mycotoxins(*, max_results: Optional[int] = None) -> int:
                 continue
                 
             with conn.cursor() as cur:
-                # Using bio.compound schema with compound_type for mycotoxin class
-                cur.execute(
-                    """
-                    INSERT INTO bio.compound (
-                        pubchem_id, name, formula, molecular_weight,
-                        smiles, inchi, inchikey, compound_type, source, metadata
+                cur.execute("SELECT id FROM bio.compound WHERE pubchem_id = %s LIMIT 1", (cid,))
+                existing = cur.fetchone()
+
+                name = _safe_compound_name(compound)
+                metadata = json.dumps({
+                    "common_name": compound.get("common_name"),
+                    "xlogp": compound.get("xlogp"),
+                    "tpsa": compound.get("tpsa"),
+                })
+
+                if existing:
+                    cur.execute(
+                        """
+                        UPDATE bio.compound SET
+                            name = COALESCE(%s, name),
+                            formula = %s,
+                            molecular_weight = %s,
+                            smiles = %s,
+                            inchi = %s,
+                            inchikey = %s,
+                            compound_type = COALESCE(%s, compound_type),
+                            source = 'pubchem',
+                            metadata = %s::jsonb,
+                            updated_at = now()
+                        WHERE pubchem_id = %s
+                        """,
+                        (
+                            name,
+                            compound.get("molecular_formula"),
+                            compound.get("molecular_weight"),
+                            compound.get("canonical_smiles"),
+                            compound.get("inchi"),
+                            compound.get("inchi_key"),
+                            "mycotoxin",
+                            metadata,
+                            cid,
+                        ),
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-                    ON CONFLICT (pubchem_id) DO UPDATE SET
-                        compound_type = COALESCE(EXCLUDED.compound_type, bio.compound.compound_type),
-                        updated_at = now()
-                    """,
-                    (
-                        cid,
-                        compound.get("common_name") or compound.get("name"),
-                        compound.get("molecular_formula"),
-                        compound.get("molecular_weight"),
-                        compound.get("canonical_smiles"),
-                        compound.get("inchi"),
-                        compound.get("inchi_key"),
-                        "mycotoxin",
-                        "pubchem",
-                        json.dumps({
-                            "common_name": compound.get("common_name"),
-                            "xlogp": compound.get("xlogp"),
-                            "tpsa": compound.get("tpsa"),
-                        }),
-                    ),
-                )
-                if cur.rowcount > 0:
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO bio.compound (
+                            pubchem_id, name, formula, molecular_weight,
+                            smiles, inchi, inchikey, compound_type, source, metadata
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                        """,
+                        (
+                            cid,
+                            name,
+                            compound.get("molecular_formula"),
+                            compound.get("molecular_weight"),
+                            compound.get("canonical_smiles"),
+                            compound.get("inchi"),
+                            compound.get("inchi_key"),
+                            "mycotoxin",
+                            "pubchem",
+                            metadata,
+                        ),
+                    )
                     inserted += 1
                     
             if inserted % 50 == 0:

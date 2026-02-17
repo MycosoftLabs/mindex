@@ -48,31 +48,38 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                 existing = cur.fetchone()
                 seq_value = genome.get("sequence") or ""
                 seq_type = _map_sequence_type(genome.get("molecule_type"))
+                species_name = genome.get("organism")
+                description = genome.get("definition")
+                source_url = genome.get("source_url") or (genome.get("metadata", {}) or {}).get("url")
                 
                 if existing:
                     # Update existing
                     cur.execute(
                         """
                         UPDATE bio.genetic_sequence SET
-                            organism = %s,
                             species_name = %s,
+                            gene_name = %s,
+                            gene = %s,
+                            region = %s,
                             sequence_length = %s,
                             sequence_type = %s,
-                            definition = %s,
-                            taxonomy = %s,
-                            metadata = %s::jsonb,
+                            description = %s,
+                            source = %s,
+                            source_url = %s,
                             sequence = %s,
                             updated_at = now()
                         WHERE accession = %s
                         """,
                         (
-                            genome.get("organism"),
-                            genome.get("organism"),  # species_name same as organism
+                            species_name,
+                            "genome",
+                            "GENOME",
+                            None,
                             genome.get("sequence_length"),
-                            seq_type,
-                            genome.get("definition"),
-                            genome.get("metadata", {}).get("taxonomy"),
-                            json.dumps(genome.get("metadata", {})),
+                            seq_type.upper(),
+                            description,
+                            "GenBank",
+                            source_url,
                             seq_value,
                             accession,
                         ),
@@ -83,24 +90,24 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                     cur.execute(
                         """
                         INSERT INTO bio.genetic_sequence (
-                            accession, source, organism, species_name,
-                            sequence_length, sequence_type, definition, taxonomy, metadata,
-                            sequence
+                            accession, source, species_name, gene_name, gene, region,
+                            sequence, sequence_length, sequence_type, description, source_url
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (accession) DO NOTHING
                         """,
                         (
                             accession,
-                            "genbank",
-                            genome.get("organism"),
-                            genome.get("organism"),  # species_name
-                            genome.get("sequence_length"),
-                            seq_type,
-                            genome.get("definition"),
-                            genome.get("metadata", {}).get("taxonomy"),
-                            json.dumps(genome.get("metadata", {})),
+                            "GenBank",
+                            species_name,
+                            "genome",
+                            "GENOME",
+                            None,
                             seq_value,
+                            genome.get("sequence_length"),
+                            seq_type.upper(),
+                            description,
+                            source_url,
                         ),
                     )
                     inserted += 1
@@ -133,24 +140,24 @@ def sync_genbank_its_sequences(*, max_pages: Optional[int] = None) -> int:
                 cur.execute(
                     """
                     INSERT INTO bio.genetic_sequence (
-                        accession, source, gene, organism, species_name,
-                        sequence_length, sequence_type, definition, taxonomy, metadata, sequence
+                        accession, source, gene, gene_name, region, species_name,
+                        sequence, sequence_length, sequence_type, description, source_url
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (accession) DO NOTHING
                     """,
                     (
                         accession,
-                        "genbank",
+                        "GenBank",
                         "ITS",
-                        seq.get("organism"),
+                        "ITS",
+                        seq.get("region"),
                         seq.get("organism"),  # species_name
-                        seq.get("sequence_length"),
-                        _map_sequence_type(seq.get("molecule_type")),
-                        seq.get("definition"),
-                        seq.get("metadata", {}).get("taxonomy"),
-                        json.dumps(seq.get("metadata", {})),
                         seq_value,
+                        seq.get("sequence_length"),
+                        _map_sequence_type(seq.get("molecule_type")).upper(),
+                        seq.get("definition"),
+                        seq.get("source_url") or (seq.get("metadata", {}) or {}).get("url"),
                     ),
                 )
                 if cur.rowcount > 0:
