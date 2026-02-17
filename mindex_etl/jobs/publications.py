@@ -241,8 +241,8 @@ class PublicationsETL:
                         id, source, external_id, title, authors, year,
                         abstract, url, doi, metadata, created_at, updated_at
                     ) VALUES (
-                        :id, :source, :external_id, :title, :authors::jsonb, :year,
-                        :abstract, :url, :doi, :metadata::jsonb, NOW(), NOW()
+                        :id, :source, :external_id, :title, CAST(:authors AS jsonb), :year,
+                        :abstract, :url, :doi, CAST(:metadata AS jsonb), NOW(), NOW()
                     )
                     ON CONFLICT (id) DO UPDATE SET
                         title = EXCLUDED.title,
