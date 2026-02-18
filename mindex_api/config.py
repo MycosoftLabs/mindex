@@ -171,6 +171,7 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
+        "extra": "ignore",  # Allow extra env vars like ncbi_api_key, chemspider_api_key
     }
 
 
