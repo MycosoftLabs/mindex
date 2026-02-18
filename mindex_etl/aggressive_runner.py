@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import signal
 import sys
 import time
@@ -42,6 +43,39 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("mindex_aggressive_etl")
+
+
+class _RedactHttpxQueryParams(logging.Filter):
+    """
+    Prevent secrets leaking into logs via full request URLs.
+    httpx logs lines like: "HTTP Request: GET https://...?...&api_key=XYZ"
+    """
+
+    _patterns = [
+        re.compile(r"(api_key=)([^&\\s\"']+)", re.IGNORECASE),
+        re.compile(r"(apikey=)([^&\\s\"']+)", re.IGNORECASE),
+        re.compile(r"(token=)([^&\\s\"']+)", re.IGNORECASE),
+    ]
+
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+
+        redacted = msg
+        for pat in self._patterns:
+            redacted = pat.sub(r"\\1REDACTED", redacted)
+
+        if redacted != msg:
+            # Mutate the record so downstream handlers print the redacted message.
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+# Attach redaction filter to httpx logger to avoid leaking query params.
+logging.getLogger("httpx").addFilter(_RedactHttpxQueryParams())
 
 
 class ServiceDowntimeError(Exception):
