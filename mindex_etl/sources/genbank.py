@@ -8,7 +8,6 @@ Uses NCBI E-utilities API.
 """
 from __future__ import annotations
 
-import os
 import time
 import xml.etree.ElementTree as ET
 from typing import Dict, Generator, List, Optional
@@ -40,7 +39,7 @@ def _esearch(
         "retmax": retmax,
         "retmode": "json",
     }
-    api_key = os.getenv("NCBI_API_KEY")
+    api_key = settings.ncbi_api_key
     if api_key:
         params["api_key"] = api_key
     resp = client.get(
@@ -68,7 +67,7 @@ def _efetch(
         "rettype": rettype,
         "retmode": retmode,
     }
-    api_key = os.getenv("NCBI_API_KEY")
+    api_key = settings.ncbi_api_key
     if api_key:
         params["api_key"] = api_key
     resp = client.get(

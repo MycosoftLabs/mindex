@@ -42,6 +42,12 @@ class ETLSettings(BaseSettings):
     http_retries: int = 3
     rate_limit_delay: float = 0.5  # Delay between API calls
 
+    # NCBI (GenBank / PubMed) - optional API key to increase throughput and reduce 429s
+    ncbi_api_key: Optional[str] = Field(
+        default=None,
+        description="NCBI E-utilities API key (optional).",
+    )
+
     # Local data storage for scraping (use local first, then NAS)
     local_data_dir: str = Field(
         default_factory=_default_local_data_dir,
