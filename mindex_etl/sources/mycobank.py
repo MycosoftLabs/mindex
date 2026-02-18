@@ -34,6 +34,10 @@ MYCOBANK_SEARCH = f"{MYCOBANK_BASE_URL}/Basic%20names%20search"
 
 # Data dump URLs (if available)
 MYCOBANK_DUMP_URLS = [
+    # Modern MycoBank export referenced from the UI (contains MBList.xlsx)
+    "https://www.mycobank.org/images/MBList.zip",
+    "https://www.MycoBank.org/images/MBList.zip",
+    # Legacy URLs (often 404)
     "https://www.mycobank.org/downloads/MycoBank_dump.zip",
     "https://www.mycobank.org/downloads/names.csv",
 ]
@@ -381,19 +385,89 @@ def parse_mycobank_csv(filepath: str) -> Generator[Tuple[dict, List[str], str], 
             yield map_record(record)
 
 
+def parse_mycobank_xlsx(filepath: str) -> Generator[Tuple[dict, List[str], str], None, None]:
+    """
+    Parse MycoBank XLSX dump.
+
+    MycoBank currently publishes MBList.zip -> MBList.xlsx.
+    We stream rows using openpyxl (read_only=True) to avoid large memory usage.
+    """
+    try:
+        import openpyxl  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "openpyxl is required to parse MycoBank XLSX dumps. Install: pip install openpyxl"
+        ) from e
+
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb.worksheets[0]
+
+    rows = ws.iter_rows(values_only=True)
+    header = next(rows, None)
+    if not header:
+        return
+
+    def norm(s: object) -> str:
+        if s is None:
+            return ""
+        return re.sub(r"[^a-z0-9]+", "", str(s).strip().lower())
+
+    headers = [norm(h) for h in header]
+
+    def find_col(candidates: list[str]) -> Optional[int]:
+        cand_norm = [norm(c) for c in candidates]
+        for i, h in enumerate(headers):
+            if not h:
+                continue
+            for c in cand_norm:
+                if c and (h == c or c in h):
+                    return i
+        return None
+
+    idx_name = find_col(["Name", "Taxon name", "CurrentName", "FullName", "Full name"])
+    idx_mb = find_col(["MycoBankNr", "MycoBank #", "MB#", "MB number", "MycoBank number"])
+    idx_auth = find_col(["Authors", "Authority", "Author"])
+    idx_rank = find_col(["Rank", "TaxonRank", "Taxon rank"])
+    idx_year = find_col(["Year", "PublicationYear", "Publication year"])
+
+    if idx_name is None:
+        raise RuntimeError(f"MycoBank XLSX: could not find a name column in headers: {headers[:30]}")
+
+    for row in rows:
+        try:
+            name = row[idx_name] if idx_name is not None else None
+            if not name:
+                continue
+            mb = row[idx_mb] if idx_mb is not None else None
+            authors = row[idx_auth] if idx_auth is not None else None
+            rank = row[idx_rank] if idx_rank is not None else None
+            year = row[idx_year] if idx_year is not None else None
+
+            record = {
+                "Name": str(name).strip(),
+                "MycoBankNr": str(mb).strip() if mb is not None and str(mb).strip() else None,
+                "Authors": str(authors).strip() if authors is not None and str(authors).strip() else None,
+                "Rank": str(rank).strip() if rank is not None and str(rank).strip() else None,
+                "Year": str(year).strip() if year is not None and str(year).strip() else None,
+            }
+            yield map_record(record)
+        except Exception:
+            continue
+
+
 def _find_first_csv_in_zip(zip_path: str) -> Optional[str]:
     """Return the first CSV-like member name from a ZIP file."""
     with zipfile.ZipFile(zip_path, "r") as zf:
         for name in zf.namelist():
             lname = name.lower()
-            if lname.endswith(".csv") or lname.endswith(".tsv"):
+            if lname.endswith(".csv") or lname.endswith(".tsv") or lname.endswith(".xlsx") or lname.endswith(".txt"):
                 return name
     return None
 
 
 def parse_mycobank_zip(zip_path: str, output_dir: Optional[str] = None) -> Generator[Tuple[dict, List[str], str], None, None]:
     """
-    Parse a MycoBank ZIP dump by extracting the first CSV/TSV we can find.
+    Parse a MycoBank ZIP dump by extracting the first CSV/TSV/XLSX we can find.
     """
     output_dir = output_dir or str(Path(settings.local_data_dir) / "mycobank" / "extracted")
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -407,8 +481,12 @@ def parse_mycobank_zip(zip_path: str, output_dir: Optional[str] = None) -> Gener
         extracted_path = str(Path(output_dir) / Path(member).name)
         with zf.open(member, "r") as src, open(extracted_path, "wb") as dst:
             dst.write(src.read())
-    # Delegate to CSV parser (utf-8-sig handling)
-    yield from parse_mycobank_csv(extracted_path)
+    lower = extracted_path.lower()
+    if lower.endswith(".xlsx"):
+        yield from parse_mycobank_xlsx(extracted_path)
+    else:
+        # Delegate to CSV parser (utf-8-sig handling). If this isn't a CSV, it'll fail fast.
+        yield from parse_mycobank_csv(extracted_path)
 
 
 # =============================================================================
@@ -426,8 +504,8 @@ def iter_mycobank_taxa(
     """
     Smart iterator that tries multiple strategies:
     1. Data dump (if available)
-    2. API (fast but may fail)
-    3. Web scraping (slower but reliable)
+    2. Web scraping (slower but reliable)
+    3. API (fast but may fail)
     
     Args:
         prefixes: Letter prefixes to search (a-z by default)

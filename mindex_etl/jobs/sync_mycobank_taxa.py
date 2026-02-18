@@ -25,7 +25,9 @@ def _insert_synonym(conn, taxon_id, synonym: str) -> None:
 def sync_mycobank_taxa(*, prefixes: Iterable[str] | None = None) -> int:
     inserted = 0
     with db_session() as conn:
-        for taxon_payload, synonyms, external_id in mycobank.iter_mycobank_taxa(prefixes=list(prefixes) if prefixes else None):
+        for taxon_payload, synonyms, external_id in mycobank.iter_mycobank_taxa(
+            prefixes=list(prefixes) if prefixes else None
+        ):
             taxon_id = upsert_taxon(conn, **taxon_payload)
             link_external_id(
                 conn,
@@ -38,6 +40,9 @@ def sync_mycobank_taxa(*, prefixes: Iterable[str] | None = None) -> int:
                 if synonym:
                     _insert_synonym(conn, taxon_id, synonym)
             inserted += 1
+            # Avoid a single massive transaction when ingesting MBList (~545k records).
+            if inserted % 1000 == 0:
+                conn.commit()
     return inserted
 
 
