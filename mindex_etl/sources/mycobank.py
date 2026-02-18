@@ -354,8 +354,19 @@ def download_mycobank_dump(output_dir: str = None) -> Optional[str]:
                     print(f"Downloaded to: {filepath}")
                     return str(filepath)
                 elif response.status_code in (403, 404, 406):
-                    # Not available / blocked
-                    print(f"  Not available (HTTP {response.status_code})")
+                    # HEAD is frequently unreliable on MycoBank (we've seen HEAD=404 but GET=200).
+                    print(f"  HEAD not usable (HTTP {response.status_code}), trying GET...", flush=True)
+                    filename = url.split("/")[-1]
+                    filepath = Path(output_dir) / filename
+                    with client.stream("GET", url, timeout=600.0) as r:
+                        if r.status_code != 200:
+                            print(f"  GET failed (HTTP {r.status_code})")
+                            continue
+                        with open(filepath, "wb") as f:
+                            for chunk in r.iter_bytes(chunk_size=8192):
+                                f.write(chunk)
+                    print(f"Downloaded to: {filepath}")
+                    return str(filepath)
                     
             except Exception as e:
                 print(f"  Failed: {e}")
