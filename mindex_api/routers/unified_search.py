@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List, Optional
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -36,7 +34,7 @@ router = APIRouter(prefix="/unified-search", tags=["Unified Search"])
 # =============================================================================
 
 class TaxonResult(BaseModel):
-    id: UUID
+    id: int  # Database uses integer, not UUID
     scientific_name: str
     common_name: Optional[str] = None
     rank: Optional[str] = None
@@ -49,7 +47,7 @@ class TaxonResult(BaseModel):
 
 
 class CompoundResult(BaseModel):
-    id: UUID
+    id: int  # Database uses integer
     name: str
     formula: Optional[str] = None
     molecular_weight: Optional[float] = None
@@ -119,22 +117,23 @@ async def search_taxa(
         if toxicity_filter in ("poisonous", "toxic", "deadly"):
             where_clauses.append("(metadata->>'toxicity' IS NOT NULL OR metadata->>'poisonous' = 'true')")
         elif toxicity_filter == "edible":
-            where_clauses.append("(metadata->>'edibility' = 'edible' OR metadata->>'edible' = 'true')")
+            where_clauses.append("(edibility = 'edible' OR metadata->>'edible' = 'true')")
         elif toxicity_filter in ("psychedelic", "hallucinogenic"):
             where_clauses.append("(metadata->>'psychoactive' = 'true' OR canonical_name ILIKE '%psilocybe%')")
     
+    # Simplified query - skip image lookup for now to ensure basic search works
     sql = f"""
         SELECT 
-            id, canonical_name, common_name, rank, description,
-            (SELECT url FROM core.taxon_image WHERE taxon_id = t.id LIMIT 1) as image_url,
-            COALESCE((metadata->>'observation_count')::int, 0) as observation_count,
-            metadata->>'toxicity' as toxicity,
-            metadata->>'edibility' as edibility
+            t.id, t.canonical_name, t.common_name, t.rank, t.description,
+            NULL as image_url,
+            0 as observation_count,
+            t.metadata->>'toxicity' as toxicity,
+            t.edibility as edibility
         FROM core.taxon t
         WHERE {' AND '.join(where_clauses)}
         ORDER BY 
-            CASE WHEN canonical_name ILIKE :exact_query THEN 0 ELSE 1 END,
-            observation_count DESC
+            CASE WHEN t.canonical_name ILIKE :exact_query THEN 0 ELSE 1 END,
+            t.canonical_name
         LIMIT :limit
     """
     params["exact_query"] = query
@@ -157,7 +156,9 @@ async def search_taxa(
             )
             for row in rows
         ]
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.error(f"Taxa search error: {e}")
         return []
 
 
@@ -167,20 +168,27 @@ async def search_compounds(
     limit: int,
 ) -> List[CompoundResult]:
     """Search compounds by name or formula."""
+    # Use core.compounds table - search by name, formula, OR producing species
     sql = """
         SELECT 
-            c.id, c.name, c.formula, c.molecular_weight, c.chemical_class, c.smiles,
-            ARRAY_AGG(DISTINCT ba.name) FILTER (WHERE ba.name IS NOT NULL) as bioactivities,
-            ARRAY_AGG(DISTINCT t.canonical_name) FILTER (WHERE t.canonical_name IS NOT NULL) as species
-        FROM bio.compound c
-        LEFT JOIN bio.compound_activity ca ON ca.compound_id = c.id
-        LEFT JOIN bio.biological_activity ba ON ba.id = ca.activity_id
-        LEFT JOIN bio.taxon_compound tc ON tc.compound_id = c.id
-        LEFT JOIN core.taxon t ON t.id = tc.taxon_id
-        WHERE c.name ILIKE :query OR c.formula ILIKE :query
-        GROUP BY c.id, c.name, c.formula, c.molecular_weight, c.chemical_class, c.smiles
+            c.id, c.name, 
+            c.molecular_formula as formula,
+            c.molecular_weight,
+            c.compound_class as chemical_class,
+            c.smiles,
+            COALESCE(c.producing_species, ARRAY[]::text[]) as species
+        FROM core.compounds c
+        WHERE c.name ILIKE :query 
+           OR c.molecular_formula ILIKE :query 
+           OR c.iupac_name ILIKE :query
+           OR EXISTS (
+               SELECT 1 FROM unnest(c.producing_species) ps 
+               WHERE ps ILIKE :query
+           )
         ORDER BY 
-            CASE WHEN c.name ILIKE :exact_query THEN 0 ELSE 1 END,
+            CASE WHEN c.name ILIKE :exact_query THEN 0 
+                 WHEN EXISTS (SELECT 1 FROM unnest(c.producing_species) ps WHERE ps ILIKE :exact_query) THEN 1
+                 ELSE 2 END,
             c.name
         LIMIT :limit
     """
@@ -201,12 +209,14 @@ async def search_compounds(
                 molecular_weight=row.molecular_weight,
                 chemical_class=row.chemical_class,
                 smiles=row.smiles,
-                bioactivity=row.bioactivities or [],
+                bioactivity=[],  # Will be populated from bioactivity jsonb if needed
                 source_species=row.species or [],
             )
             for row in rows
         ]
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.error(f"Compounds search error: {e}")
         return []
 
 
@@ -216,14 +226,17 @@ async def search_genetics(
     limit: int,
 ) -> List[GeneticsResult]:
     """Search genetic sequences by species name or accession."""
+    # Use core.dna_sequences table with correct column names
     sql = """
         SELECT 
-            id, accession, species_name, gene, sequence_length, source
-        FROM bio.genetic_sequence
-        WHERE species_name ILIKE :query OR accession ILIKE :query OR gene ILIKE :query
+            id, accession, scientific_name as species_name, gene_region as gene, 
+            COALESCE(sequence_length, 0) as sequence_length, 
+            COALESCE(source, 'genbank') as source
+        FROM core.dna_sequences
+        WHERE scientific_name ILIKE :query OR accession ILIKE :query OR gene_region ILIKE :query
         ORDER BY 
-            CASE WHEN species_name ILIKE :exact_query THEN 0 ELSE 1 END,
-            species_name
+            CASE WHEN scientific_name ILIKE :exact_query THEN 0 ELSE 1 END,
+            scientific_name
         LIMIT :limit
     """
     
@@ -246,7 +259,9 @@ async def search_genetics(
             )
             for row in rows
         ]
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.error(f"Genetics search error: {e}")
         return []
 
 

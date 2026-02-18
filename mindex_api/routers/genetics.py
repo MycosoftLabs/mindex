@@ -2,10 +2,14 @@
 Genetics Router
 
 API endpoints for genetic sequence data (GenBank, NCBI, etc.).
+On-demand ingest: when detail is requested for an accession not in MINDEX,
+fetch from GenBank and store so the user stays in-app.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -71,6 +75,11 @@ class GeneStatsResponse(BaseModel):
     avg_length: int
     min_length: int
     max_length: int
+
+
+class IngestAccessionRequest(BaseModel):
+    """Request to ingest a GenBank record by accession if not already in MINDEX."""
+    accession: str = Field(..., min_length=1, description="GenBank accession (e.g. AF123456)")
 
 
 # =============================================================================
@@ -378,6 +387,140 @@ async def get_sequence_by_accession(
         pubmed_id=row["pubmed_id"],
         doi=row["doi"],
     )
+
+
+@router.post("/ingest-accession", response_model=GeneticSequenceResponse)
+async def ingest_accession(
+    body: IngestAccessionRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> GeneticSequenceResponse:
+    """
+    Ensure a GenBank record is in MINDEX by accession.
+    If already present, returns it. If not, fetches from NCBI GenBank, stores in MINDEX, and returns.
+    Keeps users in-app: no need to open GenBank externally.
+    """
+    if not await _genetic_sequence_table_exists(db):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Genetic sequences table not available",
+        )
+    accession = body.accession.strip()
+    # Already in DB?
+    stmt = text("""
+        SELECT id, accession, species_name, gene, region, sequence, sequence_length,
+               sequence_type, source, source_url, definition, organism, pubmed_id, doi
+        FROM bio.genetic_sequence WHERE accession = :accession
+    """)
+    result = await db.execute(stmt, {"accession": accession})
+    row = result.mappings().one_or_none()
+    if row:
+        return GeneticSequenceResponse(
+            id=row["id"],
+            accession=row["accession"],
+            species_name=row["species_name"],
+            gene=row["gene"],
+            region=row["region"],
+            sequence=row["sequence"],
+            sequence_length=row["sequence_length"],
+            sequence_type=row["sequence_type"],
+            source=row["source"],
+            source_url=row["source_url"],
+            definition=row["definition"],
+            organism=row["organism"],
+            pubmed_id=row["pubmed_id"],
+            doi=row["doi"],
+        )
+    # Fetch from GenBank (sync call in thread)
+    try:
+        from mindex_etl.sources.genbank import fetch_record_by_accession
+        genome = await asyncio.to_thread(fetch_record_by_accession, accession)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to fetch from GenBank: {e!s}",
+        )
+    if not genome:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"GenBank accession '{accession}' not found",
+        )
+    seq = genome.get("sequence") or ""
+    sequence_length = len(seq.replace(" ", "").replace("\n", "")) or genome.get("sequence_length") or 0
+    source_url = f"https://www.ncbi.nlm.nih.gov/nuccore/{accession}"
+    insert_stmt = text("""
+        INSERT INTO bio.genetic_sequence (
+            accession, species_name, gene, region, sequence, sequence_length,
+            sequence_type, source, source_url, definition, organism, taxonomy, metadata
+        ) VALUES (
+            :accession, :species_name, :gene, :region, :sequence, :sequence_length,
+            :sequence_type, :source, :source_url, :definition, :organism, :taxonomy, :metadata::jsonb
+        )
+        RETURNING id, accession, species_name, gene, region, sequence, sequence_length,
+                  sequence_type, source, source_url, definition, organism, pubmed_id, doi
+    """)
+    metadata = genome.get("metadata") or {}
+    taxonomy = metadata.get("taxonomy") or ""
+    try:
+        result = await db.execute(insert_stmt, {
+            "accession": accession,
+            "species_name": genome.get("organism") or "",
+            "gene": None,
+            "region": None,
+            "sequence": seq,
+            "sequence_length": sequence_length,
+            "sequence_type": (genome.get("molecule_type") or "dna").lower()[:20],
+            "source": "genbank",
+            "source_url": source_url,
+            "definition": genome.get("definition") or "",
+            "organism": genome.get("organism") or "",
+            "taxonomy": taxonomy,
+            "metadata": json.dumps(metadata),
+        })
+        await db.commit()
+        row = result.mappings().one()
+        return GeneticSequenceResponse(
+            id=row["id"],
+            accession=row["accession"],
+            species_name=row["species_name"],
+            gene=row["gene"],
+            region=row["region"],
+            sequence=row["sequence"],
+            sequence_length=row["sequence_length"],
+            sequence_type=row["sequence_type"],
+            source=row["source"],
+            source_url=row["source_url"],
+            definition=row["definition"],
+            organism=row["organism"],
+            pubmed_id=row["pubmed_id"],
+            doi=row["doi"],
+        )
+    except Exception as e:
+        await db.rollback()
+        if "duplicate key" in str(e).lower() or "unique" in str(e).lower():
+            # Raced with another request; fetch and return
+            result = await db.execute(stmt, {"accession": accession})
+            row = result.mappings().one_or_none()
+            if row:
+                return GeneticSequenceResponse(
+                    id=row["id"],
+                    accession=row["accession"],
+                    species_name=row["species_name"],
+                    gene=row["gene"],
+                    region=row["region"],
+                    sequence=row["sequence"],
+                    sequence_length=row["sequence_length"],
+                    sequence_type=row["sequence_type"],
+                    source=row["source"],
+                    source_url=row["source_url"],
+                    definition=row["definition"],
+                    organism=row["organism"],
+                    pubmed_id=row["pubmed_id"],
+                    doi=row["doi"],
+                )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to store sequence: {e!s}",
+        )
 
 
 @router.post("", response_model=GeneticSequenceResponse, status_code=status.HTTP_201_CREATED)
