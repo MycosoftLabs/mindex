@@ -16,6 +16,19 @@ def _get_default_db_url() -> str:
     name = os.getenv("MINDEX_DB_NAME", "mindex")
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"
 
+def _default_local_data_dir() -> str:
+    # VM runs Linux; keep Windows defaults for local dev.
+    if os.name == "nt":
+        return "C:/Users/admin2/Desktop/MYCOSOFT/DATA/mindex_scrape"
+    return "/home/mycosoft/mindex/data/mindex_scrape"
+
+
+def _default_nas_data_dir() -> str:
+    if os.name == "nt":
+        return "\\\\192.168.1.50\\mindex"
+    # Convention: mount NAS under /mnt/nas (adjust if your VM differs).
+    return "/mnt/nas/mindex"
+
 
 class ETLSettings(BaseSettings):
     # Database - uses synchronous psycopg for ETL jobs
@@ -31,11 +44,11 @@ class ETLSettings(BaseSettings):
 
     # Local data storage for scraping (use local first, then NAS)
     local_data_dir: str = Field(
-        default="C:/Users/admin2/Desktop/MYCOSOFT/DATA/mindex_scrape",
+        default_factory=_default_local_data_dir,
         description="Local directory for scraped data downloads"
     )
     nas_data_dir: str = Field(
-        default="\\\\192.168.1.50\\mindex",
+        default_factory=_default_nas_data_dir,
         description="NAS directory for large data storage"
     )
 
