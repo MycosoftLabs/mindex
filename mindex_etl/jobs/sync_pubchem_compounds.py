@@ -55,6 +55,7 @@ def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
                     (cid,),
                 )
                 existing = cur.fetchone()
+                inchikey = compound.get("inchi_key")
                 
                 if existing:
                     # Update existing
@@ -91,34 +92,81 @@ def sync_pubchem_compounds(*, max_results: Optional[int] = None) -> int:
                     )
                     updated += 1
                 else:
-                    # Insert new - using bio.compound schema
-                    cur.execute(
-                        """
-                        INSERT INTO bio.compound (
-                            pubchem_id, name, formula, molecular_weight,
-                            smiles, inchi, inchikey, iupac_name, source, metadata
+                    # De-dupe: inchikey is UNIQUE in schema and may already exist without pubchem_id.
+                    if inchikey:
+                        cur.execute(
+                            "SELECT id FROM bio.compound WHERE inchikey = %s LIMIT 1",
+                            (inchikey,),
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-                        """,
-                        (
-                            cid,
-                            name,
-                            compound.get("molecular_formula"),
-                            compound.get("molecular_weight"),
-                            compound.get("canonical_smiles"),
-                            compound.get("inchi"),
-                            compound.get("inchi_key"),
-                            iupac_name,
-                            "pubchem",
-                            json.dumps({
-                                "xlogp": compound.get("xlogp"),
-                                "tpsa": compound.get("tpsa"),
-                                "complexity": compound.get("complexity"),
-                                "synonyms": compound.get("synonyms", []),
-                            }),
-                        ),
-                    )
-                    inserted += 1
+                        existing_by_inchikey = cur.fetchone()
+                    else:
+                        existing_by_inchikey = None
+
+                    if existing_by_inchikey:
+                        cur.execute(
+                            """
+                            UPDATE bio.compound SET
+                                pubchem_id = COALESCE(pubchem_id, %s),
+                                name = COALESCE(%s, name),
+                                iupac_name = COALESCE(%s, iupac_name),
+                                formula = %s,
+                                molecular_weight = %s,
+                                smiles = %s,
+                                inchi = %s,
+                                inchikey = %s,
+                                source = 'pubchem',
+                                metadata = %s::jsonb,
+                                updated_at = now()
+                            WHERE id = %s
+                            """,
+                            (
+                                cid,
+                                name,
+                                iupac_name,
+                                compound.get("molecular_formula"),
+                                compound.get("molecular_weight"),
+                                compound.get("canonical_smiles"),
+                                compound.get("inchi"),
+                                inchikey,
+                                json.dumps({
+                                    "xlogp": compound.get("xlogp"),
+                                    "tpsa": compound.get("tpsa"),
+                                    "complexity": compound.get("complexity"),
+                                    "synonyms": compound.get("synonyms", []),
+                                }),
+                                existing_by_inchikey["id"],
+                            ),
+                        )
+                        updated += 1
+                    else:
+                    # Insert new - using bio.compound schema
+                        cur.execute(
+                            """
+                            INSERT INTO bio.compound (
+                                pubchem_id, name, formula, molecular_weight,
+                                smiles, inchi, inchikey, iupac_name, source, metadata
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                            """,
+                            (
+                                cid,
+                                name,
+                                compound.get("molecular_formula"),
+                                compound.get("molecular_weight"),
+                                compound.get("canonical_smiles"),
+                                compound.get("inchi"),
+                                inchikey,
+                                iupac_name,
+                                "pubchem",
+                                json.dumps({
+                                    "xlogp": compound.get("xlogp"),
+                                    "tpsa": compound.get("tpsa"),
+                                    "complexity": compound.get("complexity"),
+                                    "synonyms": compound.get("synonyms", []),
+                                }),
+                            ),
+                        )
+                        inserted += 1
                     
             total = inserted + updated
             if total and total % 100 == 0:
@@ -149,6 +197,7 @@ def sync_mycotoxins(*, max_results: Optional[int] = None) -> int:
                 existing = cur.fetchone()
 
                 name = _safe_compound_name(compound)
+                inchikey = compound.get("inchi_key")
                 metadata = json.dumps({
                     "common_name": compound.get("common_name"),
                     "xlogp": compound.get("xlogp"),
@@ -184,28 +233,66 @@ def sync_mycotoxins(*, max_results: Optional[int] = None) -> int:
                         ),
                     )
                 else:
-                    cur.execute(
-                        """
-                        INSERT INTO bio.compound (
-                            pubchem_id, name, formula, molecular_weight,
-                            smiles, inchi, inchikey, compound_type, source, metadata
+                    if inchikey:
+                        cur.execute("SELECT id FROM bio.compound WHERE inchikey = %s LIMIT 1", (inchikey,))
+                        existing_by_inchikey = cur.fetchone()
+                    else:
+                        existing_by_inchikey = None
+
+                    if existing_by_inchikey:
+                        cur.execute(
+                            """
+                            UPDATE bio.compound SET
+                                pubchem_id = COALESCE(pubchem_id, %s),
+                                name = COALESCE(%s, name),
+                                formula = %s,
+                                molecular_weight = %s,
+                                smiles = %s,
+                                inchi = %s,
+                                inchikey = %s,
+                                compound_type = COALESCE(%s, compound_type),
+                                source = 'pubchem',
+                                metadata = %s::jsonb,
+                                updated_at = now()
+                            WHERE id = %s
+                            """,
+                            (
+                                cid,
+                                name,
+                                compound.get("molecular_formula"),
+                                compound.get("molecular_weight"),
+                                compound.get("canonical_smiles"),
+                                compound.get("inchi"),
+                                inchikey,
+                                "mycotoxin",
+                                metadata,
+                                existing_by_inchikey["id"],
+                            ),
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-                        """,
-                        (
-                            cid,
-                            name,
-                            compound.get("molecular_formula"),
-                            compound.get("molecular_weight"),
-                            compound.get("canonical_smiles"),
-                            compound.get("inchi"),
-                            compound.get("inchi_key"),
-                            "mycotoxin",
-                            "pubchem",
-                            metadata,
-                        ),
-                    )
-                    inserted += 1
+                        inserted += 1
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO bio.compound (
+                                pubchem_id, name, formula, molecular_weight,
+                                smiles, inchi, inchikey, compound_type, source, metadata
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                            """,
+                            (
+                                cid,
+                                name,
+                                compound.get("molecular_formula"),
+                                compound.get("molecular_weight"),
+                                compound.get("canonical_smiles"),
+                                compound.get("inchi"),
+                                inchikey,
+                                "mycotoxin",
+                                "pubchem",
+                                metadata,
+                            ),
+                        )
+                        inserted += 1
                     
             if inserted and inserted % 50 == 0:
                 conn.commit()
