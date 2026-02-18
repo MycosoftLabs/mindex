@@ -16,6 +16,7 @@ import os
 import re
 import string
 import time
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Generator, List, Optional, Tuple
@@ -23,7 +24,7 @@ from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
-from tenacity import retry, stop_after_attempt, wait_exponential, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_exponential, wait_fixed, retry_if_exception_type
 
 from ..config import settings
 
@@ -78,18 +79,32 @@ def save_to_local(data: list, filename: str, subdir: str = "mycobank") -> str:
 # STRATEGY 1: API-based fetching (may have issues)
 # =============================================================================
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def _api_search(client: httpx.Client, term: str) -> List[dict]:
     """Search MycoBank via JSON API."""
-    resp = client.get(
-        f"{MYCOBANK_API}/SearchSpecies",
-        params={"Name": term, "Start": 0, "Limit": 500},
-        timeout=settings.http_timeout,
-        headers={
-            "User-Agent": "MINDEX-ETL/1.0 (Mycosoft; contact@mycosoft.org)",
-            "Accept": "application/json",
-        },
+    # Retry only on transient network errors; do not retry 406/403 blocks.
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(2),
+        retry=retry_if_exception_type((httpx.RequestError,)),
+        reraise=True,
     )
+    def _do() -> httpx.Response:
+        return client.get(
+            f"{MYCOBANK_API}/SearchSpecies",
+            params={"Name": term, "Start": 0, "Limit": 500},
+            timeout=settings.http_timeout,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": MYCOBANK_BASE_URL + "/",
+            },
+        )
+
+    resp = _do()
+    # MycoBank frequently responds with 406 when automated clients are blocked.
+    if resp.status_code == 406:
+        raise httpx.HTTPStatusError("MycoBank API returned 406 (blocked)", request=resp.request, response=resp)
     resp.raise_for_status()
     
     # Handle empty or invalid responses
@@ -313,11 +328,12 @@ def download_mycobank_dump(output_dir: str = None) -> Optional[str]:
     print("ATTEMPTING MYCOBANK DATA DUMP DOWNLOAD")
     print("="*60)
     
-    with httpx.Client(follow_redirects=True) as client:
+    with httpx.Client(follow_redirects=True, headers=get_scraper_headers()) as client:
         for url in MYCOBANK_DUMP_URLS:
             try:
                 print(f"Trying: {url}")
-                response = client.head(url, timeout=30.0, headers=get_scraper_headers())
+                # Some endpoints may not support HEAD reliably; try GET headers fallback.
+                response = client.head(url, timeout=30.0)
                 
                 if response.status_code == 200:
                     # Download the file
@@ -333,6 +349,9 @@ def download_mycobank_dump(output_dir: str = None) -> Optional[str]:
                     
                     print(f"Downloaded to: {filepath}")
                     return str(filepath)
+                elif response.status_code in (403, 404, 406):
+                    # Not available / blocked
+                    print(f"  Not available (HTTP {response.status_code})")
                     
             except Exception as e:
                 print(f"  Failed: {e}")
@@ -360,6 +379,36 @@ def parse_mycobank_csv(filepath: str) -> Generator[Tuple[dict, List[str], str], 
             }
             
             yield map_record(record)
+
+
+def _find_first_csv_in_zip(zip_path: str) -> Optional[str]:
+    """Return the first CSV-like member name from a ZIP file."""
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for name in zf.namelist():
+            lname = name.lower()
+            if lname.endswith(".csv") or lname.endswith(".tsv"):
+                return name
+    return None
+
+
+def parse_mycobank_zip(zip_path: str, output_dir: Optional[str] = None) -> Generator[Tuple[dict, List[str], str], None, None]:
+    """
+    Parse a MycoBank ZIP dump by extracting the first CSV/TSV we can find.
+    """
+    output_dir = output_dir or str(Path(settings.local_data_dir) / "mycobank" / "extracted")
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    member = _find_first_csv_in_zip(zip_path)
+    if not member:
+        print("No CSV/TSV found inside MycoBank ZIP dump", flush=True)
+        return
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        extracted_path = str(Path(output_dir) / Path(member).name)
+        with zf.open(member, "r") as src, open(extracted_path, "wb") as dst:
+            dst.write(src.read())
+    # Delegate to CSV parser (utf-8-sig handling)
+    yield from parse_mycobank_csv(extracted_path)
 
 
 # =============================================================================
@@ -397,39 +446,44 @@ def iter_mycobank_taxa(
         dump_path = download_mycobank_dump()
         if dump_path:
             print(f"Using data dump: {dump_path}")
-            if dump_path.endswith(".csv"):
-                for item in parse_mycobank_csv(dump_path):
-                    yield item
-                    if save_locally:
-                        all_records.append(item)
-                return
+            try:
+                if dump_path.endswith(".csv"):
+                    for item in parse_mycobank_csv(dump_path):
+                        yield item
+                        if save_locally:
+                            all_records.append(item)
+                    return
+                if dump_path.endswith(".zip"):
+                    for item in parse_mycobank_zip(dump_path):
+                        yield item
+                        if save_locally:
+                            all_records.append(item)
+                    return
+            except Exception as e:
+                print(f"Failed to parse dump '{dump_path}': {e}", flush=True)
     
-    # Strategy 2: Try API
-    print("Trying API method...")
-    api_worked = False
-    
-    try:
-        count = 0
-        for item in iter_mycobank_api(prefixes=prefixes, client=client):
-            yield item
-            count += 1
-            if save_locally:
-                all_records.append(item)
-        
-        if count > 0:
-            api_worked = True
-            print(f"API method successful: {count} records")
-    except Exception as e:
-        print(f"API method failed: {e}")
-    
-    # Strategy 3: Fall back to web scraping
-    if not api_worked and use_scraping:
+    # Strategy 2: Web scraping (prefer over API because API often returns 406)
+    if use_scraping:
         print("Falling back to web scraping...")
         
         for item in iter_mycobank_scrape(prefixes=prefixes, client=client):
             yield item
             if save_locally:
                 all_records.append(item)
+
+        # If scraping worked at all, do not attempt API.
+        if all_records:
+            return
+
+    # Strategy 3: Try API last (often blocked)
+    print("Trying API method (last resort)...")
+    try:
+        for item in iter_mycobank_api(prefixes=prefixes, client=client):
+            yield item
+            if save_locally:
+                all_records.append(item)
+    except Exception as e:
+        print(f"API method failed: {e}", flush=True)
     
     # Save all records locally
     if save_locally and all_records:
