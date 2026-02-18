@@ -115,7 +115,7 @@ class MultiSourceImageFetcher:
     # iNaturalist - Primary Source
     # =========================================================================
     
-    async def fetch_inat_images(self, species_name: str, limit: int = 5) -> List[ImageResult]:
+    async def fetch_inat_images(self, species_name: str, limit: int = 8) -> List[ImageResult]:
         """Fetch images from iNaturalist API."""
         results = []
         await self._rate_limit("inat", 0.3)
@@ -174,7 +174,7 @@ class MultiSourceImageFetcher:
             
             if obs_resp.status_code == 200:
                 for obs in obs_resp.json().get("results", []):
-                    for photo in obs.get("photos", [])[:2]:  # Max 2 per observation
+                    for photo in obs.get("photos", [])[:3]:  # Max 3 per observation to reach target 8
                         url = photo.get("url", "")
                         if url and len(results) < limit:
                             quality = 80
@@ -285,7 +285,7 @@ class MultiSourceImageFetcher:
     # GBIF (occurrence photos)
     # =========================================================================
     
-    async def fetch_gbif_images(self, species_name: str, limit: int = 5) -> List[ImageResult]:
+    async def fetch_gbif_images(self, species_name: str, limit: int = 8) -> List[ImageResult]:
         """Fetch images from GBIF occurrence records."""
         results = []
         await self._rate_limit("gbif", 0.3)
@@ -342,7 +342,7 @@ class MultiSourceImageFetcher:
     # Mushroom Observer
     # =========================================================================
     
-    async def fetch_mushroom_observer_images(self, species_name: str, limit: int = 5) -> List[ImageResult]:
+    async def fetch_mushroom_observer_images(self, species_name: str, limit: int = 8) -> List[ImageResult]:
         """Fetch images from Mushroom Observer."""
         results = []
         await self._rate_limit("mushroom_observer", 0.5)
@@ -403,7 +403,7 @@ class MultiSourceImageFetcher:
     # Flickr (Creative Commons)
     # =========================================================================
     
-    async def fetch_flickr_images(self, species_name: str, limit: int = 5) -> List[ImageResult]:
+    async def fetch_flickr_images(self, species_name: str, limit: int = 8) -> List[ImageResult]:
         """Fetch images from Flickr (CC licensed)."""
         results = []
         await self._rate_limit("flickr", 0.5)
@@ -457,7 +457,7 @@ class MultiSourceImageFetcher:
     # Bing Image Search (web scraping fallback)
     # =========================================================================
     
-    async def fetch_bing_images(self, species_name: str, limit: int = 3) -> List[ImageResult]:
+    async def fetch_bing_images(self, species_name: str, limit: int = 5) -> List[ImageResult]:
         """Scrape images from Bing Image Search (fallback)."""
         results = []
         await self._rate_limit("bing", 1.0)  # Be conservative
@@ -550,6 +550,30 @@ class MultiSourceImageFetcher:
         
         all_results.sort(key=sort_key, reverse=True)
         return all_results
+    
+    async def find_images_for_species(
+        self,
+        species_name: str,
+        target_count: int = 8,
+        sources: Optional[List[str]] = None,
+    ) -> List[ImageResult]:
+        """
+        Find up to target_count images for a species from multiple sources.
+        
+        Deduplicates by URL and returns highest-quality images first.
+        Target is 8 per species for Ancestry gallery display.
+        """
+        all_images = await self.find_all_images(species_name, sources)
+        seen_urls: set = set()
+        unique: List[ImageResult] = []
+        for img in all_images:
+            url = img.url or img.medium_url or img.original_url
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                unique.append(img)
+                if len(unique) >= target_count:
+                    break
+        return unique[:target_count]
     
     async def find_best_image(
         self,

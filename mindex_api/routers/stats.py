@@ -165,3 +165,100 @@ async def get_statistics(db: AsyncSession = Depends(get_db)):
     stats["etl_status"] = etl_status
     
     return MINDEXStatsResponse(**stats)
+
+
+# --- Species completeness (Ancestry data quality dashboard) ---
+
+class SpeciesCompletenessResponse(BaseModel):
+    """Species data completeness stats for Ancestry dashboard."""
+    total_species: int
+    with_images: int
+    with_description: int
+    with_genetics: int
+    missing_images: int
+    missing_description: int
+    missing_genetics: int
+    incomplete_count: int
+
+
+@router.get("/species-completeness", response_model=SpeciesCompletenessResponse)
+async def get_species_completeness_stats(db: AsyncSession = Depends(get_db)):
+    """
+    Get species data completeness statistics.
+    Used by Ancestry data quality dashboard.
+    """
+    rank_filter = "species"
+
+    # Total species
+    result = await db.execute(
+        text("SELECT count(*) FROM core.taxon WHERE rank = :rank"),
+        {"rank": rank_filter},
+    )
+    total = result.scalar() or 0
+
+    # With images (default_photo url)
+    result = await db.execute(
+        text("""
+            SELECT count(*) FROM core.taxon
+            WHERE rank = :rank
+            AND metadata->'default_photo'->>'url' IS NOT NULL
+            AND (metadata->'default_photo'->>'url') != ''
+        """),
+        {"rank": rank_filter},
+    )
+    with_images = result.scalar() or 0
+
+    # With description
+    result = await db.execute(
+        text("""
+            SELECT count(*) FROM core.taxon
+            WHERE rank = :rank
+            AND description IS NOT NULL AND trim(description) != ''
+        """),
+        {"rank": rank_filter},
+    )
+    with_description = result.scalar() or 0
+
+    # With genetics (has genetic_sequence)
+    try:
+        result = await db.execute(
+            text("""
+                SELECT count(DISTINCT t.id) FROM core.taxon t
+                INNER JOIN bio.genetic_sequence gs ON gs.taxon_id = t.id
+                WHERE t.rank = :rank
+            """),
+            {"rank": rank_filter},
+        )
+        with_genetics = result.scalar() or 0
+    except Exception:
+        with_genetics = 0
+
+    # Incomplete = missing image OR description
+    try:
+        result = await db.execute(
+            text("""
+                SELECT count(*) FROM core.taxon t
+                WHERE t.rank = :rank
+                AND (
+                    (t.metadata->'default_photo'->>'url') IS NULL
+                    OR (t.metadata->'default_photo'->>'url') = ''
+                    OR t.description IS NULL
+                    OR trim(t.description) = ''
+                )
+            """),
+            {"rank": rank_filter},
+        )
+        incomplete_count = result.scalar() or 0
+    except Exception:
+        incomplete_count = max(0, total - min(with_images, with_description))
+
+    return SpeciesCompletenessResponse(
+        total_species=total,
+        with_images=with_images,
+        with_description=with_description,
+        with_genetics=with_genetics,
+        missing_images=total - with_images,
+        missing_description=total - with_description,
+        missing_genetics=total - with_genetics,
+        incomplete_count=incomplete_count,
+    )

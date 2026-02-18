@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,9 +123,30 @@ async def list_taxa(
     )
 
 
+def _queue_incomplete_taxon(taxon_id: str, data: dict[str, Any]) -> None:
+    """Append taxon to viewed-incomplete queue if missing image or description."""
+    metadata = data.get("metadata") or {}
+    default_photo = metadata.get("default_photo") or {}
+    photo_url = default_photo.get("url") if isinstance(default_photo, dict) else None
+    has_image = bool(photo_url and str(photo_url).strip())
+    desc = data.get("description") or ""
+    has_description = bool(desc and str(desc).strip())
+    if has_image and has_description:
+        return
+    missing = []
+    if not has_image:
+        missing.append("image")
+    if not has_description:
+        missing.append("description")
+    from ..utils.enrichment_queue import append_viewed_incomplete
+
+    append_viewed_incomplete(str(taxon_id), data.get("canonical_name", "unknown"), missing=missing)
+
+
 @router.get("/{taxon_id}", response_model=TaxonResponse)
 async def get_taxon(
     taxon_id: UUID,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
     _api_key: Optional[str] = Depends(require_api_key),
 ) -> TaxonResponse:
@@ -167,4 +188,7 @@ async def get_taxon(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Taxon not found")
     data = dict(row)
     data["traits"] = data.get("traits") or []
+    # Queue incomplete taxa for ancestry_sync to prioritize enrichment
+    if data.get("rank") == "species":
+        background_tasks.add_task(_queue_incomplete_taxon, str(taxon_id), data)
     return TaxonResponse(**data)

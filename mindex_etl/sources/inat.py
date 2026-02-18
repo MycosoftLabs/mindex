@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -29,13 +30,36 @@ from ..config import settings
 FUNGI_TAXON_ID = 47170  # iNaturalist taxon ID for Fungi kingdom
 
 
+def sanitize_description(html: Optional[str]) -> Optional[str]:
+    """
+    Strip HTML tags from iNaturalist/Wikipedia descriptions.
+    Converts <b>, <strong> to plain text; <i>, <em> to plain text.
+    Removes all tags and normalizes whitespace.
+    """
+    if not html or not isinstance(html, str):
+        return None
+    # Replace common formatting tags with space (preserve word boundaries)
+    text = re.sub(r"<br\s*/?>", " ", html, flags=re.IGNORECASE)
+    text = re.sub(r"<p[^>]*>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p>", " ", text, flags=re.IGNORECASE)
+    # Strip all remaining HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Decode common entities
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
+    # Normalize whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text if text else None
+
+
 def map_inat_taxon(record: dict) -> dict:
     """Map iNaturalist record to MINDEX taxon format."""
+    raw_desc = record.get("wikipedia_summary") or record.get("description")
+    description = sanitize_description(raw_desc) if raw_desc else None
     return {
         "canonical_name": record.get("name"),
         "rank": record.get("rank") or "species",
         "common_name": record.get("preferred_common_name"),
-        "description": record.get("wikipedia_summary"),
+        "description": description,
         "source": "inat",
         "metadata": {
             "inat_id": record.get("id"),
