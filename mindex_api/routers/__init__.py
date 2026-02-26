@@ -14,6 +14,7 @@ from .compounds import router as compounds_router
 from .unified_search import router as unified_search_router
 from .research import router as research_router
 from .a2a_agent import router as a2a_agent_router
+from .grounding import router as grounding_router
 
 # TODO: Fix FCI router - has import issues
 # from .fci import router as fci_router
@@ -36,5 +37,6 @@ __all__ = [
     "unified_search_router",
     "research_router",
     "a2a_agent_router",
+    "grounding_router",
     # "fci_router",  # TODO: Fix import issues
 ]

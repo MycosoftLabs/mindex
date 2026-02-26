@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .routers import (
     a2a_agent_router,
+    grounding_router,
     compounds_router,
     devices_router,
     genetics_router,
@@ -104,6 +105,9 @@ def create_app() -> FastAPI:
     
     # A2A agent router (read-only search/stats for MAS delegation)
     app.include_router(a2a_agent_router, prefix=prefix)
+
+    # Grounding router (Grounded Cognition: spatial, episodes, EPs, thoughts, reflection)
+    app.include_router(grounding_router, prefix=prefix)
     
     # TODO: Re-enable after fixing import issues
     # app.include_router(fci_router, prefix=prefix)
