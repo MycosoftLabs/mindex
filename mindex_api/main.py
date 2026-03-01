@@ -54,6 +54,10 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    @app.get("/health")
+    async def root_health() -> dict:
+        return {"status": "healthy"}
+
     if settings.api_cors_origins:
         app.add_middleware(
             CORSMiddleware,
