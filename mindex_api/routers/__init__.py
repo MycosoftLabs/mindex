@@ -16,8 +16,7 @@ from .research import router as research_router
 from .a2a_agent import router as a2a_agent_router
 from .grounding import router as grounding_router
 
-# TODO: Fix FCI router - has import issues
-# from .fci import router as fci_router
+from .fci import router as fci_router
 
 __all__ = [
     "health_router",
@@ -38,5 +37,5 @@ __all__ = [
     "research_router",
     "a2a_agent_router",
     "grounding_router",
-    # "fci_router",  # TODO: Fix import issues
+    "fci_router",
 ]

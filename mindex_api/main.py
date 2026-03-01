@@ -9,6 +9,7 @@ from .routers import (
     grounding_router,
     compounds_router,
     devices_router,
+    fci_router,
     genetics_router,
     health_router,
     images_router,
@@ -24,9 +25,6 @@ from .routers import (
     drone_router,
     research_router,
 )
-
-# TODO: Re-enable after fixing import issues
-# from .routers import fci_router
 
 
 def create_app() -> FastAPI:
@@ -109,8 +107,8 @@ def create_app() -> FastAPI:
     # Grounding router (Grounded Cognition: spatial, episodes, EPs, thoughts, reflection)
     app.include_router(grounding_router, prefix=prefix)
     
-    # TODO: Re-enable after fixing import issues
-    # app.include_router(fci_router, prefix=prefix)
+    # FCI router (Fungal Computer Interface — bioelectric signals, patterns, GFST)
+    app.include_router(fci_router, prefix=prefix)
 
     return app
 
