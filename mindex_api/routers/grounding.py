@@ -285,6 +285,52 @@ async def close_current_episode(
 # --- Experience packets ---
 
 
+@router.get("/ep-summary", response_model=List[Dict[str, Any]])
+async def get_ep_summary(
+    session_id: Optional[str] = Query(None, description="Filter by session"),
+    limit: int = Query(10, ge=1, le=50, description="Max EPs to return"),
+    db: AsyncSession = Depends(get_db_session),
+) -> List[Dict[str, Any]]:
+    """
+    High-level EP summary for MYCA context injection.
+    Returns recent EPs with id, session_id, created_at, and a brief digest.
+    """
+    where = "session_id = :session_id" if session_id else "TRUE"
+    params: Dict[str, Any] = {"limit": limit}
+    if session_id:
+        params["session_id"] = session_id
+    stmt = text(
+        f"""
+        SELECT id, session_id, user_id, ground_truth, observation, created_at
+        FROM experience_packets
+        WHERE {where}
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """
+    )
+    result = await db.execute(stmt, params)
+    rows = result.fetchall()
+    out = []
+    for r in rows:
+        gt = r[3] or {}
+        obs = r[4] or {}
+        digest = ""
+        if isinstance(gt, dict) and gt:
+            keys = list(gt.keys())[:3]
+            digest = f"ground_truth: {', '.join(str(k) for k in keys)}"
+        if isinstance(obs, dict) and obs:
+            obs_keys = list(obs.keys())[:2]
+            digest = f"{digest}; observation: {', '.join(str(k) for k in obs_keys)}" if digest else f"observation: {', '.join(str(k) for k in obs_keys)}"
+        out.append({
+            "id": r[0],
+            "session_id": r[1],
+            "user_id": r[2],
+            "created_at": r[5].isoformat() if r[5] else None,
+            "digest": digest or "—",
+        })
+    return out
+
+
 class ExperiencePacketCreate(BaseModel):
     id: str
     session_id: Optional[str] = None
