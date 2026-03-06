@@ -297,6 +297,45 @@ class ExperiencePacketCreate(BaseModel):
     provenance: Optional[Dict[str, Any]] = None
 
 
+@router.get("/experience-packets", response_model=List[Dict[str, Any]])
+async def list_experience_packets(
+    session_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db_session),
+) -> List[Dict[str, Any]]:
+    """List experience packets, optionally filtered by session_id. Most recent first."""
+    where = "session_id = :session_id" if session_id else "TRUE"
+    params: Dict[str, Any] = {"limit": limit}
+    if session_id:
+        params["session_id"] = session_id
+    stmt = text(
+        f"""
+        SELECT id, session_id, user_id, ground_truth, self_state, world_state, observation, uncertainty, provenance, created_at
+        FROM experience_packets
+        WHERE {where}
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """
+    )
+    result = await db.execute(stmt, params)
+    rows = result.fetchall()
+    return [
+        {
+            "id": r[0],
+            "session_id": r[1],
+            "user_id": r[2],
+            "ground_truth": r[3],
+            "self_state": r[4],
+            "world_state": r[5],
+            "observation": r[6],
+            "uncertainty": r[7],
+            "provenance": r[8],
+            "created_at": r[9].isoformat() if r[9] else None,
+        }
+        for r in rows
+    ]
+
+
 @router.post("/experience-packets")
 async def create_experience_packet(
     body: ExperiencePacketCreate,

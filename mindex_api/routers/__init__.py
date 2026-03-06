@@ -17,6 +17,7 @@ from .a2a_agent import router as a2a_agent_router
 from .grounding import router as grounding_router
 
 from .fci import router as fci_router
+from .beta import router as beta_router
 
 __all__ = [
     "health_router",
@@ -38,4 +39,5 @@ __all__ = [
     "a2a_agent_router",
     "grounding_router",
     "fci_router",
+    "beta_router",
 ]

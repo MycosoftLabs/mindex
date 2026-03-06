@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .routers import (
     a2a_agent_router,
+    beta_router,
     grounding_router,
     compounds_router,
     devices_router,
@@ -110,6 +111,9 @@ def create_app() -> FastAPI:
 
     # Grounding router (Grounded Cognition: spatial, episodes, EPs, thoughts, reflection)
     app.include_router(grounding_router, prefix=prefix)
+
+    # Beta users router (onboarding, API key generation for revenue validation)
+    app.include_router(beta_router, prefix=prefix)
     
     # FCI router (Fungal Computer Interface — bioelectric signals, patterns, GFST)
     app.include_router(fci_router, prefix=prefix)
