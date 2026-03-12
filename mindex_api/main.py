@@ -25,6 +25,7 @@ from .routers import (
     wifisense_router,
     drone_router,
     research_router,
+    investigation_router,
 )
 
 
@@ -105,7 +106,10 @@ def create_app() -> FastAPI:
     
     # Research router (OpenAlex integration for research papers)
     app.include_router(research_router, prefix=prefix)
-    
+
+    # Investigation router (OpenPlanter-style artifacts and evidence-backed analysis)
+    app.include_router(investigation_router, prefix=prefix)
+
     # A2A agent router (read-only search/stats for MAS delegation)
     app.include_router(a2a_agent_router, prefix=prefix)
 

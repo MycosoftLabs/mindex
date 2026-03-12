@@ -13,6 +13,7 @@ from .genetics import router as genetics_router
 from .compounds import router as compounds_router
 from .unified_search import router as unified_search_router
 from .research import router as research_router
+from .investigation import router as investigation_router
 from .a2a_agent import router as a2a_agent_router
 from .grounding import router as grounding_router
 
@@ -36,6 +37,7 @@ __all__ = [
     "compounds_router",
     "unified_search_router",
     "research_router",
+    "investigation_router",
     "a2a_agent_router",
     "grounding_router",
     "fci_router",
