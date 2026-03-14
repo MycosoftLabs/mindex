@@ -58,11 +58,11 @@ class ETLSettings(BaseSettings):
         description="NAS directory for large data storage"
     )
 
-    # iNaturalist
+    # iNaturalist - token MUST come from env (INAT_API_TOKEN) - never hardcode
     inat_base_url: str = "https://api.inaturalist.org/v1"
     inat_api_token: str = Field(
-        default="eyJhbGciOiJIUzUxMiJ9.eyJ1c2VyX2lkIjoxMDAxOTc2OSwiZXhwIjoxNzY1OTE1MDY2fQ.JXV3lLOyuuXeItfNUagixJCtKN3SI20_em1sl2gKFFDppHBNJXy79x6I6jJbiPG1a6n_-cj1JgysSmuKlbDKVg",
-        description="iNaturalist API JWT token for authenticated requests"
+        default="",
+        description="iNaturalist API JWT token (set INAT_API_TOKEN env var). Required for higher rate limits.",
     )
     inat_rate_limit: float = 0.3  # Faster with API token (3 req/sec)
 

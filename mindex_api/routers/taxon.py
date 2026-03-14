@@ -21,6 +21,7 @@ router = APIRouter(
 async def list_taxa(
     pagination: PaginationParams = Depends(pagination_params),
     db: AsyncSession = Depends(get_db_session),
+    ids: Optional[str] = Query(None, description="Comma-separated taxon UUIDs for batch lookup (e.g., ?ids=uuid1,uuid2)."),
     q: Optional[str] = Query(None, description="Free-text search across canonical/common names."),
     rank: Optional[str] = Query(None, description="Exact rank filter."),
     source: Optional[str] = Query(None, description="Exact source filter (e.g., inat, gbif, mycobank)."),
@@ -52,6 +53,11 @@ async def list_taxa(
         prefix_pattern = f"{prefix}%"
         where_clauses.append("canonical_name ILIKE :prefix_pattern")
         params["prefix_pattern"] = prefix_pattern
+    if ids:
+        id_list = [x.strip() for x in ids.split(",") if x.strip()]
+        if id_list:
+            where_clauses.append("id = ANY(CAST(STRING_TO_ARRAY(:ids_csv, ',') AS uuid[]))")
+            params["ids_csv"] = ",".join(id_list)
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
 
