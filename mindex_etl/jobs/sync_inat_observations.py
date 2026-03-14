@@ -22,9 +22,8 @@ from tenacity import (
 from ..checkpoint import CheckpointManager
 from ..config import settings
 from ..db import db_session
+from ..sources import inat
 from ..taxon_canonicalizer import upsert_taxon
-
-FUNGI_TAXON_ID = 47170  # iNaturalist Fungi taxon ID
 
 
 @retry(
@@ -39,12 +38,13 @@ def _fetch_observations(
     per_page: int,
     quality_grade: str = "research",
     updated_since: Optional[str] = None,
+    taxon_id: Optional[int] = None,
 ) -> dict:
     """Fetch observations from iNaturalist API with exponential backoff retry."""
     import time
-    
+    root_id = taxon_id if taxon_id is not None else inat._root_taxon_id(settings.inat_domain_mode)
     params = {
-        "taxon_id": FUNGI_TAXON_ID,
+        "taxon_id": root_id,
         "quality_grade": quality_grade,
         "per_page": per_page,
         "page": page,
@@ -92,13 +92,16 @@ def iter_observations(
     quality_grade: str = "research",
     updated_since: Optional[str] = None,
     delay_seconds: float = 0.7,  # Increased to respect rate limits
+    domain_mode: Optional[str] = None,
 ) -> Generator[Dict, None, None]:
-    """Iterate through iNaturalist fungal observations."""
+    """Iterate through iNaturalist observations. domain_mode: 'all' or 'fungi' (default from config)."""
+    mode = domain_mode or settings.inat_domain_mode
+    taxon_id = inat._root_taxon_id(mode)
     with httpx.Client() as client:
         page = 1
         while True:
             payload = _fetch_observations(
-                client, page, per_page, quality_grade, updated_since
+                client, page, per_page, quality_grade, updated_since, taxon_id=taxon_id
             )
             results = payload.get("results", [])
             if not results:
@@ -163,14 +166,15 @@ def sync_inat_observations(
     quality_grade: str = "research",
     start_page: int = 1,
     checkpoint_manager: Optional[CheckpointManager] = None,
+    domain_mode: Optional[str] = None,
 ) -> int:
-    """Sync iNaturalist observations into MINDEX database with checkpoint support."""
+    """Sync iNaturalist observations into MINDEX database with checkpoint support. domain_mode: 'all' or 'fungi'."""
     inserted = 0
     checkpoint_interval = 10  # Save checkpoint every 10 pages
     page = start_page
 
     with db_session() as conn:
-        for obs in iter_observations(max_pages=max_pages, quality_grade=quality_grade):
+        for obs in iter_observations(max_pages=max_pages, quality_grade=quality_grade, domain_mode=domain_mode):
             taxon_name = obs.get("taxon_name")
             if not taxon_name:
                 continue
@@ -274,12 +278,14 @@ def sync_inat_observations(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Sync iNaturalist fungal observations")
+    parser = argparse.ArgumentParser(description="Sync iNaturalist observations")
     parser.add_argument("--max-pages", type=int, default=None)
     parser.add_argument("--quality-grade", default="research", choices=["research", "needs_id", "casual"])
+    parser.add_argument("--domain-mode", type=str, default=None, choices=["all", "fungi"],
+                        help="'all' for all life, 'fungi' for fungi-only (default from config)")
     args = parser.parse_args()
 
-    total = sync_inat_observations(max_pages=args.max_pages, quality_grade=args.quality_grade)
+    total = sync_inat_observations(max_pages=args.max_pages, quality_grade=args.quality_grade, domain_mode=args.domain_mode)
     print(f"Synced {total} iNaturalist observations")
 
 

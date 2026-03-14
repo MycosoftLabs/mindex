@@ -1,13 +1,15 @@
 """
 GBIF (Global Biodiversity Information Facility) Data Source
 ============================================================
-Fetch fungal occurrence and species data from GBIF API.
+Fetch occurrence and species data from GBIF API.
 https://www.gbif.org/developer/summary
+
+Supports configurable domain selectors: all-life, fungi-only, or future per-kingdom mode.
 """
 from __future__ import annotations
 
 import time
-from typing import Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -15,7 +17,28 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from ..config import settings
 
 GBIF_API = "https://api.gbif.org/v1"
-FUNGI_KINGDOM_KEY = 5  # GBIF key for Kingdom Fungi
+FUNGI_KINGDOM_KEY = 5  # GBIF key for Kingdom Fungi (used when domain_mode="fungi")
+
+
+def _species_root_params(domain_mode: str) -> Dict[str, int]:
+    """Return root filter params for species search based on domain_mode."""
+    mode = (domain_mode or getattr(settings, "gbif_domain_mode", "fungi")).strip().lower()
+    if mode == "all":
+        return {}
+    if mode == "fungi":
+        return {"highertaxonKey": FUNGI_KINGDOM_KEY}
+    # Future: "5,4" for fungi+plants -> would need different API usage
+    return {"highertaxonKey": FUNGI_KINGDOM_KEY}
+
+
+def _occurrence_root_params(domain_mode: str) -> Dict[str, int]:
+    """Return root filter params for occurrence search based on domain_mode."""
+    mode = (domain_mode or getattr(settings, "gbif_domain_mode", "fungi")).strip().lower()
+    if mode == "all":
+        return {}
+    if mode == "fungi":
+        return {"kingdomKey": FUNGI_KINGDOM_KEY}
+    return {"kingdomKey": FUNGI_KINGDOM_KEY}
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
@@ -23,19 +46,21 @@ def _fetch_species_page(
     client: httpx.Client,
     offset: int,
     limit: int,
+    domain_mode: str = "fungi",
 ) -> dict:
-    """Fetch species from GBIF Species API."""
+    """Fetch species from GBIF Species API with configurable root filter."""
+    params: Dict[str, Any] = {
+        "rank": "SPECIES",
+        "status": "ACCEPTED",
+        "offset": offset,
+        "limit": limit,
+    }
+    params.update(_species_root_params(domain_mode))
     resp = client.get(
         f"{GBIF_API}/species/search",
-        params={
-            "highertaxonKey": FUNGI_KINGDOM_KEY,
-            "rank": "SPECIES",
-            "status": "ACCEPTED",
-            "offset": offset,
-            "limit": limit,
-        },
+        params=params,
         timeout=60,  # Longer timeout for GBIF
-        headers={"User-Agent": "MINDEX-ETL/1.0 (Mycosoft Fungal Database; contact@mycosoft.org)"},
+        headers={"User-Agent": "MINDEX-ETL/1.0 (Mycosoft Biodiversity Database; contact@mycosoft.org)"},
     )
     resp.raise_for_status()
     return resp.json()
@@ -46,16 +71,17 @@ def _fetch_occurrences_page(
     client: httpx.Client,
     offset: int,
     limit: int,
+    domain_mode: str = "fungi",
     taxon_key: Optional[int] = None,
 ) -> dict:
-    """Fetch occurrence records from GBIF Occurrence API."""
-    params = {
-        "kingdomKey": FUNGI_KINGDOM_KEY,
+    """Fetch occurrence records from GBIF Occurrence API with configurable root filter."""
+    params: Dict[str, Any] = {
         "hasCoordinate": "true",
         "hasGeospatialIssue": "false",
         "offset": offset,
         "limit": limit,
     }
+    params.update(_occurrence_root_params(domain_mode))
     if taxon_key:
         params["taxonKey"] = taxon_key
 
@@ -138,13 +164,15 @@ def iter_gbif_species(
     limit: int = 100,
     max_pages: Optional[int] = None,
     delay_seconds: float = 0.3,
+    domain_mode: Optional[str] = None,
 ) -> Generator[Dict, None, None]:
-    """Iterate through GBIF fungal species."""
+    """Iterate through GBIF species with configurable domain (all-life or fungi-only)."""
+    mode = domain_mode or getattr(settings, "gbif_domain_mode", "fungi")
     with httpx.Client() as client:
         offset = 0
         page = 1
         while True:
-            payload = _fetch_species_page(client, offset, limit)
+            payload = _fetch_species_page(client, offset, limit, domain_mode=mode)
             results = payload.get("results", [])
 
             if not results:
@@ -171,13 +199,18 @@ def iter_gbif_occurrences(
     limit: int = 100,
     max_pages: Optional[int] = None,
     delay_seconds: float = 0.3,
+    domain_mode: Optional[str] = None,
+    taxon_key: Optional[int] = None,
 ) -> Generator[Dict, None, None]:
-    """Iterate through GBIF fungal occurrence records."""
+    """Iterate through GBIF occurrence records with configurable domain (all-life or fungi-only)."""
+    mode = domain_mode or getattr(settings, "gbif_domain_mode", "fungi")
     with httpx.Client() as client:
         offset = 0
         page = 1
         while True:
-            payload = _fetch_occurrences_page(client, offset, limit)
+            payload = _fetch_occurrences_page(
+                client, offset, limit, domain_mode=mode, taxon_key=taxon_key
+            )
             results = payload.get("results", [])
 
             if not results:

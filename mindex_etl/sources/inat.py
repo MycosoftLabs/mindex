@@ -1,10 +1,9 @@
 """
 iNaturalist Species Scraper
 
-Authenticated scraper for iNaturalist fungal taxa.
+Authenticated scraper for iNaturalist taxa.
 Uses API token for higher rate limits and better access.
-
-Target: 26,616+ fungal species
+Domain mode: "all" for all life, "fungi" for fungi-only (default).
 """
 
 from __future__ import annotations
@@ -27,7 +26,17 @@ from tenacity import (
 
 from ..config import settings
 
-FUNGI_TAXON_ID = 47170  # iNaturalist taxon ID for Fungi kingdom
+# iNaturalist taxon IDs
+FUNGI_TAXON_ID = 47170  # Fungi kingdom (default when domain_mode=fungi)
+LIFE_TAXON_ID = 1  # Life (root) - use for domain_mode=all
+
+
+def _root_taxon_id(domain_mode: Optional[str] = None) -> int:
+    """Return the root taxon ID for the given domain mode."""
+    mode = (domain_mode or getattr(settings, "inat_domain_mode", "fungi")).strip().lower()
+    if mode == "all":
+        return LIFE_TAXON_ID
+    return FUNGI_TAXON_ID
 
 
 def sanitize_description(html: Optional[str]) -> Optional[str]:
@@ -111,10 +120,17 @@ class ServiceDowntimeError(Exception):
     retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
     reraise=True,
 )
-def _fetch_page(client: httpx.Client, page: int, per_page: int, rank: str = None) -> dict:
+def _fetch_page(
+    client: httpx.Client,
+    page: int,
+    per_page: int,
+    rank: str = None,
+    domain_mode: Optional[str] = None,
+) -> dict:
     """Fetch a page from iNaturalist API with exponential backoff retry."""
+    root_id = _root_taxon_id(domain_mode)
     params = {
-        "taxon_id": FUNGI_TAXON_ID,
+        "taxon_id": root_id,
         "is_active": True,
         "order_by": "observations_count",
         "per_page": per_page,
@@ -156,7 +172,7 @@ def _fetch_page(client: httpx.Client, page: int, per_page: int, rank: str = None
     return response.json()
 
 
-def iter_fungi_taxa(
+def iter_inat_taxa(
     *,
     per_page: int = 200,  # Max allowed
     max_pages: Optional[int] = None,
@@ -164,21 +180,13 @@ def iter_fungi_taxa(
     client: Optional[httpx.Client] = None,
     save_locally: bool = True,
     rank: str = None,
+    domain_mode: Optional[str] = None,
 ) -> Generator[Dict, None, None]:
     """
-    Iterate over all fungal taxa from iNaturalist.
-    
-    Args:
-        per_page: Results per page (max 200)
-        max_pages: Maximum pages to fetch (None for all)
-        delay_seconds: Delay between requests (None uses config)
-        client: Optional HTTP client
-        save_locally: Whether to save raw data locally
-        rank: Filter by rank (species, genus, family, etc.)
-    
-    Yields:
-        Tuple of (mapped_taxon, source, external_id)
+    Iterate over iNaturalist taxa.
+    domain_mode: 'all' for all life (taxon_id=1), 'fungi' for fungi-only (default from config).
     """
+    mode = domain_mode or getattr(settings, "inat_domain_mode", "fungi")
     per_page = min(per_page, 200)
     delay = delay_seconds if delay_seconds is not None else settings.inat_rate_limit
     
@@ -196,7 +204,7 @@ def iter_fungi_taxa(
         while True:
             print(f"Fetching iNaturalist page {page}...", flush=True)
             
-            payload = _fetch_page(client, page, per_page, rank)
+            payload = _fetch_page(client, page, per_page, rank, domain_mode=mode)
             results = payload.get("results", [])
             
             if total_results is None:
@@ -231,7 +239,7 @@ def iter_fungi_taxa(
         # Save all records locally
         if save_locally and all_records:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"inat_fungi_{rank or 'all'}_{timestamp}.json"
+            filename = f"inat_{mode}_{rank or 'all'}_{timestamp}.json"
             filepath = save_to_local(all_records, filename)
             print(f"Saved {len(all_records)} records to {filepath}", flush=True)
             
@@ -240,17 +248,37 @@ def iter_fungi_taxa(
             client.close()
 
 
-def download_all_fungi_taxa(output_dir: str = None) -> str:
+def iter_fungi_taxa(
+    *,
+    per_page: int = 200,
+    max_pages: Optional[int] = None,
+    delay_seconds: float = None,
+    client: Optional[httpx.Client] = None,
+    save_locally: bool = True,
+    rank: str = None,
+) -> Generator[Dict, None, None]:
     """
-    Download ALL fungal taxa from iNaturalist to local storage.
-    
-    This is a complete dump - saves everything for offline processing.
-    
-    Args:
-        output_dir: Directory to save data (uses config default if None)
-    
-    Returns:
-        Path to the saved JSON file
+    Iterate over fungal taxa from iNaturalist (preserves fungi-specific wrapper).
+    For configurable domain, use iter_inat_taxa(domain_mode=...).
+    """
+    return iter_inat_taxa(
+        per_page=per_page,
+        max_pages=max_pages,
+        delay_seconds=delay_seconds,
+        client=client,
+        save_locally=save_locally,
+        rank=rank,
+        domain_mode="fungi",
+    )
+
+
+def download_all_fungi_taxa(
+    output_dir: str = None,
+    domain_mode: Optional[str] = None,
+) -> str:
+    """
+    Download iNaturalist taxa to local storage.
+    domain_mode: 'all' for all life, 'fungi' for fungi-only (default from config).
     """
     output_dir = output_dir or settings.local_data_dir
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -258,8 +286,9 @@ def download_all_fungi_taxa(output_dir: str = None) -> str:
     all_taxa = []
     ranks = ["kingdom", "phylum", "class", "order", "family", "genus", "species", "subspecies", "variety"]
     
+    mode = domain_mode or getattr(settings, "inat_domain_mode", "fungi")
     print("="*60)
-    print("DOWNLOADING ALL INATURALIST FUNGI DATA")
+    print(f"DOWNLOADING INATURALIST DATA (domain_mode={mode})")
     print("="*60)
     
     with httpx.Client() as client:
@@ -268,11 +297,12 @@ def download_all_fungi_taxa(output_dir: str = None) -> str:
             rank_taxa = []
             
             try:
-                for taxon, source, ext_id in iter_fungi_taxa(
+                for taxon, source, ext_id in iter_inat_taxa(
                     client=client,
                     rank=rank,
                     save_locally=False,  # We'll save everything at the end
                     max_pages=None,  # Get all
+                    domain_mode=mode,
                 ):
                     rank_taxa.append({
                         "taxon": taxon,
@@ -289,7 +319,7 @@ def download_all_fungi_taxa(output_dir: str = None) -> str:
     
     # Save complete dump
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"inat_fungi_complete_{timestamp}.json"
+    filename = f"inat_{mode}_complete_{timestamp}.json"
     filepath = Path(output_dir) / "inat" / filename
     filepath.parent.mkdir(parents=True, exist_ok=True)
     
@@ -309,14 +339,16 @@ def download_all_fungi_taxa(output_dir: str = None) -> str:
 
 
 # Observations scraper (for future use)
-def iter_fungi_observations(
+def iter_inat_observations(
     *,
-    taxon_id: int = FUNGI_TAXON_ID,
+    taxon_id: Optional[int] = None,
     per_page: int = 200,
     max_pages: Optional[int] = None,
     client: Optional[httpx.Client] = None,
+    domain_mode: Optional[str] = None,
 ) -> Generator[dict, None, None]:
-    """Iterate over fungal observations from iNaturalist."""
+    """Iterate over observations from iNaturalist. taxon_id defaults from domain_mode."""
+    root_id = taxon_id if taxon_id is not None else _root_taxon_id(domain_mode)
     close_client = False
     if client is None:
         client = httpx.Client()
@@ -328,7 +360,7 @@ def iter_fungi_observations(
             response = client.get(
                 f"{settings.inat_base_url}/observations",
                 params={
-                    "taxon_id": taxon_id,
+                    "taxon_id": root_id,
                     "quality_grade": "research",
                     "per_page": per_page,
                     "page": page,
@@ -356,3 +388,20 @@ def iter_fungi_observations(
     finally:
         if close_client:
             client.close()
+
+
+def iter_fungi_observations(
+    *,
+    taxon_id: int = FUNGI_TAXON_ID,
+    per_page: int = 200,
+    max_pages: Optional[int] = None,
+    client: Optional[httpx.Client] = None,
+) -> Generator[dict, None, None]:
+    """Iterate over fungal observations (preserves fungi-specific wrapper)."""
+    return iter_inat_observations(
+        taxon_id=taxon_id,
+        per_page=per_page,
+        max_pages=max_pages,
+        client=client,
+        domain_mode="fungi",
+    )

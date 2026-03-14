@@ -1,7 +1,8 @@
 """
 Master ETL Runner for MINDEX
 ============================
-Orchestrates all data source syncs to populate and maintain the fungal database.
+Orchestrates all data source syncs to populate and maintain the biodiversity database.
+Domain mode: use --domain-mode all for all-life ingestion, or fungi (default) for fungi-only.
 
 Usage:
     python -m mindex_etl.jobs.run_all --full          # Full initial sync
@@ -102,7 +103,7 @@ def create_job_registry() -> Dict[str, ETLJob]:
             source="iNaturalist",
             run_func=sync_inat_taxa,
             priority=10,
-            description="Sync fungal taxonomy from iNaturalist API (~26,616 species)",
+            description="Sync taxonomy from iNaturalist (domain-mode: all or fungi)",
         ),
         "mycobank": ETLJob(
             name="mycobank",
@@ -151,14 +152,14 @@ def create_job_registry() -> Dict[str, ETLJob]:
             source="iNaturalist",
             run_func=sync_inat_observations,
             priority=50,
-            description="Sync observations with locations and images",
+            description="Sync observations with locations and images (domain-mode: all or fungi)",
         ),
         "gbif": ETLJob(
             name="gbif",
             source="GBIF",
             run_func=sync_gbif_occurrences,
             priority=60,
-            description="Sync occurrence records from GBIF (~50,000+ occurrences)",
+            description="Sync occurrence records from GBIF (domain-mode: all or fungi)",
         ),
         # Additional jobs from remediation plan
         "hq_media": ETLJob(
@@ -189,6 +190,7 @@ def run_etl(
     jobs: Optional[List[str]] = None,
     full_sync: bool = False,
     max_pages: Optional[int] = None,
+    domain_mode: Optional[str] = None,
 ) -> Dict[str, int]:
     """Run ETL jobs and return results."""
     registry = create_job_registry()
@@ -200,17 +202,23 @@ def run_etl(
     else:
         job_list = sorted(registry.values(), key=lambda x: x.priority)
 
-    # Configure limits for incremental vs full sync
-    kwargs = {}
-    if not full_sync:
-        kwargs["max_pages"] = max_pages or 5  # Small batches for incremental
-    elif max_pages:
-        kwargs["max_pages"] = max_pages
+    # Jobs that support domain_mode (all-life vs fungi-only)
+    DOMAIN_MODE_JOBS = {"inat_taxa", "inat_obs", "gbif"}
 
     logger.info(f"Starting ETL run with {len(job_list)} jobs...")
     logger.info(f"Mode: {'FULL SYNC' if full_sync else 'INCREMENTAL'}")
+    if domain_mode:
+        logger.info(f"Domain mode: {domain_mode} (applies to inat_taxa, inat_obs, gbif)")
 
     for job in job_list:
+        kwargs: Dict[str, object] = {}
+        if not full_sync:
+            kwargs["max_pages"] = max_pages or 5
+        elif max_pages:
+            kwargs["max_pages"] = max_pages
+        if domain_mode and job.name in DOMAIN_MODE_JOBS:
+            kwargs["domain_mode"] = domain_mode
+
         logger.info(f"[{job.name}] Starting: {job.description}")
         start_time = time.time()
 
@@ -265,6 +273,7 @@ Examples:
     parser.add_argument("--full", action="store_true", help="Run full sync (no page limits)")
     parser.add_argument("--incremental", action="store_true", help="Run incremental sync (default)")
     parser.add_argument("--max-pages", type=int, default=None, help="Maximum pages to fetch per source")
+    parser.add_argument("--domain-mode", choices=["all", "fungi"], default=None, help="Override domain: 'all' for all-life, 'fungi' for fungi-only (default from config)")
     parser.add_argument("--jobs", nargs="+", help="Specific jobs to run")
     parser.add_argument("--list-jobs", action="store_true", help="List available jobs and exit")
 
@@ -284,6 +293,7 @@ Examples:
         jobs=args.jobs,
         full_sync=full_sync,
         max_pages=args.max_pages,
+        domain_mode=args.domain_mode,
     )
 
     log_run_summary(results)

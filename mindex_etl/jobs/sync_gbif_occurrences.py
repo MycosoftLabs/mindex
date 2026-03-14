@@ -1,7 +1,8 @@
 """
 GBIF Occurrences Sync
 =====================
-Sync fungal occurrence records from GBIF (Global Biodiversity Information Facility).
+Sync occurrence records from GBIF (Global Biodiversity Information Facility).
+Domain mode: "all" for all life, "fungi" for fungi-only (default).
 """
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import argparse
 import json
 from typing import Optional
 
+from ..config import settings
 from ..db import db_session
 from ..sources import gbif
 from ..taxon_canonicalizer import link_external_id, upsert_taxon
@@ -45,15 +47,21 @@ def sync_gbif_occurrences(
     max_pages: Optional[int] = None,
     sync_species: bool = True,
     sync_occurrences: bool = True,
+    domain_mode: Optional[str] = None,
 ) -> int:
-    """Sync GBIF occurrences into MINDEX database."""
+    """Sync GBIF occurrences into MINDEX database.
+    domain_mode: 'all' for all life, 'fungi' for fungi-only (default from config).
+    """
+    mode = domain_mode or settings.gbif_domain_mode
     species_processed = 0
     occ_inserted = 0
 
     with db_session() as conn:
         # First sync species
         if sync_species:
-            for species in gbif.iter_gbif_species(max_pages=max_pages):
+            for species in gbif.iter_gbif_species(
+                max_pages=max_pages, domain_mode=mode
+            ):
                 taxon_id = upsert_taxon(conn, **species)
                 species_processed += 1
                 gbif_key = species.get("metadata", {}).get("gbif_key")
@@ -68,7 +76,9 @@ def sync_gbif_occurrences(
 
         # Then sync occurrences
         if sync_occurrences:
-            for obs in gbif.iter_gbif_occurrences(max_pages=max_pages):
+            for obs in gbif.iter_gbif_occurrences(
+                max_pages=max_pages, domain_mode=mode
+            ):
                 taxon_name = obs.get("taxon_name")
                 if not taxon_name:
                     continue
@@ -145,11 +155,21 @@ def sync_gbif_occurrences(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Sync GBIF fungal occurrences")
+    parser = argparse.ArgumentParser(
+        description="Sync GBIF occurrences (default: fungi; use --domain-mode all for all life)"
+    )
     parser.add_argument("--max-pages", type=int, default=None)
+    parser.add_argument(
+        "--domain-mode",
+        choices=("all", "fungi"),
+        default=None,
+        help="Domain: 'all' for all life, 'fungi' for fungi-only (default: from config)",
+    )
     args = parser.parse_args()
 
-    total = sync_gbif_occurrences(max_pages=args.max_pages)
+    total = sync_gbif_occurrences(
+        max_pages=args.max_pages, domain_mode=args.domain_mode
+    )
     print(f"Synced {total} GBIF occurrences")
 
 
