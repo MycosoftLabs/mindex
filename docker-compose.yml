@@ -1,22 +1,29 @@
 version: '3.9'
 
-# MINDEX Standalone Docker Compose
-# ================================
-# This compose file runs MINDEX with its own PostgreSQL database.
-# For integration with the full Mycosoft ecosystem, use docker-compose.mycosoft.yml
-# at C:\Users\admin2\Desktop\MYCOSOFT\CODE\docker-compose.mycosoft.yml
+# MINDEX Earth Data Platform — Docker Compose
+# =============================================
+# Full stack: PostgreSQL + Redis + API + ETL + Earth Sync
+#
+# Architecture:
+#   PostgreSQL (hot, <5ms) → Redis (cache, <1ms) → Supabase (cloud, <50ms) → NAS (cold)
 #
 # Usage:
-#   docker compose up -d              # Start MINDEX standalone
-#   docker compose up -d --build      # Rebuild and start
-#   docker compose logs -f api        # Watch API logs
-#   docker compose down -v            # Stop and remove volumes
+#   docker compose up -d                          # Start core (db + redis + api)
+#   docker compose --profile etl up -d            # Start with ETL worker
+#   docker compose --profile earth up -d          # Start with Earth data sync
+#   docker compose --profile init up etl-init     # One-time data load
+#   docker compose --profile full up -d           # Start everything
+#   docker compose logs -f api                    # Watch API logs
+#   docker compose down -v                        # Stop and remove volumes
 
 networks:
   mindex-network:
     driver: bridge
 
 services:
+  # =========================================================================
+  # PostgreSQL + PostGIS (HOT TIER — <5ms)
+  # =========================================================================
   db:
     image: postgis/postgis:16-3.4
     container_name: mindex-postgres
@@ -38,6 +45,29 @@ services:
       - mindex-network
     restart: unless-stopped
 
+  # =========================================================================
+  # Redis (CACHE TIER — <1ms)
+  # =========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: mindex-redis
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --save ""
+    ports:
+      - "${MINDEX_REDIS_PORT:-6379}:6379"
+    volumes:
+      - mindex-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - mindex-network
+    restart: unless-stopped
+
+  # =========================================================================
+  # MINDEX API (FastAPI)
+  # =========================================================================
   api:
     build:
       context: .
@@ -53,20 +83,37 @@ services:
       MINDEX_DB_USER: ${MINDEX_DB_USER:-mindex}
       MINDEX_DB_PASSWORD: ${MINDEX_DB_PASSWORD:-mindex}
       MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
-      
+
+      # Redis Cache
+      REDIS_URL: redis://redis:6379/0
+
+      # Supabase (cloud middleware)
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+
+      # NAS Storage
+      NAS_MOUNT_PATH: ${NAS_MOUNT_PATH:-/mnt/nas/mindex}
+
       # API Configuration
       API_TITLE: "MINDEX API"
-      API_VERSION: "0.1.0"
+      API_VERSION: "3.0.0"
       API_PREFIX: "/api/mindex"
       API_KEYS: '["${MINDEX_API_KEY:-change-me}"]'
-      
-      # CORS - Allow NatureOS and other local services
-      API_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002","http://127.0.0.1:3000","http://natureos-web:3000"]'
-      
+
+      # CORS - Allow NatureOS, CREP, and other local services
+      API_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002","http://127.0.0.1:3000","http://natureos-web:3000","http://crep-web:3000"]'
+
+      # Earth data API keys (optional, enables higher rate limits)
+      NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
+      NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
+
       # Git SHA for version endpoint
       GIT_SHA: ${GIT_SHA:-}
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "${MINDEX_API_PORT:-8000}:8000"
@@ -74,6 +121,8 @@ services:
       # Hot reload for development
       - ./mindex_api:/app/mindex_api:ro
       - ./mindex_etl:/app/mindex_etl:ro
+      # NAS mount (if available)
+      - ${NAS_MOUNT_PATH:-/mnt/nas/mindex}:/mnt/nas/mindex:rw
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/mindex/health"]
       interval: 30s
@@ -84,7 +133,9 @@ services:
       - mindex-network
     restart: unless-stopped
 
-  # ETL Worker - runs data sync jobs on a schedule
+  # =========================================================================
+  # ETL Worker — Legacy data sync (fungi, compounds, genetics)
+  # =========================================================================
   etl:
     build:
       context: .
@@ -92,13 +143,56 @@ services:
     container_name: mindex-etl
     command: python -m mindex_etl.scheduler --interval 60
     environment:
-      # Database (internal Docker network)
       MINDEX_DB_HOST: db
       MINDEX_DB_PORT: 5432
       MINDEX_DB_USER: ${MINDEX_DB_USER:-mindex}
       MINDEX_DB_PASSWORD: ${MINDEX_DB_PASSWORD:-mindex}
       MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
       DATABASE_URL: postgresql://${MINDEX_DB_USER:-mindex}:${MINDEX_DB_PASSWORD:-mindex}@db:5432/${MINDEX_DB_NAME:-mindex}
+      REDIS_URL: redis://redis:6379/0
+      NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
+      NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./mindex_etl:/app/mindex_etl:ro
+      - ${NAS_MOUNT_PATH:-/mnt/nas/mindex}:/mnt/nas/mindex:rw
+    networks:
+      - mindex-network
+    restart: unless-stopped
+    profiles:
+      - etl
+      - full
+
+  # =========================================================================
+  # Earth Data Sync — Real-time planetary data ingestion
+  # =========================================================================
+  earth-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mindex-earth-sync
+    command: python -c "
+      import time, logging;
+      logging.basicConfig(level=logging.INFO);
+      from mindex_etl.jobs.sync_earth_data import run_realtime_sync;
+      while True:
+        try:
+          run_realtime_sync()
+        except Exception as e:
+          logging.error(f'Earth sync error: {e}');
+        time.sleep(900)
+      "
+    environment:
+      MINDEX_DB_HOST: db
+      MINDEX_DB_PORT: 5432
+      MINDEX_DB_USER: ${MINDEX_DB_USER:-mindex}
+      MINDEX_DB_PASSWORD: ${MINDEX_DB_PASSWORD:-mindex}
+      MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
+      DATABASE_URL: postgresql://${MINDEX_DB_USER:-mindex}:${MINDEX_DB_PASSWORD:-mindex}@db:5432/${MINDEX_DB_NAME:-mindex}
+      NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
+      NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -108,9 +202,12 @@ services:
       - mindex-network
     restart: unless-stopped
     profiles:
-      - etl  # Only start with: docker compose --profile etl up
+      - earth
+      - full
 
+  # =========================================================================
   # One-time initial data load
+  # =========================================================================
   etl-init:
     build:
       context: .
@@ -132,7 +229,8 @@ services:
     networks:
       - mindex-network
     profiles:
-      - init  # Only run with: docker compose --profile init up etl-init
+      - init
 
 volumes:
   mindex-postgres-data:
+  mindex-redis-data:

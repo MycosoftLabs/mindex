@@ -71,6 +71,48 @@ class Settings(BaseSettings):
             return [raw]
         return v
 
+    # =========================================================================
+    # SUPABASE (Cloud Middleware)
+    # =========================================================================
+
+    supabase_url: Optional[str] = Field(
+        default=None,
+        description="Supabase project URL (e.g., https://xxx.supabase.co). Set SUPABASE_URL env var.",
+    )
+    supabase_anon_key: Optional[str] = Field(
+        default=None,
+        description="Supabase anon/public key for client-side access.",
+    )
+    supabase_service_role_key: Optional[str] = Field(
+        default=None,
+        description="Supabase service role key for server-side operations (upserts, storage, realtime).",
+    )
+
+    # =========================================================================
+    # REDIS (Cache Layer)
+    # =========================================================================
+
+    redis_url: Optional[str] = Field(
+        default=None,
+        description="Redis URL (e.g., redis://localhost:6379/0). Falls back to in-process LRU if not set.",
+    )
+    redis_search_ttl: int = Field(120, description="TTL for cached search results (seconds)")
+    redis_entity_ttl: int = Field(600, description="TTL for cached entities (seconds)")
+    redis_map_ttl: int = Field(60, description="TTL for cached map layer tiles (seconds)")
+
+    # =========================================================================
+    # NAS (Cold Storage - Ubiquiti)
+    # =========================================================================
+
+    nas_mount_path: str = Field(
+        default="/mnt/nas/mindex",
+        description="NAS mount point for cold storage (16TB base, expandable to ~178TB).",
+    )
+    local_staging_path: str = Field(
+        default="/tmp/mindex_staging",
+        description="Local staging area for data before NAS write.",
+    )
+
     # Integrations
     hypergraph_endpoint: Optional[AnyHttpUrl] = None
     bitcoin_ordinal_endpoint: Optional[AnyHttpUrl] = None

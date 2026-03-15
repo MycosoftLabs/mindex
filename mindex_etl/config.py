@@ -109,6 +109,100 @@ class ETLSettings(BaseSettings):
     chemspider_rate_limit: float = 0.6  # ~100 requests/minute
     chemspider_cache_ttl: int = 86400  # 24 hours cache
 
+    # =========================================================================
+    # EARTH-SCALE DATA SOURCES
+    # =========================================================================
+
+    # --- USGS Earthquake Hazards ---
+    usgs_earthquake_api: str = "https://earthquake.usgs.gov/fdsnws/event/1"
+    usgs_min_magnitude: float = 2.5
+
+    # --- NASA ---
+    nasa_api_key: Optional[str] = Field(
+        default=None,
+        description="NASA API key (DEMO_KEY works with rate limits). Get from https://api.nasa.gov/",
+    )
+    nasa_firms_map_key: Optional[str] = Field(
+        default=None,
+        description="NASA FIRMS MAP_KEY for fire/hotspot data. Get from https://firms.modaps.eosdis.nasa.gov/api/",
+    )
+
+    # --- NOAA ---
+    noaa_swpc_api: str = "https://services.swpc.noaa.gov"
+    noaa_ndbc_api: str = "https://www.ndbc.noaa.gov/data/realtime2"
+    noaa_nws_api: str = "https://api.weather.gov"
+    noaa_gml_api: str = "https://gml.noaa.gov/webdata"
+
+    # --- Air Quality ---
+    openaq_api: str = "https://api.openaq.org/v2"
+    airnow_api_key: Optional[str] = Field(
+        default=None,
+        description="EPA AirNow API key for US air quality data.",
+    )
+
+    # --- Aviation (ADS-B) ---
+    opensky_api: str = "https://opensky-network.org/api"
+    opensky_username: Optional[str] = None
+    opensky_password: Optional[str] = None
+    adsb_exchange_api_key: Optional[str] = Field(
+        default=None,
+        description="ADS-B Exchange API key for extended aircraft data.",
+    )
+
+    # --- Maritime (AIS) ---
+    aishub_api_key: Optional[str] = Field(
+        default=None,
+        description="AISHub API key for vessel tracking data.",
+    )
+
+    # --- Cell Towers / Antennas ---
+    opencellid_api_key: Optional[str] = Field(
+        default=None,
+        description="OpenCellID API key for cell tower locations.",
+    )
+
+    # --- WiFi / Bluetooth ---
+    wigle_api_name: Optional[str] = Field(
+        default=None,
+        description="WiGLE API name for WiFi/BT network data.",
+    )
+    wigle_api_token: Optional[str] = Field(
+        default=None,
+        description="WiGLE API token.",
+    )
+
+    # --- Infrastructure ---
+    eia_api_key: Optional[str] = Field(
+        default=None,
+        description="US Energy Information Administration API key.",
+    )
+
+    # --- Satellites ---
+    celestrak_api: str = "https://celestrak.org"
+    spacetrack_username: Optional[str] = None
+    spacetrack_password: Optional[str] = None
+
+    # --- Space Launches ---
+    launch_library_api: str = "https://ll.thespacedevs.com/2.2.0"
+
+    # --- Domain mode for all-life ingestion ---
+    # "all" = ingest all kingdoms (plants, animals, fungi, etc.)
+    # "fungi" = fungi only (legacy default)
+    earth_domain_mode: str = Field(
+        default="all",
+        description="Global domain mode: 'all' for full planetary data, 'fungi' for legacy fungi-only.",
+    )
+
+    # --- Ingestion scheduling ---
+    earth_sync_interval_minutes: int = Field(
+        default=15,
+        description="How often to poll real-time feeds (earthquakes, aircraft, vessels, weather).",
+    )
+    earth_full_sync_interval_hours: int = Field(
+        default=24,
+        description="How often to run full catalog syncs (satellites, facilities, ports, airports).",
+    )
+
     # Batch sizes
     batch_size: int = 100
     max_concurrent_requests: int = 5
