@@ -10,6 +10,7 @@ from .routers import (
     grounding_router,
     compounds_router,
     devices_router,
+    earth_router,
     fci_router,
     genetics_router,
     health_router,
@@ -47,9 +48,12 @@ def create_app() -> FastAPI:
         title=settings.api_title,
         version=settings.api_version,
         description=(
-            "MINDEX API - Core data platform for the Mycosoft ecosystem. "
-            "Integrates with MycoBrain devices via MDP v1, bridges to NatureOS "
-            "through the Mycorrhizae Protocol, and provides AI/ML-ready data pipelines."
+            "MINDEX API — Unified Earth Data Platform for the Mycosoft ecosystem. "
+            "Searches and indexes all planetary data: every species, every natural event, "
+            "all infrastructure, signals, transport, satellites, weather, air quality, "
+            "water systems, and telemetry. Integrates with MycoBrain devices via MDP v1, "
+            "bridges to NatureOS through the Mycorrhizae Protocol, feeds CREP map rendering, "
+            "and provides AI/ML-ready data pipelines for the Nature Learning Model."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -101,7 +105,7 @@ def create_app() -> FastAPI:
     # Compounds router (chemical compounds, ChemSpider integration)
     app.include_router(compounds_router, prefix=prefix)
     
-    # Unified search router (cross-table search for species, compounds, genetics)
+    # Unified Earth Search (cross-domain parallel search for ALL planetary data)
     app.include_router(unified_search_router, prefix=prefix)
     
     # Research router (OpenAlex integration for research papers)
@@ -121,6 +125,9 @@ def create_app() -> FastAPI:
     
     # FCI router (Fungal Computer Interface — bioelectric signals, patterns, GFST)
     app.include_router(fci_router, prefix=prefix)
+
+    # Earth Data router (CREP map layers, domain queries, all planetary data)
+    app.include_router(earth_router, prefix=prefix)
 
     return app
 

@@ -19,6 +19,7 @@ from .grounding import router as grounding_router
 
 from .fci import router as fci_router
 from .beta import router as beta_router
+from .earth import router as earth_router
 
 __all__ = [
     "health_router",
@@ -42,4 +43,5 @@ __all__ = [
     "grounding_router",
     "fci_router",
     "beta_router",
+    "earth_router",
 ]
