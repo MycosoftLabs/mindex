@@ -6,7 +6,8 @@ import time
 
 VM_IP = "192.168.0.189"
 VM_USER = "mycosoft"
-VM_PASS = os.environ.get("VM_PASSWORD", "Mushroom1!Mushroom1!")
+VM_PASS = os.environ.get("VM_PASSWORD", "")
+MINDEX_DB_PASSWORD = os.environ.get("MINDEX_DB_PASSWORD", "")
 
 def run_cmd(ssh, cmd, timeout=600, show=True):
     stdin, stdout, stderr = ssh.exec_command(cmd, timeout=timeout)
@@ -54,6 +55,7 @@ run_cmd(ssh, "echo '%s' | sudo -S fuser -k 8000/tcp 2>/dev/null; true" % VM_PASS
 time.sleep(2)
 
 print("\n[6] Starting API container connected to existing infra...")
+db_pass_escaped = MINDEX_DB_PASSWORD.replace("'", "'\"'\"'")
 run_cmd(ssh, f"""docker run -d \\
     --name mindex-api \\
     --restart unless-stopped \\
@@ -62,7 +64,7 @@ run_cmd(ssh, f"""docker run -d \\
     -e MINDEX_DB_HOST=mindex-postgres \\
     -e MINDEX_DB_PORT=5432 \\
     -e MINDEX_DB_USER=mycosoft \\
-    -e MINDEX_DB_PASSWORD=mycosoft_mindex_2026 \\
+    -e MINDEX_DB_PASSWORD='{db_pass_escaped}' \\
     -e MINDEX_DB_NAME=mindex \\
     -e API_CORS_ORIGINS='[\"http://localhost:3000\",\"http://localhost:3010\",\"http://192.168.0.187:3000\",\"http://192.168.0.172:3010\"]' \\
     mindex-api:latest 2>&1""")

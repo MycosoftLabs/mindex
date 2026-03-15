@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Check actual genetic_sequence table schema."""
+import os
 import psycopg2
 import sys
 
-DB_HOST = "192.168.0.189"
-DB_PORT = 5432
-DB_NAME = "mindex"
-DB_USER = "mycosoft"
-DB_PASSWORD = "mycosoft_mindex_2026"
+DB_HOST = os.environ.get("MINDEX_DB_HOST", "192.168.0.189")
+DB_PORT = int(os.environ.get("MINDEX_DB_PORT", "5432"))
+DB_NAME = os.environ.get("MINDEX_DB_NAME", "mindex")
+DB_USER = os.environ.get("MINDEX_DB_USER", "mycosoft")
+DB_PASSWORD = os.environ.get("MINDEX_DB_PASSWORD", "")
 
 def main():
     try:

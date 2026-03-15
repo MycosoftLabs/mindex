@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Quick restart of MINDEX API after code changes."""
+import os
 import paramiko
 import sys
 import time
 
 VM_HOST = "192.168.0.189"
 VM_USER = "mycosoft"
-VM_PASSWORD = "Mushroom1!Mushroom1!"
+VM_PASSWORD = os.environ.get("VM_PASSWORD", "")
 
 def main():
     try:

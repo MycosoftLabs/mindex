@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fix genetic_sequence schema to match router expectations."""
+import os
 import psycopg2
 import sys
 
@@ -7,7 +8,7 @@ DB_HOST = "192.168.0.189"
 DB_PORT = 5432
 DB_NAME = "mindex"
 DB_USER = "mycosoft"
-DB_PASSWORD = "mycosoft_mindex_2026"
+DB_PASSWORD = os.environ.get("MINDEX_DB_PASSWORD", "")
 
 FIXES = """
 BEGIN;

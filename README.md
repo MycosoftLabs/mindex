@@ -408,7 +408,7 @@ POST /api/v1/predict/growth
 
 ```env
 # Database
-DATABASE_URL=postgresql://mycosoft:mycosoft_mindex_2026@localhost:5432/mindex
+DATABASE_URL=postgresql://mycosoft:<MINDEX_DB_PASSWORD>@localhost:5432/mindex
 REDIS_URL=redis://localhost:6379
 QDRANT_URL=http://localhost:6333
 

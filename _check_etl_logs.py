@@ -4,7 +4,7 @@ import paramiko
 
 VM_IP = "192.168.0.189"
 VM_USER = "mycosoft"
-VM_PASSWORD = os.environ.get("VM_PASSWORD", "Mushroom1!Mushroom1!")
+VM_PASSWORD = os.environ.get("VM_PASSWORD", "")
 
 def main():
     print("Connecting to VM 189...")

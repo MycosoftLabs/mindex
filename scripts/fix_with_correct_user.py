@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Fix MINDEX with correct PostgreSQL user: mycosoft"""
+import os
 import paramiko
 import sys
 import time
 
 VM_HOST = "192.168.0.189"
 VM_USER = "mycosoft"
-VM_PASS = "Mushroom1!Mushroom1!"
+VM_PASS = os.environ.get("VM_PASSWORD", "")
 MINDEX_DIR = "/home/mycosoft/mindex"
 PG_USER = "mycosoft"  # Correct PostgreSQL user
 PG_DB = "mindex"

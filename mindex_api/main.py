@@ -18,15 +18,18 @@ from .routers import (
     ip_assets_router,
     knowledge_router,
     mycobrain_router,
+    nlm_router,
     observations_router,
+    plasticity_router,
+    research_router,
+    investigation_router,
+    search_answers_router,
     stats_router,
     taxon_router,
     telemetry_router,
     unified_search_router,
     wifisense_router,
     drone_router,
-    research_router,
-    investigation_router,
 )
 
 
@@ -128,6 +131,13 @@ def create_app() -> FastAPI:
 
     # Earth Data router (CREP map layers, domain queries, all planetary data)
     app.include_router(earth_router, prefix=prefix)
+
+    # Plasticity Forge (model candidates, aliases, training runs)
+    app.include_router(plasticity_router, prefix=prefix)
+    # NLM persistence (NMF, training, evals)
+    app.include_router(nlm_router, prefix=prefix)
+    # Search answers (answer snippets, QA pairs, second-search)
+    app.include_router(search_answers_router, prefix=prefix)
 
     return app
 

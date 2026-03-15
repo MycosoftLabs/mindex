@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Deploy unified_search.py fix to MINDEX VM."""
+import os
 import paramiko
 import sys
 import time
 
 VM_HOST = "192.168.0.189"
 VM_USER = "mycosoft"
-VM_PASSWORD = "Mushroom1!Mushroom1!"
+VM_PASSWORD = os.environ.get("VM_PASSWORD", "")
 
 def main():
     try:

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Check MINDEX container status."""
+import os
 import paramiko
 import sys
 
 VM_HOST = "192.168.0.189"
 VM_USER = "mycosoft"
-VM_PASSWORD = "Mushroom1!Mushroom1!"
+VM_PASSWORD = os.environ.get("VM_PASSWORD", "")
 
 def main():
     try:

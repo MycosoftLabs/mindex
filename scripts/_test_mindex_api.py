@@ -5,7 +5,7 @@ import os
 
 VM_IP = "192.168.0.189"
 VM_USER = "mycosoft"
-VM_PASS = os.environ.get("VM_PASSWORD", "Mushroom1!Mushroom1!")
+VM_PASS = os.environ.get("VM_PASSWORD", "")
 
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())

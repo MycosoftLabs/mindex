@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Create final missing tables and test"""
+import os
 import paramiko
 import time
 
 VM_HOST = "192.168.0.189"
 VM_USER = "mycosoft"
-VM_PASS = "Mushroom1!Mushroom1!"
+VM_PASS = os.environ.get("VM_PASSWORD", "")
 PG_USER = "mycosoft"
 PG_DB = "mindex"
 
