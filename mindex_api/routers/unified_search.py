@@ -51,6 +51,8 @@ Supports:
   - Domain filtering (select which data types to search)
   - Parallel execution via asyncio.gather()
   - CREP map pipeline (all results carry lat/lng for map rendering)
+  - Cache-first with live-scrape fallback (local-first data strategy)
+  - Redis/LRU cache → PostgreSQL → Supabase → live scrape → store locally
 """
 
 from __future__ import annotations
@@ -1345,13 +1347,30 @@ async def unified_search(
     """
     start_time = time.time()
 
+    # ── TIER 0+1: Check cache first (LRU + Redis) ──────────────────────
+    from ..cache import get_cache
+    cache = get_cache()
+    await cache.connect()
+
+    cached = await cache.get_cached_search(q, types)
+    if cached is not None:
+        timing_ms = int((time.time() - start_time) * 1000)
+        return UnifiedSearchResponse(
+            query=q,
+            domains_searched=cached.get("domains_searched", []),
+            results=cached.get("results", {}),
+            total_count=cached.get("total_count", 0),
+            timing_ms=timing_ms,
+            filters_applied=cached.get("filters_applied", {}),
+        )
+
+    # ── TIER 2: Local PostgreSQL (parallel across all domains) ─────────
     domains = _resolve_domains(types)
     if not domains:
         domains = ALL_DOMAINS
 
     dispatch = _build_dispatch(session, q, limit, lat, lng, radius, toxicity, kingdom, facility_type)
 
-    # Build parallel search tasks only for requested domains
     tasks = []
     task_names = []
     for domain in domains:
@@ -1359,20 +1378,47 @@ async def unified_search(
             tasks.append(dispatch[domain])
             task_names.append(domain)
 
-    # Execute all in parallel
     results_list = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
-    # Combine results
     results: Dict[str, List[Any]] = {}
     total_count = 0
+    empty_domains = []
 
     for name, result in zip(task_names, results_list):
         if isinstance(result, Exception):
             logger.error(f"Domain {name} search failed: {result}")
             results[name] = []
+            empty_domains.append(name)
         else:
             results[name] = result
             total_count += len(result)
+            if not result:
+                empty_domains.append(name)
+
+    # ── TIER 4: Live-scrape for domains that returned 0 results ────────
+    # Only scrape domains that have live scrapers configured
+    from ..scrape_pipeline import LIVE_SCRAPERS
+    scrape_tasks = []
+    scrape_names = []
+    for domain in empty_domains:
+        if domain in LIVE_SCRAPERS:
+            scrape_tasks.append(
+                asyncio.get_event_loop().run_in_executor(
+                    None, LIVE_SCRAPERS[domain], q
+                )
+            )
+            scrape_names.append(domain)
+
+    if scrape_tasks:
+        scrape_results = await asyncio.gather(*scrape_tasks, return_exceptions=True)
+        for name, result in zip(scrape_names, scrape_results):
+            if isinstance(result, Exception):
+                logger.debug(f"Live scrape {name} failed: {result}")
+            elif result:
+                results[name] = result
+                total_count += len(result)
+                # Async: store scraped data locally for future searches
+                asyncio.create_task(_async_store_scraped(session, name, result))
 
     timing_ms = int((time.time() - start_time) * 1000)
 
@@ -1390,6 +1436,22 @@ async def unified_search(
     if until:
         filters_applied["until"] = until
 
+    response_data = {
+        "domains_searched": task_names,
+        "results": results,
+        "total_count": total_count,
+        "filters_applied": filters_applied,
+    }
+
+    # ── Cache the results for future requests ──────────────────────────
+    await cache.cache_search(q, types, response_data, ttl=120)
+
+    # ── Async: Sync to Supabase for global access ──────────────────────
+    from ..supabase_client import get_supabase
+    supa = get_supabase()
+    if supa.enabled and total_count > 0:
+        asyncio.create_task(supa.sync_search_results(q, results))
+
     return UnifiedSearchResponse(
         query=q,
         domains_searched=task_names,
@@ -1398,6 +1460,34 @@ async def unified_search(
         timing_ms=timing_ms,
         filters_applied=filters_applied,
     )
+
+
+async def _async_store_scraped(session: AsyncSession, domain: str, records: List[dict]):
+    """Background task: store live-scraped data in local DB for future instant access."""
+    try:
+        for record in records:
+            lat = record.get("lat")
+            lng = record.get("lng")
+            if lat is not None and lng is not None:
+                import json as _json
+                await session.execute(text("""
+                    INSERT INTO crep.unified_entities (id, entity_type, geometry, state,
+                        observed_at, valid_from, source, confidence, s2_cell_id)
+                    VALUES (:id, :type, ST_MakePoint(:lng, :lat)::geography,
+                        :state::jsonb, COALESCE(:occurred_at::timestamptz, NOW()), NOW(),
+                        :source, 0.7, 0)
+                    ON CONFLICT (id, observed_at) DO NOTHING
+                """), {
+                    "id": str(record.get("id", f"{domain}_{id(record)}")),
+                    "type": record.get("entity_type", domain),
+                    "lng": lng, "lat": lat,
+                    "state": _json.dumps(record, default=str),
+                    "occurred_at": record.get("occurred_at"),
+                    "source": record.get("source", f"scrape_{domain}"),
+                })
+        await session.commit()
+    except Exception as e:
+        logger.debug(f"Async store scraped {domain} error: {e}")
 
 
 @router.get("/earth", response_model=EarthSearchResponse)
