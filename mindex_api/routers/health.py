@@ -45,7 +45,7 @@ async def health_check(db: AsyncSession = Depends(get_db_session)) -> HealthResp
     except Exception:
         db_state = "error"
     status = "ok" if db_state == "ok" else "degraded"
-    return HealthResponse(status="ok", db=db_state, timestamp=datetime.now(timezone.utc), service="mindex", version=settings.api_version, git_sha=_get_git_sha())
+    return HealthResponse(status=status, db=db_state, timestamp=datetime.now(timezone.utc), service="mindex", version=settings.api_version, git_sha=_get_git_sha())
 
 
 @router.get("/version", response_model=VersionResponse)
