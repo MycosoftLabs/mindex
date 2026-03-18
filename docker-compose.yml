@@ -173,17 +173,23 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: mindex-earth-sync
-    command: python -c "
-      import time, logging;
-      logging.basicConfig(level=logging.INFO);
-      from mindex_etl.jobs.sync_earth_data import run_realtime_sync;
-      while True:
-        try:
-          run_realtime_sync()
-        except Exception as e:
-          logging.error(f'Earth sync error: {e}');
-        time.sleep(900)
-      "
+    # Use sh heredoc — inline python -c with colons breaks YAML (while True:)
+    command:
+      - /bin/sh
+      - -c
+      - |
+        exec python -u <<'PY'
+        import time
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        from mindex_etl.jobs.sync_earth_data import run_realtime_sync
+        while True:
+            try:
+                run_realtime_sync()
+            except Exception as e:
+                logging.error("Earth sync error: %s", e)
+            time.sleep(900)
+        PY
     environment:
       MINDEX_DB_HOST: db
       MINDEX_DB_PORT: 5432
