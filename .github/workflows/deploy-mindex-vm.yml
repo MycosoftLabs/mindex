@@ -1,0 +1,112 @@
+# Deploy MINDEX API to VM 189 — build in CI, VM pull + restart only.
+# Same pattern as website deploy-sandbox-production and MAS deploy-mas-production.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   MINDEX_HOST          - 192.168.0.189
+#   VM_SSH_PRIVATE_KEY   - SSH private key for mycosoft user
+#   GHCR_PULL_TOKEN      - (Optional) PAT with read:packages for VM to pull image
+#
+# On VM 189: ensure .env (or env passed to container) has POSTGRES/Redis/Qdrant URLs as required by mindex_api.
+
+name: Deploy MINDEX to VM 189
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mindex_api/**'
+      - 'mindex_etl/**'
+      - 'migrations/**'
+      - 'pyproject.toml'
+      - 'Dockerfile'
+      - '.github/workflows/deploy-mindex-vm.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: Build MINDEX image in CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:mindex-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:mindex-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          network: host
+
+  deploy:
+    name: Deploy to MINDEX VM (189)
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production
+    steps:
+      - name: Set image for deploy (GHCR uses lowercase)
+        run: echo "IMAGE_FULL=${{ env.REGISTRY }}/$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]'):mindex-latest" >> $GITHUB_ENV
+
+      - name: Deploy to MINDEX VM
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_FULL: ${{ env.IMAGE_FULL }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        with:
+          host: ${{ secrets.MINDEX_HOST }}
+          username: mycosoft
+          key: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+          command_timeout: 10m
+          envs: IMAGE_FULL,GHCR_PULL_TOKEN
+          script: |
+            set -e
+            if [ -n "$GHCR_PULL_TOKEN" ]; then
+              echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u mycosoft --password-stdin
+            fi
+            echo "=== Pulling image ==="
+            docker pull "$IMAGE_FULL"
+            echo "=== Replacing container ==="
+            docker stop mindex-api 2>/dev/null || true
+            docker rm mindex-api 2>/dev/null || true
+            MINDEX_DIR="/home/mycosoft/mindex"
+            [ -d "/opt/mycosoft/mindex" ] && MINDEX_DIR="/opt/mycosoft/mindex"
+            ENV_FILE_OPT=""
+            [ -f "$MINDEX_DIR/.env" ] && ENV_FILE_OPT="--env-file $MINDEX_DIR/.env"
+            docker run -d --name mindex-api -p 8000:8000 \
+              $ENV_FILE_OPT \
+              --restart unless-stopped \
+              "$IMAGE_FULL"
+            echo "=== Waiting for health ==="
+            sleep 15
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -sf http://localhost:8000/health >/dev/null; then
+                echo "Health check passed"
+                break
+              fi
+              echo "Attempt $i: waiting 5s..."
+              sleep 5
+            done
+            curl -sf http://localhost:8000/health || exit 1

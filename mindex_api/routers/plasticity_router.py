@@ -316,6 +316,12 @@ async def set_alias(
 ) -> Dict[str, Any]:
     """Set alias -> candidate_id (upsert). Promotion controller uses this."""
     try:
+        prev = await db.execute(
+            text("SELECT candidate_id FROM plasticity.runtime_alias_state WHERE alias = :alias"),
+            {"alias": alias},
+        )
+        prow = prev.fetchone()
+        from_cid = prow[0] if prow else None
         stmt = text(
             """
             INSERT INTO plasticity.runtime_alias_state (alias, candidate_id)
@@ -325,6 +331,26 @@ async def set_alias(
             """
         )
         result = await db.execute(stmt, {"alias": alias, "candidate_id": body.candidate_id})
+        await db.execute(text("SAVEPOINT alias_hist_sp"))
+        try:
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO plasticity.alias_history (alias, from_candidate_id, to_candidate_id, reason)
+                    VALUES (:alias, :from_c, :to_c, :reason)
+                    """
+                ),
+                {
+                    "alias": alias,
+                    "from_c": from_cid,
+                    "to_c": body.candidate_id,
+                    "reason": "alias_upsert",
+                },
+            )
+            await db.execute(text("RELEASE SAVEPOINT alias_hist_sp"))
+        except Exception:
+            await db.execute(text("ROLLBACK TO SAVEPOINT alias_hist_sp"))
+            logger.debug("alias_history insert skipped or table missing")
         await db.commit()
         row = result.fetchone()
         if not row:
@@ -459,3 +485,368 @@ async def create_promotion_decision(
             raise HTTPException(status_code=400, detail="candidate_id not found") from e
         logger.exception("Create promotion decision failed")
         raise HTTPException(status_code=500, detail=f"create_failed: {e!s}") from e
+
+
+# --- MYCA2 PSILO sessions (Mar 17, 2026) ---
+
+
+class PsiloSessionCreate(BaseModel):
+    session_id: Optional[str] = None
+    dose_profile: Dict[str, Any] = Field(default_factory=dict)
+    phase_profile: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PsiloSessionPatch(BaseModel):
+    status: Optional[str] = None
+    overlay_edges: Optional[List[Any]] = None
+    metrics: Optional[Dict[str, Any]] = None
+    integration_report: Optional[Dict[str, Any]] = None
+    dose_profile: Optional[Dict[str, Any]] = None
+    phase_profile: Optional[Dict[str, Any]] = None
+
+
+class PsiloEventCreate(BaseModel):
+    event_type: str = Field(..., max_length=128)
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+@plasticity_router.post("/psilo/sessions")
+async def psilo_session_create(
+    body: PsiloSessionCreate,
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    import uuid
+
+    sid = (body.session_id or "").strip() or f"psilo_{uuid.uuid4().hex[:16]}"
+    try:
+        await db.execute(
+            text(
+                """
+                INSERT INTO plasticity.psilo_session (session_id, dose_profile, phase_profile, status)
+                VALUES (:sid, :dose::jsonb, :phase::jsonb, 'active')
+                """
+            ),
+            {"sid": sid, "dose": json.dumps(body.dose_profile), "phase": json.dumps(body.phase_profile)},
+        )
+        await db.commit()
+        return {"session_id": sid, "status": "active"}
+    except Exception as e:
+        await db.rollback()
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+            raise HTTPException(status_code=409, detail="session_id exists") from e
+        logger.exception("psilo session create")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@plasticity_router.get("/psilo/sessions/{session_id}")
+async def psilo_session_get(session_id: str, db: AsyncSession = Depends(get_db_session)) -> Dict[str, Any]:
+    r = await db.execute(
+        text(
+            """
+            SELECT session_id, status, dose_profile, phase_profile, overlay_edges, metrics,
+                   started_at, ended_at, integration_report
+            FROM plasticity.psilo_session WHERE session_id = :sid
+            """
+        ),
+        {"sid": session_id},
+    )
+    row = r.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {
+        "session_id": row[0],
+        "status": row[1],
+        "dose_profile": row[2] if isinstance(row[2], dict) else (row[2] or {}),
+        "phase_profile": row[3] if isinstance(row[3], dict) else (row[3] or {}),
+        "overlay_edges": row[4] if isinstance(row[4], list) else (row[4] or []),
+        "metrics": row[5] if isinstance(row[5], dict) else (row[5] or {}),
+        "started_at": row[6].isoformat() if hasattr(row[6], "isoformat") else str(row[6]),
+        "ended_at": row[7].isoformat() if row[7] and hasattr(row[7], "isoformat") else row[7],
+        "integration_report": row[8],
+    }
+
+
+@plasticity_router.patch("/psilo/sessions/{session_id}")
+async def psilo_session_patch(
+    session_id: str,
+    body: PsiloSessionPatch,
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    updates: List[str] = []
+    params: Dict[str, Any] = {"sid": session_id}
+    if body.status is not None:
+        updates.append("status = :status")
+        params["status"] = body.status
+        if body.status in ("stopped", "killed", "ended"):
+            updates.append("ended_at = NOW()")
+    if body.overlay_edges is not None:
+        updates.append("overlay_edges = :edges::jsonb")
+        params["edges"] = json.dumps(body.overlay_edges)
+    if body.metrics is not None:
+        updates.append("metrics = :metrics::jsonb")
+        params["metrics"] = json.dumps(body.metrics)
+    if body.integration_report is not None:
+        updates.append("integration_report = :ir::jsonb")
+        params["ir"] = json.dumps(body.integration_report)
+    if body.dose_profile is not None:
+        updates.append("dose_profile = :dose::jsonb")
+        params["dose"] = json.dumps(body.dose_profile)
+    if body.phase_profile is not None:
+        updates.append("phase_profile = :phase::jsonb")
+        params["phase"] = json.dumps(body.phase_profile)
+    if not updates:
+        raise HTTPException(status_code=400, detail="no fields to update")
+    try:
+        await db.execute(
+            text(f"UPDATE plasticity.psilo_session SET {', '.join(updates)} WHERE session_id = :sid"),
+            params,
+        )
+        await db.commit()
+        return {"session_id": session_id, "updated": True}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@plasticity_router.post("/psilo/sessions/{session_id}/events")
+async def psilo_session_append_event(
+    session_id: str,
+    body: PsiloEventCreate,
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    try:
+        await db.execute(
+            text(
+                """
+                INSERT INTO plasticity.psilo_session_event (session_id, event_type, payload)
+                VALUES (:sid, :et, :pl::jsonb)
+                RETURNING id, created_at
+                """
+            ),
+            {"sid": session_id, "et": body.event_type, "pl": json.dumps(body.payload)},
+        )
+        await db.commit()
+        return {"session_id": session_id, "event_type": body.event_type, "ok": True}
+    except Exception as e:
+        await db.rollback()
+        if "foreign key" in str(e).lower():
+            raise HTTPException(status_code=404, detail="session not found") from e
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@plasticity_router.get("/psilo/sessions/{session_id}/events")
+async def psilo_session_list_events(
+    session_id: str,
+    limit: int = Query(100, le=500),
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    r = await db.execute(
+        text(
+            """
+            SELECT id, event_type, payload, created_at
+            FROM plasticity.psilo_session_event
+            WHERE session_id = :sid ORDER BY id DESC LIMIT :lim
+            """
+        ),
+        {"sid": session_id, "lim": limit},
+    )
+    rows = r.fetchall()
+    return {
+        "session_id": session_id,
+        "events": [
+            {
+                "id": x[0],
+                "event_type": x[1],
+                "payload": x[2] if isinstance(x[2], dict) else {},
+                "created_at": x[3].isoformat() if hasattr(x[3], "isoformat") else str(x[3]),
+            }
+            for x in rows
+        ],
+    }
+
+
+class MutationRunCreate(BaseModel):
+    mutation_run_id: str
+    candidate_id: Optional[str] = None
+    parent_mutation_run_id: Optional[str] = None
+    operators_applied: List[Any] = Field(default_factory=list)
+    config: Dict[str, Any] = Field(default_factory=dict)
+
+
+@plasticity_router.post("/mutation-runs")
+async def create_mutation_run(body: MutationRunCreate, db: AsyncSession = Depends(get_db_session)) -> Dict[str, Any]:
+    await db.execute(
+        text(
+            """
+            INSERT INTO plasticity.mutation_run (mutation_run_id, candidate_id, parent_mutation_run_id, operators_applied, status, config)
+            VALUES (:id, :cid, :pid, :ops::jsonb, 'running', :cfg::jsonb)
+            """
+        ),
+        {
+            "id": body.mutation_run_id,
+            "cid": body.candidate_id,
+            "pid": body.parent_mutation_run_id,
+            "ops": json.dumps(body.operators_applied),
+            "cfg": json.dumps(body.config),
+        },
+    )
+    await db.commit()
+    return {"mutation_run_id": body.mutation_run_id, "status": "running"}
+
+
+class LineageEventCreate(BaseModel):
+    event_id: str
+    candidate_id: str
+    event_type: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+@plasticity_router.post("/lineage-events")
+async def create_lineage_event(body: LineageEventCreate, db: AsyncSession = Depends(get_db_session)) -> Dict[str, Any]:
+    await db.execute(
+        text(
+            """
+            INSERT INTO plasticity.lineage_event (event_id, candidate_id, event_type, payload)
+            VALUES (:eid, :cid, :et, :pl::jsonb)
+            """
+        ),
+        {"eid": body.event_id, "cid": body.candidate_id, "et": body.event_type, "pl": json.dumps(body.payload)},
+    )
+    await db.commit()
+    return {"event_id": body.event_id}
+
+
+class EvalCaseResultCreate(BaseModel):
+    eval_run_id: str
+    case_id: str
+    passed: Optional[bool] = None
+    score: Optional[float] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+@plasticity_router.post("/eval-case-results")
+async def create_eval_case_result(body: EvalCaseResultCreate, db: AsyncSession = Depends(get_db_session)) -> Dict[str, Any]:
+    try:
+        r = await db.execute(
+            text(
+                """
+                INSERT INTO plasticity.eval_case_result (eval_run_id, case_id, passed, score, details)
+                VALUES (:eid, :cid, :p, :s, :d::jsonb) RETURNING id
+                """
+            ),
+            {
+                "eid": body.eval_run_id,
+                "cid": body.case_id,
+                "p": body.passed,
+                "s": body.score,
+                "d": json.dumps(body.details),
+            },
+        )
+        await db.commit()
+        row = r.fetchone()
+        return {"id": row[0] if row else None}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+class ArtifactMetaCreate(BaseModel):
+    artifact_id: str
+    candidate_id: Optional[str] = None
+    uri: str
+    content_hash: Optional[str] = None
+    kind: Optional[str] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
+
+
+@plasticity_router.post("/artifact-meta")
+async def create_artifact_meta(body: ArtifactMetaCreate, db: AsyncSession = Depends(get_db_session)) -> Dict[str, Any]:
+    await db.execute(
+        text(
+            """
+            INSERT INTO plasticity.artifact_meta (artifact_id, candidate_id, uri, content_hash, kind, meta)
+            VALUES (:aid, :cid, :uri, :h, :k, :m::jsonb)
+            """
+        ),
+        {
+            "aid": body.artifact_id,
+            "cid": body.candidate_id,
+            "uri": body.uri,
+            "h": body.content_hash,
+            "k": body.kind,
+            "m": json.dumps(body.meta),
+        },
+    )
+    await db.commit()
+    return {"artifact_id": body.artifact_id}
+
+
+class RollbackEventCreate(BaseModel):
+    rollback_id: str
+    alias: str
+    from_candidate_id: Optional[str] = None
+    to_candidate_id: str
+    decided_by: Optional[str] = None
+
+
+@plasticity_router.post("/rollback-events")
+async def create_rollback_event(body: RollbackEventCreate, db: AsyncSession = Depends(get_db_session)) -> Dict[str, Any]:
+    await db.execute(
+        text(
+            """
+            INSERT INTO plasticity.rollback_event (rollback_id, alias, from_candidate_id, to_candidate_id, decided_by)
+            VALUES (:rid, :al, :fc, :tc, :db)
+            """
+        ),
+        {
+            "rid": body.rollback_id,
+            "al": body.alias,
+            "fc": body.from_candidate_id,
+            "tc": body.to_candidate_id,
+            "db": body.decided_by,
+        },
+    )
+    await db.commit()
+    return {"rollback_id": body.rollback_id}
+
+
+@plasticity_router.get("/alias-history")
+async def list_alias_history(
+    alias: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    if alias:
+        r = await db.execute(
+            text(
+                """
+                SELECT id, alias, from_candidate_id, to_candidate_id, changed_at, reason
+                FROM plasticity.alias_history WHERE alias = :a ORDER BY id DESC LIMIT :lim
+                """
+            ),
+            {"a": alias, "lim": limit},
+        )
+    else:
+        r = await db.execute(
+            text(
+                """
+                SELECT id, alias, from_candidate_id, to_candidate_id, changed_at, reason
+                FROM plasticity.alias_history ORDER BY id DESC LIMIT :lim
+                """
+            ),
+            {"lim": limit},
+        )
+    rows = r.fetchall()
+    return {
+        "items": [
+            {
+                "id": x[0],
+                "alias": x[1],
+                "from_candidate_id": x[2],
+                "to_candidate_id": x[3],
+                "changed_at": x[4].isoformat() if hasattr(x[4], "isoformat") else str(x[4]),
+                "reason": x[5],
+            }
+            for x in rows
+        ]
+    }
