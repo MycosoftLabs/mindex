@@ -1,9 +1,19 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+import logging
+
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
+from .auth import require_internal_token
+from .middleware import (
+    MeteringMiddleware,
+    OutputSanitizerMiddleware,
+    RateLimitMiddleware,
+    RequestValidationMiddleware,
+    SecurityHeadersMiddleware,
+)
 from .routers import (
     a2a_agent_router,
     beta_router,
@@ -16,6 +26,7 @@ from .routers import (
     health_router,
     images_router,
     ip_assets_router,
+    key_management_router,
     knowledge_router,
     mycobrain_router,
     nlm_router,
@@ -31,32 +42,35 @@ from .routers import (
     wifisense_router,
     drone_router,
 )
+from .routers.worldview import (
+    worldview_search_router,
+    worldview_earth_router,
+    worldview_species_router,
+    worldview_answers_router,
+    worldview_research_router,
+    worldview_manifest_router,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
     """
     Create and configure the MINDEX FastAPI application.
-    
-    Includes routers for:
-    - Health checks
-    - Taxon management (mycological taxonomy)
-    - Telemetry (generic device data)
-    - MycoBrain (MDP v1 device integration)
-    - Observations (field observations)
-    - IP Assets (blockchain anchoring)
-    - WiFi Sense (CSI-based sensing)
-    - MycoDRONE (autonomous deployment/recovery)
+
+    Three-zone architecture:
+    - Utility (/api/mindex): Health checks, beta onboarding (open or lightly protected)
+    - Internal (/api/mindex/internal): Service-to-service (MAS, MycoBrain, NLM, etc.)
+    - Worldview (/api/worldview/v1): Read-only curated data for paying users
     """
     app = FastAPI(
         title=settings.api_title,
         version=settings.api_version,
         description=(
             "MINDEX API — Unified Earth Data Platform for the Mycosoft ecosystem. "
-            "Searches and indexes all planetary data: every species, every natural event, "
-            "all infrastructure, signals, transport, satellites, weather, air quality, "
-            "water systems, and telemetry. Integrates with MycoBrain devices via MDP v1, "
-            "bridges to NatureOS through the Mycorrhizae Protocol, feeds CREP map rendering, "
-            "and provides AI/ML-ready data pipelines for the Nature Learning Model."
+            "Three-zone architecture: Internal APIs for service-to-service communication, "
+            "Worldview API for paying users (humans & agents), and Utility endpoints "
+            "for health checks and onboarding."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -67,6 +81,11 @@ def create_app() -> FastAPI:
     async def root_health() -> dict:
         return {"status": "healthy"}
 
+    # =========================================================================
+    # MIDDLEWARE STACK (order matters: outermost applied first)
+    # =========================================================================
+
+    # CORS — internal zone gets no CORS, worldview gets strict origins
     if settings.api_cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -76,67 +95,106 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
-    # Core routers - all under the api_prefix
+    # Security headers on Worldview responses
+    app.add_middleware(SecurityHeadersMiddleware, path_prefix=settings.worldview_prefix)
+
+    # Request validation on Worldview (read-only enforcement, query length, injection detection)
+    app.add_middleware(RequestValidationMiddleware, path_prefix=settings.worldview_prefix)
+
+    # Output sanitization on Worldview (strip internal data, secrets, injection patterns)
+    app.add_middleware(OutputSanitizerMiddleware, path_prefix=settings.worldview_prefix)
+
+    # Usage metering (record API calls for billing and audit)
+    app.add_middleware(MeteringMiddleware, path_prefix=settings.worldview_prefix)
+
+    # Rate limiting on Worldview (per-key Redis sliding window)
+    if settings.rate_limit_enabled:
+        app.add_middleware(RateLimitMiddleware, path_prefix=settings.worldview_prefix)
+
+    # =========================================================================
+    # ZONE 1: UTILITY (open or lightly protected)
+    # =========================================================================
     prefix = settings.api_prefix
-    
+
     app.include_router(health_router, prefix=prefix)
+    app.include_router(beta_router, prefix=prefix)
+
+    # =========================================================================
+    # ZONE 2: INTERNAL (service-to-service, requires X-Internal-Token)
+    # =========================================================================
+    internal_prefix = settings.internal_prefix
+    internal_deps = [Depends(require_internal_token)]
+
+    # Device & telemetry routers
+    app.include_router(mycobrain_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(telemetry_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(devices_router, prefix=internal_prefix, dependencies=internal_deps)
+
+    # AI/ML routers
+    app.include_router(grounding_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(plasticity_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(nlm_router, prefix=internal_prefix, dependencies=internal_deps)
+
+    # Specialized hardware routers
+    app.include_router(fci_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(wifisense_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(drone_router, prefix=internal_prefix, dependencies=internal_deps)
+
+    # Data management routers (internal write access)
+    app.include_router(investigation_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(images_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(knowledge_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(ip_assets_router, prefix=internal_prefix, dependencies=internal_deps)
+
+    # Agent-to-agent delegation (MAS → MINDEX)
+    app.include_router(a2a_agent_router, prefix=internal_prefix, dependencies=internal_deps)
+
+    # Internal write endpoints for search answers (MAS orchestrator)
+    app.include_router(search_answers_router, prefix=internal_prefix, dependencies=internal_deps)
+
+    # API key management (CRUD, rotation, usage, audit)
+    app.include_router(key_management_router, prefix=internal_prefix, dependencies=internal_deps)
+
+    # =========================================================================
+    # ZONE 3: WORLDVIEW API (read-only, paying users, DB-backed API key auth)
+    # =========================================================================
+    worldview_prefix = settings.worldview_prefix
+
+    # Worldview routers (auth is handled per-endpoint via require_worldview_key dependency)
+    app.include_router(worldview_search_router, prefix=worldview_prefix)
+    app.include_router(worldview_earth_router, prefix=worldview_prefix)
+    app.include_router(worldview_species_router, prefix=worldview_prefix)
+    app.include_router(worldview_answers_router, prefix=worldview_prefix)
+    app.include_router(worldview_research_router, prefix=worldview_prefix)
+    app.include_router(worldview_manifest_router, prefix=worldview_prefix)
+
+    # =========================================================================
+    # BACKWARD COMPATIBILITY (deprecated — remove after all consumers migrate)
+    # =========================================================================
+    # These keep the old /api/mindex/... paths working during the migration window
+    # so MAS, CREP, and device consumers don't break.
     app.include_router(taxon_router, prefix=prefix)
-    
-    # Telemetry routers (legacy generic + MycoBrain-specific)
     app.include_router(telemetry_router, prefix=prefix)
     app.include_router(devices_router, prefix=prefix)
     app.include_router(mycobrain_router, prefix=prefix)
-    
-    # Data routers
     app.include_router(observations_router, prefix=prefix)
     app.include_router(ip_assets_router, prefix=prefix)
     app.include_router(stats_router, prefix=prefix)
-    
-    # Feature routers (WiFi Sense and MycoDRONE)
     app.include_router(wifisense_router, prefix=prefix)
     app.include_router(drone_router, prefix=prefix)
-    
-    # Image management router
     app.include_router(images_router, prefix=prefix)
-
-    # Knowledge router (categories, knowledge graph for MYCA world model)
     app.include_router(knowledge_router, prefix=prefix)
-    
-    # Genetics router (GenBank sequences, DNA/RNA data)
     app.include_router(genetics_router, prefix=prefix)
-    
-    # Compounds router (chemical compounds, ChemSpider integration)
     app.include_router(compounds_router, prefix=prefix)
-    
-    # Unified Earth Search (cross-domain parallel search for ALL planetary data)
     app.include_router(unified_search_router, prefix=prefix)
-    
-    # Research router (OpenAlex integration for research papers)
     app.include_router(research_router, prefix=prefix)
-
-    # Investigation router (OpenPlanter-style artifacts and evidence-backed analysis)
     app.include_router(investigation_router, prefix=prefix)
-
-    # A2A agent router (read-only search/stats for MAS delegation)
     app.include_router(a2a_agent_router, prefix=prefix)
-
-    # Grounding router (Grounded Cognition: spatial, episodes, EPs, thoughts, reflection)
     app.include_router(grounding_router, prefix=prefix)
-
-    # Beta users router (onboarding, API key generation for revenue validation)
-    app.include_router(beta_router, prefix=prefix)
-    
-    # FCI router (Fungal Computer Interface — bioelectric signals, patterns, GFST)
     app.include_router(fci_router, prefix=prefix)
-
-    # Earth Data router (CREP map layers, domain queries, all planetary data)
     app.include_router(earth_router, prefix=prefix)
-
-    # Plasticity Forge (model candidates, aliases, training runs)
     app.include_router(plasticity_router, prefix=prefix)
-    # NLM persistence (NMF, training, evals)
     app.include_router(nlm_router, prefix=prefix)
-    # Search answers (answer snippets, QA pairs, second-search)
     app.include_router(search_answers_router, prefix=prefix)
 
     return app
