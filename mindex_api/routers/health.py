@@ -56,3 +56,91 @@ async def version() -> VersionResponse:
         version=settings.api_version,
         git_sha=_get_git_sha(),
     )
+
+
+@router.get("/health/detailed")
+async def detailed_health_check(db: AsyncSession = Depends(get_db_session)) -> dict:
+    """
+    Detailed health check including DB, Redis, auth tables, and API zones.
+
+    Checks:
+    - Database connectivity
+    - Redis connectivity (if configured)
+    - user_registry table accessibility
+    - api_keys table accessibility
+    - API zone status (internal, worldview, utility)
+    """
+    checks: dict = {
+        "status": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "service": "mindex",
+        "version": settings.api_version,
+        "git_sha": _get_git_sha(),
+        "checks": {},
+        "zones": {
+            "internal": {"prefix": settings.internal_prefix, "auth": "X-Internal-Token (HMAC)"},
+            "worldview": {"prefix": settings.worldview_prefix, "auth": "X-API-Key (DB-backed)"},
+            "utility": {"prefix": settings.api_prefix, "auth": "open/light"},
+        },
+    }
+
+    # DB check
+    try:
+        await db.execute(text("SELECT 1"))
+        checks["checks"]["database"] = "ok"
+    except Exception as e:
+        checks["checks"]["database"] = f"error: {str(e)[:100]}"
+        checks["status"] = "degraded"
+
+    # Redis check
+    try:
+        if settings.redis_url:
+            import redis.asyncio as aioredis
+            r = aioredis.from_url(settings.redis_url)
+            await r.ping()
+            await r.aclose()
+            checks["checks"]["redis"] = "ok"
+        else:
+            checks["checks"]["redis"] = "not_configured (using in-process LRU)"
+    except Exception as e:
+        checks["checks"]["redis"] = f"error: {str(e)[:100]}"
+
+    # user_registry table check
+    try:
+        result = await db.execute(text("SELECT COUNT(*) FROM user_registry"))
+        count = result.scalar()
+        checks["checks"]["user_registry"] = f"ok ({count} users)"
+    except Exception:
+        checks["checks"]["user_registry"] = "not_available (migration pending)"
+
+    # api_keys table check
+    try:
+        result = await db.execute(text(
+            "SELECT COUNT(*) FILTER (WHERE is_active), COUNT(*) FROM api_keys"
+        ))
+        row = result.fetchone()
+        active, total = (row[0], row[1]) if row else (0, 0)
+        checks["checks"]["api_keys"] = f"ok ({active} active / {total} total)"
+    except Exception:
+        checks["checks"]["api_keys"] = "not_available (migration pending)"
+
+    # api_key_usage table check
+    try:
+        result = await db.execute(text("SELECT COUNT(*) FROM api_key_usage"))
+        count = result.scalar()
+        checks["checks"]["api_key_usage"] = f"ok ({count} records)"
+    except Exception:
+        checks["checks"]["api_key_usage"] = "not_available"
+
+    # Internal auth config check
+    has_internal_secret = bool(settings.internal_auth_secret)
+    has_internal_tokens = bool(settings.internal_tokens)
+    if has_internal_secret or has_internal_tokens:
+        checks["checks"]["internal_auth"] = "configured"
+    else:
+        checks["checks"]["internal_auth"] = "not_configured (set MINDEX_INTERNAL_SECRET or MINDEX_INTERNAL_TOKENS)"
+
+    # Rate limiting check
+    checks["checks"]["rate_limiting"] = "enabled" if settings.rate_limit_enabled else "disabled"
+
+    return checks

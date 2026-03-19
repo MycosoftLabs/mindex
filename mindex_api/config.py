@@ -119,6 +119,74 @@ class Settings(BaseSettings):
     solana_rpc_url: Optional[AnyHttpUrl] = None
 
     # =========================================================================
+    # API COMPARTMENTALIZATION — Internal / Worldview zones
+    # =========================================================================
+
+    worldview_prefix: str = Field(
+        "/api/worldview/v1",
+        description="URL prefix for the Worldview API (external, paying users).",
+    )
+    internal_prefix: str = Field(
+        "/api/mindex/internal",
+        description="URL prefix for internal service-to-service APIs.",
+    )
+
+    # Internal service auth — HMAC secret for signed tokens
+    internal_auth_secret: Optional[str] = Field(
+        None,
+        description="HMAC-SHA256 shared secret for internal service tokens.",
+    )
+    # Internal service auth — pre-shared token list (simpler alternative)
+    internal_tokens: Union[List[str], str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("MINDEX_INTERNAL_TOKENS"),
+        description="Pre-shared internal service tokens (comma-separated or JSON list).",
+    )
+
+    @field_validator("internal_tokens", mode="before")
+    @classmethod
+    def parse_internal_tokens(cls, v):
+        """Parse internal tokens the same way as api_keys."""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            raw = v.strip()
+            if raw == "":
+                return []
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    return parsed if isinstance(parsed, list) else [str(parsed)]
+                except Exception:
+                    pass
+            if "," in raw:
+                return [p.strip() for p in raw.split(",") if p.strip()]
+            return [raw]
+        return v
+
+    # Rate limiting
+    rate_limit_enabled: bool = Field(True, description="Enable per-key rate limiting on Worldview API.")
+    rate_limit_redis_prefix: str = Field("ratelimit", description="Redis key prefix for rate limit counters.")
+
+    # Worldview CORS (separate from internal CORS)
+    worldview_cors_origins: List[str] = Field(
+        default_factory=lambda: ["https://mycosoft.com", "https://www.mycosoft.com"],
+        description="Allowed CORS origins for the Worldview API.",
+    )
+
+    # Plan-tier rate limit defaults
+    worldview_rate_limits: dict = Field(
+        default_factory=lambda: {
+            "free": {"per_minute": 10, "per_day": 1000},
+            "pro": {"per_minute": 60, "per_day": 10000},
+            "enterprise": {"per_minute": 300, "per_day": 100000},
+        },
+        description="Default rate limits per plan tier.",
+    )
+
+    # =========================================================================
     # MYCOBRAIN / MDP V1 SETTINGS
     # =========================================================================
     

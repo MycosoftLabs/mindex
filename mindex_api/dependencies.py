@@ -22,10 +22,21 @@ async def get_db_session(db: AsyncSession = Depends(get_db)) -> AsyncSession:
 
 
 async def require_api_key(api_key: Optional[str] = Depends(api_key_header)) -> Optional[str]:
-    """Simple API key guard for non-health routes."""
+    """Simple API key guard for non-health routes.
+
+    DEPRECATED: This checks against the flat API_KEYS env var.
+    For Worldview endpoints, use auth.require_worldview_key instead.
+    For internal endpoints, use auth.require_internal_token instead.
+    Both validate against the api_keys DB table with full identity context.
+    """
+    import logging
     if settings.api_keys:
         if api_key is None or api_key not in settings.api_keys:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Unauthorized')
+        logging.getLogger(__name__).debug(
+            "Legacy env-var API key auth used — migrate to DB-backed auth "
+            "(auth.require_worldview_key or auth.require_internal_token)"
+        )
     return api_key
 
 

@@ -23,6 +23,7 @@ from .earth import router as earth_router
 from .plasticity_router import plasticity_router
 from .nlm_router import nlm_router
 from .search_answers import router as search_answers_router
+from .key_management import router as key_management_router
 
 __all__ = [
     "health_router",
@@ -50,4 +51,5 @@ __all__ = [
     "plasticity_router",
     "nlm_router",
     "search_answers_router",
+    "key_management_router",
 ]
