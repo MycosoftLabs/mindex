@@ -155,6 +155,17 @@ def create_app() -> FastAPI:
     # API key management (CRUD, rotation, usage, audit)
     app.include_router(key_management_router, prefix=internal_prefix, dependencies=internal_deps)
 
+    # GPU acceleration (cuDF, cuVS, STATIC) — optional, degrades to CPU
+    try:
+        from .gpu.router import gpu_router
+
+        app.include_router(gpu_router, prefix=internal_prefix, dependencies=internal_deps)
+        logger.info("GPU router registered at %s/gpu", internal_prefix)
+    except ImportError:
+        logger.debug("GPU module not available — skipping GPU router")
+    except Exception as exc:
+        logger.warning("GPU router failed to load: %s", exc)
+
     # =========================================================================
     # ZONE 3: WORLDVIEW API (read-only, paying users, DB-backed API key auth)
     # =========================================================================

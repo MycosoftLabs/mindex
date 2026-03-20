@@ -143,4 +143,18 @@ async def detailed_health_check(db: AsyncSession = Depends(get_db_session)) -> d
     # Rate limiting check
     checks["checks"]["rate_limiting"] = "enabled" if settings.rate_limit_enabled else "disabled"
 
+    # GPU acceleration check
+    try:
+        from ..gpu.runtime import get_gpu_runtime
+        from ..gpu import get_availability
+
+        runtime = get_gpu_runtime()
+        gpu_status = runtime.health_status()
+        gpu_status.update(get_availability())
+        checks["checks"]["gpu"] = gpu_status
+    except ImportError:
+        checks["checks"]["gpu"] = {"available": False, "reason": "gpu module not installed"}
+    except Exception as e:
+        checks["checks"]["gpu"] = {"available": False, "error": str(e)[:100]}
+
     return checks

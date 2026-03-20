@@ -237,6 +237,88 @@ services:
     profiles:
       - init
 
+  # =========================================================================
+  # GPU-accelerated MINDEX API (NVIDIA RAPIDS: cuDF + cuVS)
+  # =========================================================================
+  api-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+      args:
+        GIT_SHA: ${GIT_SHA:-}
+    container_name: mindex-api-gpu
+    command: uvicorn mindex_api.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      # Database
+      MINDEX_DB_HOST: db
+      MINDEX_DB_PORT: 5432
+      MINDEX_DB_USER: ${MINDEX_DB_USER:-mindex}
+      MINDEX_DB_PASSWORD: ${MINDEX_DB_PASSWORD:-mindex}
+      MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
+
+      # Redis Cache
+      REDIS_URL: redis://redis:6379/0
+
+      # Supabase
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+
+      # NAS Storage
+      NAS_MOUNT_PATH: ${NAS_MOUNT_PATH:-/mnt/nas/mindex}
+
+      # API Configuration
+      API_TITLE: "MINDEX API (GPU)"
+      API_VERSION: "3.0.0"
+      API_PREFIX: "/api/mindex"
+      API_KEYS: '["${MINDEX_API_KEY:-change-me}"]'
+      API_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002"]'
+
+      # GPU Acceleration
+      GPU_ENABLED: "true"
+      GPU_DEVICE_ID: "0"
+      GPU_MEMORY_LIMIT_GB: "0"
+      CUVS_INDEX_DIR: /data/cuvs_indexes
+
+      # STATIC (via MAS)
+      STATIC_ENABLED: "${STATIC_ENABLED:-false}"
+      STATIC_MAS_ENDPOINT: "${STATIC_MAS_ENDPOINT:-}"
+
+      # Earth data API keys
+      NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
+      GIT_SHA: ${GIT_SHA:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${MINDEX_GPU_API_PORT:-8001}:8000"
+    volumes:
+      - ./mindex_api:/app/mindex_api:ro
+      - ./mindex_etl:/app/mindex_etl:ro
+      - ${NAS_MOUNT_PATH:-/mnt/nas/mindex}:/mnt/nas/mindex:rw
+      - cuvs-indexes:/data/cuvs_indexes
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/mindex/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - mindex-network
+    restart: unless-stopped
+    profiles:
+      - gpu
+
 volumes:
   mindex-postgres-data:
   mindex-redis-data:
+  cuvs-indexes:

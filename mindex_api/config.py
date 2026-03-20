@@ -269,6 +269,37 @@ class Settings(BaseSettings):
         description="Enable MAS device agent for LoRa/UART routing.",
     )
 
+    # =========================================================================
+    # GPU ACCELERATION (cuDF + cuVS + STATIC)
+    # =========================================================================
+
+    gpu_enabled: bool = Field(
+        False,
+        description="Enable GPU acceleration via RAPIDS (cuDF, cuVS). "
+        "Gracefully falls back to CPU when hardware/packages unavailable.",
+    )
+    gpu_device_id: int = Field(0, description="CUDA device ordinal.")
+    gpu_memory_limit_gb: float = Field(
+        0.0,
+        description="GPU memory limit in GB (0 = auto, uses 80%% of VRAM).",
+    )
+
+    # cuVS vector index settings
+    cuvs_index_dir: str = Field(
+        "/data/cuvs_indexes",
+        description="Persistent storage for cuVS vector indexes.",
+    )
+
+    # STATIC constrained decoding (via MAS)
+    static_enabled: bool = Field(
+        False,
+        description="Enable STATIC constrained decoding integration.",
+    )
+    static_mas_endpoint: Optional[str] = Field(
+        None,
+        description="MAS endpoint for STATIC constrained decoding requests.",
+    )
+
     @property
     def mindex_db_dsn(self) -> str:
         return (
