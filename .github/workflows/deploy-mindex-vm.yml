@@ -73,18 +73,15 @@ jobs:
 
       - name: Deploy to MINDEX VM
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-          IMAGE_FULL: ${{ env.IMAGE_FULL }}
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         with:
           host: ${{ secrets.MINDEX_HOST }}
           username: mycosoft
           key: ${{ secrets.VM_SSH_PRIVATE_KEY }}
           command_timeout: 10m
-          envs: IMAGE_FULL,GHCR_PULL_TOKEN
           script: |
             set -e
+            IMAGE_FULL="${{ env.IMAGE_FULL }}"
+            GHCR_PULL_TOKEN="${{ secrets.GHCR_PULL_TOKEN }}"
             if [ -n "$GHCR_PULL_TOKEN" ]; then
               echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u mycosoft --password-stdin
             fi
