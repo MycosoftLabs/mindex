@@ -38,6 +38,13 @@ dev = [
     "ruff>=0.6,<0.7",
     "black>=24.4,<25.0",
 ]
+gpu = [
+    "cudf-cu12>=26.02",
+    "cuvs-cu12>=25.02",
+    "cupy-cuda12x>=13.0",
+    "rmm-cu12>=26.02",
+    "blake3>=1.0",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"

@@ -1,0 +1,51 @@
+# GPU-accelerated MINDEX image
+# Built on NVIDIA RAPIDS for cuDF + cuVS support
+#
+# Usage:
+#   docker compose --profile gpu up -d api-gpu
+#
+# Requires:
+#   - NVIDIA GPU with CUDA 12.x support
+#   - nvidia-container-toolkit installed on host
+#   - Docker configured with nvidia runtime
+
+FROM nvcr.io/nvidia/rapidsai/base:26.02-cuda12.5-py3.11
+
+WORKDIR /app
+
+# Build arguments
+ARG GIT_SHA=""
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    GIT_SHA=${GIT_SHA} \
+    GPU_ENABLED=true
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency files first for layer caching
+COPY pyproject.toml README.md /app/
+
+# Copy application code
+COPY mindex_api /app/mindex_api
+COPY mindex_etl /app/mindex_etl
+COPY scripts /app/scripts
+COPY migrations /app/migrations
+COPY tests /app/tests
+
+# Install Python dependencies (base + GPU extras)
+RUN pip install --upgrade pip && \
+    pip install ".[gpu]" && \
+    pip cache purge
+
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/api/mindex/health || exit 1
+
+CMD ["uvicorn", "mindex_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
