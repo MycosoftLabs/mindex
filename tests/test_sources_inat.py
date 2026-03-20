@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import httpx
-import respx
+import pytest
+
+httpx = pytest.importorskip("httpx")
+respx = pytest.importorskip("respx")
 
 from mindex_etl.config import settings
 from mindex_etl.sources import inat

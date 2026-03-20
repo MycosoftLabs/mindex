@@ -107,81 +107,83 @@ def validate_crc(payload: bytes) -> bool:
 def cobs_encode(data: bytes) -> bytes:
     """
     Encode data using Consistent Overhead Byte Stuffing (COBS).
-    
+
     COBS eliminates all zero bytes from the data, allowing 0x00
     to be used as an unambiguous frame delimiter.
-    
+
     Args:
         data: Raw data to encode
-        
+
     Returns:
         COBS-encoded data (does NOT include frame delimiters)
     """
-    if not data:
-        return b'\x01'
-    
     output = bytearray()
-    block_start = 0
-    
-    for i, byte in enumerate(data):
+    # Reserve space for first code byte
+    code_idx = 0
+    output.append(0)  # placeholder
+    code = 1
+
+    for byte in data:
         if byte == 0:
-            # Found zero - emit block length + block data
-            block_len = i - block_start + 1
-            output.append(block_len)
-            output.extend(data[block_start:i])
-            block_start = i + 1
-    
-    # Handle final block
-    remaining = len(data) - block_start
-    if remaining > 0 or block_start == len(data):
-        output.append(remaining + 1)
-        output.extend(data[block_start:])
-    
+            # Finalize current block
+            output[code_idx] = code
+            code = 1
+            code_idx = len(output)
+            output.append(0)  # placeholder for next code
+        else:
+            output.append(byte)
+            code += 1
+            if code == 0xFF:
+                # Max block length reached — emit and start new block
+                output[code_idx] = code
+                code = 1
+                code_idx = len(output)
+                output.append(0)  # placeholder
+
+    # Finalize last block
+    output[code_idx] = code
     return bytes(output)
 
 
 def cobs_decode(data: bytes) -> bytes:
     """
     Decode COBS-encoded data.
-    
+
     Args:
         data: COBS-encoded data (without frame delimiters)
-        
+
     Returns:
         Decoded original data
-        
+
     Raises:
         ValueError: If data is malformed
     """
     if not data:
         return b''
-    
+
     output = bytearray()
     i = 0
-    
+
     while i < len(data):
         code = data[i]
         i += 1
-        
+
         if code == 0:
             raise ValueError("Zero byte in COBS data")
-        
-        # Copy block (code - 1 bytes)
+
+        # Copy block (code - 1 data bytes)
         block_len = code - 1
         if i + block_len > len(data):
             raise ValueError("COBS block extends past end of data")
-        
+
         output.extend(data[i:i + block_len])
         i += block_len
-        
-        # Add implicit zero unless this was the last block or code was 0xFF
+
+        # Add implicit zero after every block EXCEPT the final one
+        # and EXCEPT when code == 0xFF (continuation, no implicit zero)
         if i < len(data) and code != 0xFF:
             output.append(0)
-    
-    # Remove trailing zero if present
-    if output and output[-1] == 0:
-        output = output[:-1]
-    
+
     return bytes(output)
 
 

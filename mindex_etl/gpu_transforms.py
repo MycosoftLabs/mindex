@@ -40,8 +40,12 @@ except ImportError:
     _BACKEND = "pandas"
 
 # Always need pandas for DB writes and final conversion
-import pandas as pd
-import numpy as np
+try:
+    import pandas as pd
+    import numpy as np
+except ImportError:
+    pd = None  # type: ignore[assignment]
+    np = None  # type: ignore[assignment]
 
 
 def _log_perf(func_name: str, rows: int, elapsed: float) -> None:

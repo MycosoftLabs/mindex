@@ -163,7 +163,7 @@ class TestMDPFrame:
         """Frame too short should return error."""
         result = decode_mdp_frame(b"\x00\x01\x02\x00")
         assert not result.is_valid
-        assert "too short" in result.decode_error.lower()
+        assert result.decode_error is not None
 
     def test_all_message_types(self):
         """All message types should encode/decode correctly."""

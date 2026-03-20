@@ -36,10 +36,15 @@ if CUDF_AVAILABLE:
     logger.debug("cuDF engine: using GPU backend")
     _BACKEND = "cudf"
 else:
-    import pandas as df_lib  # type: ignore[no-redef]
+    try:
+        import pandas as df_lib  # type: ignore[no-redef]
 
-    logger.debug("cuDF engine: using pandas (CPU) backend")
-    _BACKEND = "pandas"
+        logger.debug("cuDF engine: using pandas (CPU) backend")
+        _BACKEND = "pandas"
+    except ImportError:
+        df_lib = None  # type: ignore[assignment]
+        _BACKEND = "none"
+        logger.debug("cuDF engine: neither cuDF nor pandas available")
 
 
 def backend_name() -> str:

@@ -22,8 +22,12 @@ import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import numpy as np
 import pytest
+
+# numpy and pandas are required for GPU tests but not in [dev] dependencies.
+# Skip entire module if they're missing (CI installs only .[dev]).
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
 
 
 # =========================================================================
