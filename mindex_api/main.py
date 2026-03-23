@@ -41,6 +41,12 @@ from .routers import (
     unified_search_router,
     wifisense_router,
     drone_router,
+    etl_router,
+    phylogeny_router,
+    genomes_router,
+    ledger_router,
+    mwave_router,
+    emissions_router,
 )
 from .routers.worldview import (
     worldview_search_router,
@@ -72,12 +78,12 @@ def create_app() -> FastAPI:
             "Worldview API for paying users (humans & agents), and Utility endpoints "
             "for health checks and onboarding."
         ),
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url=f"{settings.api_prefix}/docs",
+        redoc_url=f"{settings.api_prefix}/redoc",
+        openapi_url=f"{settings.api_prefix}/openapi.json",
     )
 
-    @app.get("/health")
+    @app.get("/health", include_in_schema=False)
     async def root_health() -> dict:
         return {"status": "healthy"}
 
@@ -207,6 +213,14 @@ def create_app() -> FastAPI:
     app.include_router(plasticity_router, prefix=prefix)
     app.include_router(nlm_router, prefix=prefix)
     app.include_router(search_answers_router, prefix=prefix)
+    
+    # New integration routers
+    app.include_router(etl_router, prefix=prefix)
+    app.include_router(phylogeny_router, prefix=prefix)
+    app.include_router(genomes_router, prefix=prefix)
+    app.include_router(ledger_router, prefix=prefix)
+    app.include_router(mwave_router, prefix=prefix)
+    app.include_router(emissions_router, prefix=prefix)
 
     return app
 

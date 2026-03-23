@@ -121,22 +121,26 @@ def cobs_encode(data: bytes) -> bytes:
         return b'\x01'
     
     output = bytearray()
-    block_start = 0
+    code = 1
+    code_idx = len(output)
+    output.append(0) # placeholder
     
-    for i, byte in enumerate(data):
+    for byte in data:
         if byte == 0:
-            # Found zero - emit block length + block data
-            block_len = i - block_start + 1
-            output.append(block_len)
-            output.extend(data[block_start:i])
-            block_start = i + 1
+            output[code_idx] = code
+            code = 1
+            code_idx = len(output)
+            output.append(0)
+        else:
+            output.append(byte)
+            code += 1
+            if code == 0xFF:
+                output[code_idx] = code
+                code = 1
+                code_idx = len(output)
+                output.append(0)
     
-    # Handle final block
-    remaining = len(data) - block_start
-    if remaining > 0 or block_start == len(data):
-        output.append(remaining + 1)
-        output.extend(data[block_start:])
-    
+    output[code_idx] = code
     return bytes(output)
 
 
@@ -177,10 +181,6 @@ def cobs_decode(data: bytes) -> bytes:
         # Add implicit zero unless this was the last block or code was 0xFF
         if i < len(data) and code != 0xFF:
             output.append(0)
-    
-    # Remove trailing zero if present
-    if output and output[-1] == 0:
-        output = output[:-1]
     
     return bytes(output)
 

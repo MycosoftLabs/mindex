@@ -1,4 +1,5 @@
 from .health import router as health_router
+from .emissions import router as emissions_router
 from .taxon import router as taxon_router
 from .telemetry import telemetry_router, devices_router
 from .observations import router as observations_router
@@ -25,8 +26,15 @@ from .nlm_router import nlm_router
 from .search_answers import router as search_answers_router
 from .key_management import router as key_management_router
 
+from .etl import router as etl_router
+from .phylogeny import router as phylogeny_router
+from .genomes import router as genomes_router
+from .ledger import router as ledger_router
+from .mwave import router as mwave_router
+
 __all__ = [
     "health_router",
+    "emissions_router",
     "taxon_router",
     "telemetry_router",
     "devices_router",
@@ -52,4 +60,9 @@ __all__ = [
     "nlm_router",
     "search_answers_router",
     "key_management_router",
+    "etl_router",
+    "phylogeny_router",
+    "genomes_router",
+    "ledger_router",
+    "mwave_router",
 ]

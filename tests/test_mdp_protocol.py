@@ -161,7 +161,7 @@ class TestMDPFrame:
 
     def test_decode_too_short(self):
         """Frame too short should return error."""
-        result = decode_mdp_frame(b"\x00\x01\x02\x00")
+        result = decode_mdp_frame(b"\x00\x01\x00") # decodes to empty payload
         assert not result.is_valid
         assert "too short" in result.decode_error.lower()
 

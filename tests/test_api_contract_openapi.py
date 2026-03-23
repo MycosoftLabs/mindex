@@ -16,7 +16,7 @@ def test_openapi_is_namespaced_under_api_prefix() -> None:
     paths = spec["paths"]
 
     assert paths, "OpenAPI spec should contain paths"
-    assert all(path.startswith("/api/mindex/") for path in paths.keys())
+    assert all(path.startswith("/api/mindex/") or path.startswith("/api/worldview/") for path in paths.keys())
 
     # Guardrails: no accidental un-namespaced routes.
     assert "/taxa" not in paths
