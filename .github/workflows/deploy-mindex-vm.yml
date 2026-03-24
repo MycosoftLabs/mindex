@@ -115,16 +115,6 @@ jobs:
       - name: Deploy to MINDEX VM
         uses: appleboy/ssh-action@v1.0.3
         env:
-          script: |
-            set -e
-            if [ -n "$GHCR_PULL_TOKEN" ]; then
-              echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u mycosoft --password-stdin
-            fi
-            echo "=== Pulling image ==="
-            docker pull "$IMAGE_FULL"
-            echo "=== Replacing container ==="
-            docker stop mindex-api 2>/dev/null || true
-            docker rm mindex-api 2>/dev/null || true
             MINDEX_DIR="/home/mycosoft/mindex"
             [ -d "/opt/mycosoft/mindex" ] && MINDEX_DIR="/opt/mycosoft/mindex"
             ENV_FILE_OPT=""
