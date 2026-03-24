@@ -316,6 +316,29 @@ def fetch_co2_trends(client: httpx.Client) -> list:
     return results
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+def fetch_ch4_trends(client: httpx.Client) -> list:
+    """Fetch global CH4 trend data from NOAA GML."""
+    resp = client.get(
+        f"{GML_API}/ccgg/trends/ch4/ch4_trend_gl.csv",
+        timeout=30,
+    )
+    resp.raise_for_status()
+    lines = resp.text.strip().split("\n")
+    results = []
+    for line in lines:
+        if line.startswith("#") or not line.strip():
+            continue
+        parts = line.split(",")
+        if len(parts) >= 3:
+            results.append({
+                "year": parts[0].strip(),
+                "month": parts[1].strip(),
+                "value": parts[2].strip(),
+            })
+    return results
+
+
 def map_co2_measurement(record: dict) -> dict:
     return {
         "source": "noaa_gml",

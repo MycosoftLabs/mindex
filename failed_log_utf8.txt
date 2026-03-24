@@ -1,0 +1,499 @@
+﻿build-hardened-image	UNKNOWN STEP	∩╗┐2026-03-23T01:58:45.6135884Z Current runner version: '2.332.0'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6166856Z ##[group]Runner Image Provisioner
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6168016Z Hosted Compute Agent
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6168747Z Version: 20260213.493
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6169597Z Commit: 5c115507f6dd24b8de37d8bbe0bb4509d0cc0fa3
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6170568Z Build Date: 2026-02-13T00:28:41Z
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6171872Z Worker ID: {816893f9-fa8a-4e69-b214-dac560e055cf}
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6172919Z Azure Region: centralus
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6173745Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6175650Z ##[group]Operating System
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6176438Z Ubuntu
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6177157Z 24.04.3
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6177792Z LTS
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6178509Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6179156Z ##[group]Runner Image
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6179969Z Image: ubuntu-24.04
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6180713Z Version: 20260309.50.1
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6182575Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260309.50/images/ubuntu/Ubuntu2404-Readme.md
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6184877Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260309.50
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6186353Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6190383Z ##[group]GITHUB_TOKEN Permissions
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6193438Z Actions: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6194251Z ArtifactMetadata: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6195047Z Attestations: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6195798Z Checks: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6196482Z Contents: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6197207Z Deployments: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6197858Z Discussions: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6198721Z Issues: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6199350Z Metadata: read
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6200011Z Models: read
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6200727Z Packages: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6201412Z Pages: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6202407Z PullRequests: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6203197Z RepositoryProjects: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6204054Z SecurityEvents: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6204805Z Statuses: write
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6205567Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6208207Z Secret source: Actions
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6209400Z Prepare workflow directory
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6705258Z Prepare all required actions
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.6744543Z Getting action download info
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:45.9770644Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.1192423Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.2897637Z Complete job name: build-hardened-image
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3432650Z ##[group]Run actions/checkout@v4
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3433436Z with:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3433859Z   repository: MycosoftLabs/mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3434560Z   token: ***
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3435002Z   ssh-strict: true
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3435401Z   ssh-user: git
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3435874Z   persist-credentials: true
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3436313Z   clean: true
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3436756Z   sparse-checkout-cone-mode: true
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3437266Z   fetch-depth: 1
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3437690Z   fetch-tags: false
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3438119Z   show-progress: true
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3438536Z   lfs: false
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3438959Z   submodules: false
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3439365Z   set-safe-directory: true
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3440060Z env:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3440461Z   IRON_BANK_REGISTRY: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3440906Z   IRON_BANK_USERNAME: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3441366Z   IRON_BANK_PASSWORD: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3441919Z   IRON_BANK_BASE_IMAGE: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.3442420Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4429834Z Syncing repository: MycosoftLabs/mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4431604Z ##[group]Getting Git version info
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4432469Z Working directory is '/home/runner/work/mindex/mindex'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4433535Z [command]/usr/bin/git version
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4474992Z git version 2.53.0
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4496953Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4517342Z Temporarily overriding HOME='/home/runner/work/_temp/cb32dd95-14a6-4b9e-bb92-343b8e700000' before making global git config changes
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4518807Z Adding repository directory to the temporary git global config as a safe directory
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4522007Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/mindex/mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4552909Z Deleting the contents of '/home/runner/work/mindex/mindex'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4555971Z ##[group]Initializing the repository
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4559840Z [command]/usr/bin/git init /home/runner/work/mindex/mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4624801Z hint: Using 'master' as the name for the initial branch. This default branch name
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4626457Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4628001Z hint: to use in all of your new repositories, which will suppress this warning,
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4628948Z hint: call:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4629338Z hint:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4629830Z hint: 	git config --global init.defaultBranch <name>
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4630382Z hint:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4630994Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4632228Z hint: 'development'. The just-created branch can be renamed via this command:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4633024Z hint:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4633476Z hint: 	git branch -m <name>
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4633905Z hint:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4634488Z hint: Disable this message with "git config set advice.defaultBranchName false"
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4635427Z Initialized empty Git repository in /home/runner/work/mindex/mindex/.git/
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4637435Z [command]/usr/bin/git remote add origin https://github.com/MycosoftLabs/mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4662178Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4662978Z ##[group]Disabling automatic garbage collection
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4665589Z [command]/usr/bin/git config --local gc.auto 0
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4687655Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4688321Z ##[group]Setting up auth
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4693758Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4717220Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.4966825Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.5097501Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.5171473Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.5198597Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.5366739Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.5393524Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.5394601Z ##[group]Fetching the repository
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.5402560Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +620a725ed348f57ee63e78a68943b8dad098aee0:refs/remotes/origin/main
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9715013Z From https://github.com/MycosoftLabs/mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9715806Z  * [new ref]         620a725ed348f57ee63e78a68943b8dad098aee0 -> origin/main
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9740515Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9741508Z ##[group]Determining the checkout info
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9742921Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9748271Z [command]/usr/bin/git sparse-checkout disable
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9780817Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9801357Z ##[group]Checking out the ref
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9805737Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9976327Z Switched to a new branch 'main'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9977485Z branch 'main' set up to track 'origin/main'.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:46.9982315Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0009801Z [command]/usr/bin/git log -1 --format=%H
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0027064Z 620a725ed348f57ee63e78a68943b8dad098aee0
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0224360Z ##[group]Run actions/setup-python@v5
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0224809Z with:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0225132Z   python-version: 3.11
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0225493Z   check-latest: false
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0225981Z   token: ***
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0226300Z   update-environment: true
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0226673Z   allow-prereleases: false
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0227044Z   freethreaded: false
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0227380Z env:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0227688Z   IRON_BANK_REGISTRY: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0228044Z   IRON_BANK_USERNAME: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0228396Z   IRON_BANK_PASSWORD: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0228730Z   IRON_BANK_BASE_IMAGE: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.0229073Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.1805486Z ##[group]Installed versions
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2160198Z Successfully set up CPython (3.11.15)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2161980Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2279065Z ##[group]Run python -m pip install --upgrade pip
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2280625Z [36;1mpython -m pip install --upgrade pip[0m
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2282423Z [36;1mpip install .[dev][0m
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2352675Z shell: /usr/bin/bash -e {0}
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2353686Z env:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2354423Z   IRON_BANK_REGISTRY: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2355309Z   IRON_BANK_USERNAME: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2356200Z   IRON_BANK_PASSWORD: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2357098Z   IRON_BANK_BASE_IMAGE: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2358272Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.15/x64
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2360075Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib/pkgconfig
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2362019Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2363623Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2365240Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2366872Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:47.2368194Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:49.3376391Z Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages (26.0.1)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:50.2980604Z Processing ./.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:50.2996862Z   Installing build dependencies: started
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:51.3587158Z   Installing build dependencies: finished with status 'done'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:51.3593386Z   Getting requirements to build wheel: started
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:51.7887625Z   Getting requirements to build wheel: finished with status 'done'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:51.7897525Z   Preparing metadata (pyproject.toml): started
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:51.9483928Z   Preparing metadata (pyproject.toml): finished with status 'done'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.0956978Z Collecting fastapi<0.112,>=0.111 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.2177092Z   Downloading fastapi-0.111.1-py3-none-any.whl.metadata (26 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.2657028Z Collecting uvicorn<0.31,>=0.30 (from uvicorn[standard]<0.31,>=0.30->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.2918504Z   Downloading uvicorn-0.30.6-py3-none-any.whl.metadata (6.6 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.5907137Z Collecting sqlalchemy<2.1,>=2.0 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.6174327Z   Downloading sqlalchemy-2.0.48-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.6800520Z Collecting asyncpg<0.30,>=0.29 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.7068252Z   Downloading asyncpg-0.29.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.4 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.7351417Z Collecting psycopg<3.2,>=3.1 (from psycopg[binary]<3.2,>=3.1->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.7614641Z   Downloading psycopg-3.1.20-py3-none-any.whl.metadata (4.2 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.8850889Z Collecting pydantic<3.0,>=2.8 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.9117354Z   Downloading pydantic-2.12.5-py3-none-any.whl.metadata (90 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:52.9743111Z Collecting pydantic-settings<3.0,>=2.2 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.0007936Z   Downloading pydantic_settings-2.13.1-py3-none-any.whl.metadata (3.4 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.0262851Z Collecting python-dotenv<2.0,>=1.0 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.0528697Z   Downloading python_dotenv-1.2.2-py3-none-any.whl.metadata (27 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.0986659Z Collecting httpx<0.28,>=0.27 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.1247869Z   Downloading httpx-0.27.2-py3-none-any.whl.metadata (7.1 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.1500836Z Collecting tenacity<9.0,>=8.4 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.1762578Z   Downloading tenacity-8.5.0-py3-none-any.whl.metadata (1.2 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.6635229Z Collecting aiohttp<4.0,>=3.9 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.6902093Z   Downloading aiohttp-3.13.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.7176818Z Collecting beautifulsoup4<5.0,>=4.12 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.7440175Z   Downloading beautifulsoup4-4.14.3-py3-none-any.whl.metadata (3.8 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.9162845Z Collecting lxml<6.0,>=5.2 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.9426132Z   Downloading lxml-5.4.0-cp311-cp311-manylinux_2_28_x86_64.whl.metadata (3.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.9723365Z Collecting requests<3.0,>=2.32 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:53.9984882Z   Downloading requests-2.32.5-py3-none-any.whl.metadata (4.9 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.0260809Z Collecting openpyxl<3.2,>=3.1 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.0522060Z   Downloading openpyxl-3.1.5-py2.py3-none-any.whl.metadata (2.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.0882403Z Collecting pytest<9.0,>=8.3 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.1143869Z   Downloading pytest-8.4.2-py3-none-any.whl.metadata (7.7 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.1420846Z Collecting pytest-asyncio<0.24,>=0.23 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.1682296Z   Downloading pytest_asyncio-0.23.8-py3-none-any.whl.metadata (3.9 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.1951172Z Collecting pytest-cov<6.0,>=5.0 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.2212285Z   Downloading pytest_cov-5.0.0-py3-none-any.whl.metadata (27 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.2494558Z Collecting respx<0.22,>=0.21 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.2758115Z   Downloading respx-0.21.1-py2.py3-none-any.whl.metadata (4.1 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.6174544Z Collecting ruff<0.7,>=0.6 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.6446358Z   Downloading ruff-0.6.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (25 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.7053011Z Collecting black<25.0,>=24.4 (from mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.7320037Z   Downloading black-24.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_28_x86_64.whl.metadata (79 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.7694784Z Collecting aiohappyeyeballs>=2.5.0 (from aiohttp<4.0,>=3.9->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.7959925Z   Downloading aiohappyeyeballs-2.6.1-py3-none-any.whl.metadata (5.9 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.8174026Z Collecting aiosignal>=1.4.0 (from aiohttp<4.0,>=3.9->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.8435678Z   Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.8755841Z Collecting attrs>=17.3.0 (from aiohttp<4.0,>=3.9->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.9017377Z   Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.9679884Z Collecting frozenlist>=1.1.1 (from aiohttp<4.0,>=3.9->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:54.9942453Z   Downloading frozenlist-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.2460206Z Collecting multidict<7.0,>=4.5 (from aiohttp<4.0,>=3.9->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.2725895Z   Downloading multidict-6.7.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.3278143Z Collecting propcache>=0.2.0 (from aiohttp<4.0,>=3.9->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.3542761Z   Downloading propcache-0.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (13 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.5806247Z Collecting yarl<2.0,>=1.17.0 (from aiohttp<4.0,>=3.9->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.6070273Z   Downloading yarl-1.23.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (79 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.6415846Z Collecting async-timeout>=4.0.3 (from asyncpg<0.30,>=0.29->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.6681373Z   Downloading async_timeout-5.0.1-py3-none-any.whl.metadata (5.1 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.7586852Z Collecting soupsieve>=1.6.1 (from beautifulsoup4<5.0,>=4.12->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.7851201Z   Downloading soupsieve-2.8.3-py3-none-any.whl.metadata (4.6 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.8124418Z Collecting typing-extensions>=4.0.0 (from beautifulsoup4<5.0,>=4.12->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.8388984Z   Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.8651534Z Collecting click>=8.0.0 (from black<25.0,>=24.4->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.8913635Z   Downloading click-8.3.1-py3-none-any.whl.metadata (2.6 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.9124606Z Collecting mypy-extensions>=0.4.3 (from black<25.0,>=24.4->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.9385043Z   Downloading mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.9619178Z Collecting packaging>=22.0 (from black<25.0,>=24.4->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.9631458Z   Using cached packaging-26.0-py3-none-any.whl.metadata (3.3 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:55.9841541Z Collecting pathspec>=0.9.0 (from black<25.0,>=24.4->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.0102629Z   Downloading pathspec-1.0.4-py3-none-any.whl.metadata (13 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.0380955Z Collecting platformdirs>=2 (from black<25.0,>=24.4->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.0639796Z   Downloading platformdirs-4.9.4-py3-none-any.whl.metadata (4.7 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.0963611Z Collecting starlette<0.38.0,>=0.37.2 (from fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.1223718Z   Downloading starlette-0.37.2-py3-none-any.whl.metadata (5.9 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.1504978Z Collecting fastapi-cli>=0.0.2 (from fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.1768546Z   Downloading fastapi_cli-0.0.24-py3-none-any.whl.metadata (6.4 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.2027403Z Collecting jinja2>=2.11.2 (from fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.2287793Z   Downloading jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.2538453Z Collecting python-multipart>=0.0.7 (from fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.2799475Z   Downloading python_multipart-0.0.22-py3-none-any.whl.metadata (1.8 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.3020358Z Collecting email_validator>=2.0.0 (from fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.3282106Z   Downloading email_validator-2.3.0-py3-none-any.whl.metadata (26 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.3587021Z Collecting anyio (from httpx<0.28,>=0.27->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.3848478Z   Downloading anyio-4.12.1-py3-none-any.whl.metadata (4.3 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.4137563Z Collecting certifi (from httpx<0.28,>=0.27->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.4398160Z   Downloading certifi-2026.2.25-py3-none-any.whl.metadata (2.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.4650767Z Collecting httpcore==1.* (from httpx<0.28,>=0.27->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.4912190Z   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.5150957Z Collecting idna (from httpx<0.28,>=0.27->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.5410921Z   Downloading idna-3.11-py3-none-any.whl.metadata (8.4 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.5618598Z Collecting sniffio (from httpx<0.28,>=0.27->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.5879351Z   Downloading sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.6102958Z Collecting h11>=0.16 (from httpcore==1.*->httpx<0.28,>=0.27->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.6365122Z   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.6594933Z Collecting et-xmlfile (from openpyxl<3.2,>=3.1->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.6856862Z   Downloading et_xmlfile-2.0.0-py3-none-any.whl.metadata (2.7 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.8284649Z Collecting psycopg-binary==3.1.20 (from psycopg[binary]<3.2,>=3.1->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.8555082Z   Downloading psycopg_binary-3.1.20-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (2.8 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.8777164Z Collecting annotated-types>=0.6.0 (from pydantic<3.0,>=2.8->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:56.9038516Z   Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.5102653Z Collecting pydantic-core==2.41.5 (from pydantic<3.0,>=2.8->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.5368334Z   Downloading pydantic_core-2.41.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.5591244Z Collecting typing-inspection>=0.4.2 (from pydantic<3.0,>=2.8->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.5855175Z   Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.6145147Z Collecting iniconfig>=1 (from pytest<9.0,>=8.3->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.6408941Z   Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.6653734Z Collecting pluggy<2,>=1.5 (from pytest<9.0,>=8.3->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.6915961Z   Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.7190592Z Collecting pygments>=2.7.2 (from pytest<9.0,>=8.3->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:57.7452705Z   Downloading pygments-2.19.2-py3-none-any.whl.metadata (2.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.1509906Z Collecting coverage>=5.2.1 (from coverage[toml]>=5.2.1->pytest-cov<6.0,>=5.0->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.1772602Z   Downloading coverage-7.13.5-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (8.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.2617041Z Collecting charset_normalizer<4,>=2 (from requests<3.0,>=2.32->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.2878238Z   Downloading charset_normalizer-3.4.6-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.3237960Z Collecting urllib3<3,>=1.21.1 (from requests<3.0,>=2.32->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.3501084Z   Downloading urllib3-2.6.3-py3-none-any.whl.metadata (6.9 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.4677901Z Collecting greenlet>=1 (from sqlalchemy<2.1,>=2.0->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.4942760Z   Downloading greenlet-3.3.2-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (3.7 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.5406621Z Collecting httptools>=0.5.0 (from uvicorn[standard]<0.31,>=0.30->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.5670429Z   Downloading httptools-0.7.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (3.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.6108691Z Collecting pyyaml>=5.1 (from uvicorn[standard]<0.31,>=0.30->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.6376947Z   Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.6810924Z Collecting uvloop!=0.15.0,!=0.15.1,>=0.14.0 (from uvicorn[standard]<0.31,>=0.30->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.7074559Z   Downloading uvloop-0.22.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (4.9 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.7806894Z Collecting watchfiles>=0.13 (from uvicorn[standard]<0.31,>=0.30->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.8071453Z   Downloading watchfiles-1.1.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.8875179Z Collecting websockets>=10.4 (from uvicorn[standard]<0.31,>=0.30->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.9137053Z   Downloading websockets-16.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (6.8 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.9678383Z Collecting dnspython>=2.0.0 (from email_validator>=2.0.0->fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:58.9939790Z   Downloading dnspython-2.8.0-py3-none-any.whl.metadata (5.7 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.0242665Z Collecting typer>=0.16.0 (from fastapi-cli>=0.0.2->fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.0502235Z   Downloading typer-0.24.1-py3-none-any.whl.metadata (16 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.0774253Z Collecting rich-toolkit>=0.14.8 (from fastapi-cli>=0.0.2->fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.1035859Z   Downloading rich_toolkit-0.19.7-py3-none-any.whl.metadata (1.0 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.1599427Z Collecting MarkupSafe>=2.0 (from jinja2>=2.11.2->fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.1864551Z   Downloading markupsafe-3.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.2313186Z Collecting rich>=13.7.1 (from rich-toolkit>=0.14.8->fastapi-cli>=0.0.2->fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.2576081Z   Downloading rich-14.3.3-py3-none-any.whl.metadata (18 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.2839167Z Collecting markdown-it-py>=2.2.0 (from rich>=13.7.1->rich-toolkit>=0.14.8->fastapi-cli>=0.0.2->fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.3102694Z   Downloading markdown_it_py-4.0.0-py3-none-any.whl.metadata (7.3 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.3352166Z Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.7.1->rich-toolkit>=0.14.8->fastapi-cli>=0.0.2->fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.3614623Z   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.3878185Z Collecting shellingham>=1.3.0 (from typer>=0.16.0->fastapi-cli>=0.0.2->fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.4138695Z   Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.4362188Z Collecting annotated-doc>=0.0.2 (from typer>=0.16.0->fastapi-cli>=0.0.2->fastapi<0.112,>=0.111->mindex==0.1.0)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.4621805Z   Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.5002181Z Downloading aiohttp-3.13.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.5879337Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 1.7/1.7 MB 27.0 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.6146558Z Downloading asyncpg-0.29.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.8 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.6492056Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 2.8/2.8 MB 79.3 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.6759457Z Downloading beautifulsoup4-4.14.3-py3-none-any.whl (107 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.7046242Z Downloading black-24.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.7134989Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 1.7/1.7 MB 221.2 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.7398348Z Downloading fastapi-0.111.1-py3-none-any.whl (92 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.7679971Z Downloading httpx-0.27.2-py3-none-any.whl (76 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.7961129Z Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.8248031Z Downloading lxml-5.4.0-cp311-cp311-manylinux_2_28_x86_64.whl (4.9 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.8596782Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 4.9/4.9 MB 143.7 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.8859984Z Downloading multidict-6.7.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (246 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.9146119Z Downloading openpyxl-3.1.5-py2.py3-none-any.whl (250 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.9440024Z Downloading psycopg-3.1.20-py3-none-any.whl (179 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:58:59.9727162Z Downloading psycopg_binary-3.1.20-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.2 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.0048617Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 4.2/4.2 MB 131.1 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.0310595Z Downloading pydantic-2.12.5-py3-none-any.whl (463 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.0599913Z Downloading pydantic_core-2.41.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.0681656Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 2.1/2.1 MB 296.5 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.0947785Z Downloading pydantic_settings-2.13.1-py3-none-any.whl (58 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.1228309Z Downloading pytest-8.4.2-py3-none-any.whl (365 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.1518492Z Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.1796534Z Downloading pytest_asyncio-0.23.8-py3-none-any.whl (17 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.2071367Z Downloading pytest_cov-5.0.0-py3-none-any.whl (21 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.2347268Z Downloading python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.2625593Z Downloading requests-2.32.5-py3-none-any.whl (64 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.2908672Z Downloading charset_normalizer-3.4.6-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (204 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.3189305Z Downloading idna-3.11-py3-none-any.whl (71 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.3467972Z Downloading respx-0.21.1-py2.py3-none-any.whl (25 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.3739986Z Downloading ruff-0.6.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.9 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.4403523Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 10.9/10.9 MB 166.1 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.4664543Z Downloading sqlalchemy-2.0.48-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.3 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.4768675Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 3.3/3.3 MB 360.4 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.5028114Z Downloading starlette-0.37.2-py3-none-any.whl (71 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.5305695Z Downloading anyio-4.12.1-py3-none-any.whl (113 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.5585453Z Downloading tenacity-8.5.0-py3-none-any.whl (28 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.5860004Z Downloading urllib3-2.6.3-py3-none-any.whl (131 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.6139103Z Downloading uvicorn-0.30.6-py3-none-any.whl (62 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.6421501Z Downloading yarl-1.23.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (102 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.6700922Z Downloading aiohappyeyeballs-2.6.1-py3-none-any.whl (15 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.6980139Z Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.7260614Z Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.7540279Z Downloading async_timeout-5.0.1-py3-none-any.whl (6.2 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.7819437Z Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.8103981Z Downloading certifi-2026.2.25-py3-none-any.whl (153 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.8386454Z Downloading click-8.3.1-py3-none-any.whl (108 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.8668112Z Downloading coverage-7.13.5-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (252 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.8956025Z Downloading email_validator-2.3.0-py3-none-any.whl (35 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.9232248Z Downloading dnspython-2.8.0-py3-none-any.whl (331 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.9512171Z Downloading fastapi_cli-0.0.24-py3-none-any.whl (12 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:00.9789740Z Downloading frozenlist-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (231 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.0069256Z Downloading greenlet-3.3.2-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (594 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.0113994Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 594.2/594.2 kB 130.3 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.0377010Z Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.0650651Z Downloading httptools-0.7.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (456 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.0933889Z Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.1210351Z Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.1492655Z Downloading markupsafe-3.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.1768012Z Downloading mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.1793071Z Using cached packaging-26.0-py3-none-any.whl (74 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.2056679Z Downloading pathspec-1.0.4-py3-none-any.whl (55 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.2331392Z Downloading platformdirs-4.9.4-py3-none-any.whl (21 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.2603837Z Downloading propcache-0.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (210 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.2883936Z Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.2943855Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 1.2/1.2 MB 250.8 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.3204692Z Downloading python_multipart-0.0.22-py3-none-any.whl (24 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.3477792Z Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (806 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.3524132Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 806.6/806.6 kB 195.6 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.3785235Z Downloading rich_toolkit-0.19.7-py3-none-any.whl (32 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.4061970Z Downloading rich-14.3.3-py3-none-any.whl (310 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.4346146Z Downloading markdown_it_py-4.0.0-py3-none-any.whl (87 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.4621028Z Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.4895488Z Downloading soupsieve-2.8.3-py3-none-any.whl (37 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.5173705Z Downloading typer-0.24.1-py3-none-any.whl (56 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.5449042Z Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.5720835Z Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.6001643Z Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.6279202Z Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.6564666Z Downloading uvloop-0.22.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.8 MB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.6688675Z    ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü 3.8/3.8 MB 343.4 MB/s  0:00:00
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.6954355Z Downloading watchfiles-1.1.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (456 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.7248065Z Downloading websockets-16.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (184 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.7532813Z Downloading et_xmlfile-2.0.0-py3-none-any.whl (18 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.7813268Z Downloading sniffio-1.3.1-py3-none-any.whl (10 kB)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.8658968Z Building wheels for collected packages: mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:01.8664582Z   Building wheel for mindex (pyproject.toml): started
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:02.1164888Z   Building wheel for mindex (pyproject.toml): finished with status 'done'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:02.1174077Z   Created wheel for mindex: filename=mindex-0.1.0-py3-none-any.whl size=387681 sha256=d7b799fd661c687ce25111741dbed6f20a72c1e6e401742a524dfaf552a1b020
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:02.1175485Z   Stored in directory: /tmp/pip-ephem-wheel-cache-grev8t3o/wheels/b3/be/2c/b65b9503f0690205993b3e2e55faebbedf8ad53397cf2d5dad
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:02.1201629Z Successfully built mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:02.2125365Z Installing collected packages: websockets, uvloop, urllib3, typing-extensions, tenacity, soupsieve, sniffio, shellingham, ruff, pyyaml, python-multipart, python-dotenv, pygments, psycopg-binary, propcache, pluggy, platformdirs, pathspec, packaging, mypy-extensions, multidict, mdurl, MarkupSafe, lxml, iniconfig, idna, httptools, h11, greenlet, frozenlist, et-xmlfile, dnspython, coverage, click, charset_normalizer, certifi, attrs, async-timeout, annotated-types, annotated-doc, aiohappyeyeballs, yarl, uvicorn, typing-inspection, sqlalchemy, requests, pytest, pydantic-core, psycopg, openpyxl, markdown-it-py, jinja2, httpcore, email_validator, black, beautifulsoup4, asyncpg, anyio, aiosignal, watchfiles, starlette, rich, pytest-cov, pytest-asyncio, pydantic, httpx, aiohttp, typer, rich-toolkit, respx, pydantic-settings, fastapi-cli, fastapi, mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:06.9127166Z 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:06.9157220Z Successfully installed MarkupSafe-3.0.3 aiohappyeyeballs-2.6.1 aiohttp-3.13.3 aiosignal-1.4.0 annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.12.1 async-timeout-5.0.1 asyncpg-0.29.0 attrs-26.1.0 beautifulsoup4-4.14.3 black-24.10.0 certifi-2026.2.25 charset_normalizer-3.4.6 click-8.3.1 coverage-7.13.5 dnspython-2.8.0 email_validator-2.3.0 et-xmlfile-2.0.0 fastapi-0.111.1 fastapi-cli-0.0.24 frozenlist-1.8.0 greenlet-3.3.2 h11-0.16.0 httpcore-1.0.9 httptools-0.7.1 httpx-0.27.2 idna-3.11 iniconfig-2.3.0 jinja2-3.1.6 lxml-5.4.0 markdown-it-py-4.0.0 mdurl-0.1.2 mindex-0.1.0 multidict-6.7.1 mypy-extensions-1.1.0 openpyxl-3.1.5 packaging-26.0 pathspec-1.0.4 platformdirs-4.9.4 pluggy-1.6.0 propcache-0.4.1 psycopg-3.1.20 psycopg-binary-3.1.20 pydantic-2.12.5 pydantic-core-2.41.5 pydantic-settings-2.13.1 pygments-2.19.2 pytest-8.4.2 pytest-asyncio-0.23.8 pytest-cov-5.0.0 python-dotenv-1.2.2 python-multipart-0.0.22 pyyaml-6.0.3 requests-2.32.5 respx-0.21.1 rich-14.3.3 rich-toolkit-0.19.7 ruff-0.6.9 shellingham-1.5.4 sniffio-1.3.1 soupsieve-2.8.3 sqlalchemy-2.0.48 starlette-0.37.2 tenacity-8.5.0 typer-0.24.1 typing-extensions-4.15.0 typing-inspection-0.4.2 urllib3-2.6.3 uvicorn-0.30.6 uvloop-0.22.1 watchfiles-1.1.1 websockets-16.0 yarl-1.23.0
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5938939Z ##[group]Run pytest
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5939168Z [36;1mpytest[0m
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5969438Z shell: /usr/bin/bash -e {0}
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5969700Z env:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5969862Z   IRON_BANK_REGISTRY: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5970054Z   IRON_BANK_USERNAME: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5970226Z   IRON_BANK_PASSWORD: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5970415Z   IRON_BANK_BASE_IMAGE: 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5970674Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.15/x64
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5971061Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib/pkgconfig
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5971428Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5972623Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5972961Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5973295Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:07.5973591Z ##[endgroup]
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4954623Z 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4955371Z ==================================== ERRORS ====================================
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4955847Z _____________ ERROR collecting tests/test_api_contract_openapi.py ______________
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4956704Z ImportError while importing test module '/home/runner/work/mindex/mindex/tests/test_api_contract_openapi.py'.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4957519Z Hint: make sure your test modules/packages have valid Python names.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4958018Z Traceback:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4958554Z /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/importlib/__init__.py:126: in import_module
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4959345Z     return _bootstrap._gcd_import(name[level:], package, level)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4959887Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4960365Z tests/test_api_contract_openapi.py:5: in <module>
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4960699Z     from mindex_api.main import create_app
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4961132Z /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/main.py:17: in <module>
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4961564Z     from .routers import (
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4962368Z /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/routers/__init__.py:2: in <module>
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4962860Z     from .emissions import router as emissions_router
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4963226Z E   ModuleNotFoundError: No module named 'mindex_api.routers.emissions'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4963638Z __________________ ERROR collecting tests/test_api_routes.py ___________________
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4964137Z ImportError while importing test module '/home/runner/work/mindex/mindex/tests/test_api_routes.py'.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4964654Z Hint: make sure your test modules/packages have valid Python names.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4964944Z Traceback:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4965273Z /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/importlib/__init__.py:126: in import_module
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4965731Z     return _bootstrap._gcd_import(name[level:], package, level)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4966325Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4966574Z tests/test_api_routes.py:9: in <module>
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4966816Z     from mindex_api.main import create_app
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4967228Z /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/main.py:17: in <module>
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4967648Z     from .routers import (
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4968054Z /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/routers/__init__.py:2: in <module>
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4968528Z     from .emissions import router as emissions_router
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4968888Z E   ModuleNotFoundError: No module named 'mindex_api.routers.emissions'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4969301Z ________________ ERROR collecting tests/test_gpu_integration.py ________________
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4969824Z ImportError while importing test module '/home/runner/work/mindex/mindex/tests/test_gpu_integration.py'.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4970542Z Hint: make sure your test modules/packages have valid Python names.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4970845Z Traceback:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4971175Z /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/importlib/__init__.py:126: in import_module
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4971626Z     return _bootstrap._gcd_import(name[level:], package, level)
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4972103Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4972369Z tests/test_gpu_integration.py:25: in <module>
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4972623Z     import numpy as np
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4972842Z E   ModuleNotFoundError: No module named 'numpy'
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4973144Z =============================== warnings summary ===============================
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4973614Z ../../../../../opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/starlette/formparsers.py:12
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4974489Z   /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/starlette/formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4975127Z     import multipart
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4975244Z 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4975520Z ../../../../../opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/schemas/common.py:24
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4976852Z   /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/schemas/common.py:24: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4977996Z     class GeoJSON(BaseModel):
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4978135Z 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4978412Z ../../../../../opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/schemas/mycobrain.py:65
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4979727Z   /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/schemas/mycobrain.py:65: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4980852Z     class AnalogChannelConfig(BaseModel):
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4981015Z 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4981297Z ../../../../../opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/schemas/mycobrain.py:216
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4982764Z   /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/mindex_api/schemas/mycobrain.py:216: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4983936Z     class TelemetryPayload(BaseModel):
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4984095Z 
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4984279Z -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4984875Z =========================== short test summary info ============================
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4985183Z ERROR tests/test_api_contract_openapi.py
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4985431Z ERROR tests/test_api_routes.py
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4985665Z ERROR tests/test_gpu_integration.py
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4985968Z !!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.4986281Z 4 warnings, 3 errors in 0.95s
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.6145543Z ##[error]Process completed with exit code 2.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.6249768Z Post job cleanup.
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7103207Z [command]/usr/bin/git version
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7135175Z git version 2.53.0
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7173930Z Temporarily overriding HOME='/home/runner/work/_temp/084b0379-fae5-49d7-9c51-e6492010c99a' before making global git config changes
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7175101Z Adding repository directory to the temporary git global config as a safe directory
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7187319Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/mindex/mindex
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7218567Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7246771Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7425864Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7443452Z http.https://github.com/.extraheader
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7454444Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7479852Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7651859Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7677637Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.7936212Z Cleaning up orphan processes
+build-hardened-image	UNKNOWN STEP	2026-03-23T01:59:09.8138232Z ##[warning]Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@v4, actions/setup-python@v5. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

@@ -1,0 +1,285 @@
+FF......................................................FFF....F........ [ 69%]
+..........................Fss..                                          [100%]
+================================== FAILURES ===================================
+_________________ test_openapi_is_namespaced_under_api_prefix _________________
+
+    def test_openapi_is_namespaced_under_api_prefix() -> None:
+        app = create_app()
+        client = TestClient(app)
+    
+        resp = client.get("/api/mindex/openapi.json")
+>       assert resp.status_code == 200
+E       assert 404 == 200
+E        +  where 404 = <Response [404 Not Found]>.status_code
+
+tests\test_api_contract_openapi.py:13: AssertionError
+______________ test_openapi_contract_includes_stable_dto_shapes _______________
+
+    def test_openapi_contract_includes_stable_dto_shapes() -> None:
+        app = create_app()
+        client = TestClient(app)
+    
+        spec = client.get("/api/mindex/openapi.json").json()
+>       schemas = spec["components"]["schemas"]
+                  ^^^^^^^^^^^^^^^^^^
+E       KeyError: 'components'
+
+tests\test_api_contract_openapi.py:37: KeyError
+______________________ TestCOBS.test_cobs_multiple_zeros ______________________
+
+self = <test_mdp_protocol.TestCOBS object at 0x00000161FBC0C510>
+
+    def test_cobs_multiple_zeros(self):
+        """Multiple zeros are handled correctly."""
+        data = b"\x00\x00\x00"
+        encoded = cobs_encode(data)
+        decoded = cobs_decode(encoded)
+>       assert decoded == data
+E       AssertionError: assert b'\x00\x00' == b'\x00\x00\x00'
+E         
+E         Use -v to get more diff
+
+tests\test_mdp_protocol.py:88: AssertionError
+________________________ TestCOBS.test_cobs_roundtrip _________________________
+
+self = <test_mdp_protocol.TestCOBS object at 0x00000161FBBD96D0>
+
+    def test_cobs_roundtrip(self):
+        """Encode then decode should return original data."""
+        test_cases = [
+            b"",
+            b"\x00",
+            b"Hello, World!",
+            b"\x00\x00\x00",
+            b"A\x00B\x00C",
+            bytes(range(256)),  # All byte values
+        ]
+        for data in test_cases:
+            encoded = cobs_encode(data)
+            decoded = cobs_decode(encoded)
+>           assert decoded == data, f"Roundtrip failed for {data!r}"
+E           AssertionError: Roundtrip failed for b'\x00'
+E           assert b'' == b'\x00'
+E             
+E             Use -v to get more diff
+
+tests\test_mdp_protocol.py:103: AssertionError
+____________________ TestCOBS.test_cobs_no_zeros_in_output ____________________
+
+self = <test_mdp_protocol.TestCOBS object at 0x00000161FBBC4D10>
+
+    def test_cobs_no_zeros_in_output(self):
+        """COBS encoded data should never contain zeros."""
+        test_cases = [
+            b"\x00",
+            b"\x00\x00",
+            b"A\x00B\x00C\x00D",
+            bytes(range(256)),
+        ]
+        for data in test_cases:
+>           encoded = cobs_encode(data)
+                      ^^^^^^^^^^^^^^^^^
+
+tests\test_mdp_protocol.py:114: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+data = b'\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x...e2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb\xec\xed\xee\xef\xf0\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff'
+
+    def cobs_encode(data: bytes) -> bytes:
+        """
+        Encode data using Consistent Overhead Byte Stuffing (COBS).
+    
+        COBS eliminates all zero bytes from the data, allowing 0x00
+        to be used as an unambiguous frame delimiter.
+    
+        Args:
+            data: Raw data to encode
+    
+        Returns:
+            COBS-encoded data (does NOT include frame delimiters)
+        """
+        if not data:
+            return b'\x01'
+    
+        output = bytearray()
+        block_start = 0
+    
+        for i, byte in enumerate(data):
+            if byte == 0:
+                # Found zero - emit block length + block data
+                block_len = i - block_start + 1
+                output.append(block_len)
+                output.extend(data[block_start:i])
+                block_start = i + 1
+    
+        # Handle final block
+        remaining = len(data) - block_start
+        if remaining > 0 or block_start == len(data):
+>           output.append(remaining + 1)
+E           ValueError: byte must be in range(0, 256)
+
+mindex_api\protocols\mdp_v1.py:137: ValueError
+_____________________ TestMDPFrame.test_decode_too_short ______________________
+
+self = <test_mdp_protocol.TestMDPFrame object at 0x00000161FBC0C8A0>
+
+    def test_decode_too_short(self):
+        """Frame too short should return error."""
+        result = decode_mdp_frame(b"\x00\x01\x02\x00")
+        assert not result.is_valid
+>       assert "too short" in result.decode_error.lower()
+E       AssertionError: assert 'too short' in 'cobs decode error: cobs block extends past end of data'
+E        +  where 'cobs decode error: cobs block extends past end of data' = <built-in method lower of str object at 0x00000161FDA8F330>()
+E        +    where <built-in method lower of str object at 0x00000161FDA8F330> = 'COBS decode error: COBS block extends past end of data'.lower
+E        +      where 'COBS decode error: COBS block extends past end of data' = MDPFrame(raw_frame=b'\x00\x01\x02\x00', cobs_payload=b'\x01\x02', decoded_payload=b'', message=None, decode_error='COBS decode error: COBS block extends past end of data').decode_error
+
+tests\test_mdp_protocol.py:166: AssertionError
+___________________ test_iter_fungi_taxa_handles_pagination ___________________
+
+    def test_iter_fungi_taxa_handles_pagination():
+        page1 = {
+            "results": [
+                {
+                    "id": 1,
+                    "name": "Agaricus",
+                    "rank": "species",
+                    "preferred_common_name": "Field mushroom",
+                    "wikipedia_summary": "Summary",
+                }
+            ]
+        }
+        page2 = {"results": []}
+        with respx.mock as mock:
+            mock.get(f"{settings.inat_base_url}/taxa").mock(
+                side_effect=[httpx.Response(200, json=page1), httpx.Response(200, json=page2)]
+            )
+>           rows = list(inat.iter_fungi_taxa(per_page=1, max_pages=2))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sources_inat.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+mindex_etl\sources\inat.py:207: in iter_inat_taxa
+    payload = _fetch_page(client, page, per_page, rank, domain_mode=mode)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\tenacity\__init__.py:336: in wrapped_f
+    return copy(f, *args, **kw)
+           ^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\tenacity\__init__.py:475: in __call__
+    do = self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\tenacity\__init__.py:376: in iter
+    result = action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\tenacity\__init__.py:398: in <lambda>
+    self._add_action_func(lambda rs: rs.outcome.result())
+                                     ^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\concurrent\futures\_base.py:449: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\concurrent\futures\_base.py:401: in __get_result
+    raise self._exception
+C:\Python313\Lib\site-packages\tenacity\__init__.py:478: in __call__
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+mindex_etl\sources\inat.py:143: in _fetch_page
+    response = client.get(
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:1053: in get
+    return self.request(
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:914: in send
+    response = self._send_handling_auth(
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_transports\default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\respx\mocks.py:181: in mock
+    response = cls._send_sync_request(
+C:\Python313\Lib\site-packages\respx\mocks.py:212: in _send_sync_request
+    httpx_response = cls.handler(httpx_request)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\respx\mocks.py:120: in handler
+    raise assertion_error
+C:\Python313\Lib\site-packages\respx\mocks.py:113: in handler
+    httpx_response = router.handler(httpx_request)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\respx\router.py:313: in handler
+    resolved = self.resolve(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\respx\router.py:277: in resolve
+    with self.resolver(request) as resolved:
+         ^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\contextlib.py:148: in __exit__
+    next(self.gen)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <respx.router.MockRouter object at 0x00000161C96546E0>
+request = <Request(b'GET', 'https://api.inaturalist.org/v1/taxa?taxon_id=47170&is_active=true&order_by=observations_count&per_page=1&page=1')>
+
+    @contextmanager
+    def resolver(self, request: httpx.Request) -> Generator[ResolvedRoute, None, None]:
+        resolved = ResolvedRoute()
+    
+        try:
+            yield resolved
+    
+            if resolved.route is None:
+                # Assert we always get a route match, if check is enabled
+                if self._assert_all_mocked:
+>                   raise AllMockedAssertionError(f"RESPX: {request!r} not mocked!")
+E                   respx.models.AllMockedAssertionError: RESPX: <Request(b'GET', 'https://api.inaturalist.org/v1/taxa?taxon_id=47170&is_active=true&order_by=observations_count&per_page=1&page=1')> not mocked!
+
+C:\Python313\Lib\site-packages\respx\router.py:250: AllMockedAssertionError
+---------------------------- Captured stdout call -----------------------------
+Fetching iNaturalist page 1...
+============================== warnings summary ===============================
+..\..\..\..\..\..\..\Python313\Lib\site-packages\starlette\formparsers.py:12
+  C:\Python313\Lib\site-packages\starlette\formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+mindex_api\schemas\common.py:24
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\schemas\common.py:24: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class GeoJSON(BaseModel):
+
+mindex_api\schemas\mycobrain.py:65
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\schemas\mycobrain.py:65: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class AnalogChannelConfig(BaseModel):
+
+mindex_api\schemas\mycobrain.py:216
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\schemas\mycobrain.py:216: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class TelemetryPayload(BaseModel):
+
+mindex_api\routers\genetics.py:27
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\routers\genetics.py:27: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class GeneticSequenceResponse(BaseModel):
+
+tests/test_api_routes.py::test_get_taxon_route
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\utils\enrichment_queue.py:38: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "at": datetime.utcnow().isoformat() + "Z",
+
+..\..\..\..\..\..\..\Python313\Lib\site-packages\_pytest\cacheprovider.py:475
+  C:\Python313\Lib\site-packages\_pytest\cacheprovider.py:475: PytestCacheWarning: could not create cache path C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\.pytest_cache\v\cache\nodeids: [WinError 5] Access is denied: 'C:\\Users\\admin2\\Desktop\\MYCOSOFT\\CODE\\MINDEX\\mindex\\.pytest_cache\\v\\cache'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+..\..\..\..\..\..\..\Python313\Lib\site-packages\_pytest\cacheprovider.py:429
+  C:\Python313\Lib\site-packages\_pytest\cacheprovider.py:429: PytestCacheWarning: could not create cache path C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\.pytest_cache\v\cache\lastfailed: [WinError 5] Access is denied: 'C:\\Users\\admin2\\Desktop\\MYCOSOFT\\CODE\\MINDEX\\mindex\\.pytest_cache\\v\\cache'
+    config.cache.set("cache/lastfailed", self.lastfailed)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_api_contract_openapi.py::test_openapi_is_namespaced_under_api_prefix
+FAILED tests/test_api_contract_openapi.py::test_openapi_contract_includes_stable_dto_shapes
+FAILED tests/test_mdp_protocol.py::TestCOBS::test_cobs_multiple_zeros - Asser...
+FAILED tests/test_mdp_protocol.py::TestCOBS::test_cobs_roundtrip - AssertionE...
+FAILED tests/test_mdp_protocol.py::TestCOBS::test_cobs_no_zeros_in_output - V...
+FAILED tests/test_mdp_protocol.py::TestMDPFrame::test_decode_too_short - Asse...
+FAILED tests/test_sources_inat.py::test_iter_fungi_taxa_handles_pagination - ...
+7 failed, 94 passed, 2 skipped, 8 warnings in 3.17s

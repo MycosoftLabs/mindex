@@ -1,0 +1,146 @@
+........................................................................ [ 69%]
+..........................Fss..                                          [100%]
+================================== FAILURES ===================================
+___________________ test_iter_fungi_taxa_handles_pagination ___________________
+
+    def test_iter_fungi_taxa_handles_pagination():
+        page1 = {
+            "results": [
+                {
+                    "id": 1,
+                    "name": "Agaricus",
+                    "rank": "species",
+                    "preferred_common_name": "Field mushroom",
+                    "wikipedia_summary": "Summary",
+                }
+            ]
+        }
+        page2 = {"results": []}
+        with respx.mock as mock:
+            mock.get(host="api.inaturalist.org", path="/v1/taxa").mock(
+                side_effect=[httpx.Response(200, json=page1), httpx.Response(200, json=page2)]
+            )
+>           rows = list(inat.iter_fungi_taxa(per_page=1, max_pages=2))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_sources_inat.py:28: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+mindex_etl\sources\inat.py:207: in iter_inat_taxa
+    payload = _fetch_page(client, page, per_page, rank, domain_mode=mode)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\tenacity\__init__.py:336: in wrapped_f
+    return copy(f, *args, **kw)
+           ^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\tenacity\__init__.py:475: in __call__
+    do = self.iter(retry_state=retry_state)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\tenacity\__init__.py:376: in iter
+    result = action(retry_state)
+             ^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\tenacity\__init__.py:398: in <lambda>
+    self._add_action_func(lambda rs: rs.outcome.result())
+                                     ^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\concurrent\futures\_base.py:449: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\concurrent\futures\_base.py:401: in __get_result
+    raise self._exception
+C:\Python313\Lib\site-packages\tenacity\__init__.py:478: in __call__
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+mindex_etl\sources\inat.py:143: in _fetch_page
+    response = client.get(
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:1053: in get
+    return self.request(
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:914: in send
+    response = self._send_handling_auth(
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_transports\default.py:250: in handle_request
+    resp = self._pool.handle_request(req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\respx\mocks.py:181: in mock
+    response = cls._send_sync_request(
+C:\Python313\Lib\site-packages\respx\mocks.py:212: in _send_sync_request
+    httpx_response = cls.handler(httpx_request)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\respx\mocks.py:120: in handler
+    raise assertion_error
+C:\Python313\Lib\site-packages\respx\mocks.py:113: in handler
+    httpx_response = router.handler(httpx_request)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\respx\router.py:313: in handler
+    resolved = self.resolve(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\site-packages\respx\router.py:277: in resolve
+    with self.resolver(request) as resolved:
+         ^^^^^^^^^^^^^^^^^^^^^^
+C:\Python313\Lib\contextlib.py:148: in __exit__
+    next(self.gen)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <respx.router.MockRouter object at 0x000002ACCC4B46E0>
+request = <Request(b'GET', 'https://api.inaturalist.org/v1/taxa?taxon_id=47170&is_active=true&order_by=observations_count&per_page=1&page=1')>
+
+    @contextmanager
+    def resolver(self, request: httpx.Request) -> Generator[ResolvedRoute, None, None]:
+        resolved = ResolvedRoute()
+    
+        try:
+            yield resolved
+    
+            if resolved.route is None:
+                # Assert we always get a route match, if check is enabled
+                if self._assert_all_mocked:
+>                   raise AllMockedAssertionError(f"RESPX: {request!r} not mocked!")
+E                   respx.models.AllMockedAssertionError: RESPX: <Request(b'GET', 'https://api.inaturalist.org/v1/taxa?taxon_id=47170&is_active=true&order_by=observations_count&per_page=1&page=1')> not mocked!
+
+C:\Python313\Lib\site-packages\respx\router.py:250: AllMockedAssertionError
+---------------------------- Captured stdout call -----------------------------
+Fetching iNaturalist page 1...
+============================== warnings summary ===============================
+..\..\..\..\..\..\..\Python313\Lib\site-packages\starlette\formparsers.py:12
+  C:\Python313\Lib\site-packages\starlette\formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+mindex_api\schemas\common.py:24
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\schemas\common.py:24: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class GeoJSON(BaseModel):
+
+mindex_api\schemas\mycobrain.py:65
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\schemas\mycobrain.py:65: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class AnalogChannelConfig(BaseModel):
+
+mindex_api\schemas\mycobrain.py:216
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\schemas\mycobrain.py:216: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class TelemetryPayload(BaseModel):
+
+mindex_api\routers\genetics.py:27
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\routers\genetics.py:27: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class GeneticSequenceResponse(BaseModel):
+
+tests/test_api_routes.py::test_get_taxon_route
+  C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\mindex_api\utils\enrichment_queue.py:38: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "at": datetime.utcnow().isoformat() + "Z",
+
+..\..\..\..\..\..\..\Python313\Lib\site-packages\_pytest\cacheprovider.py:475
+  C:\Python313\Lib\site-packages\_pytest\cacheprovider.py:475: PytestCacheWarning: could not create cache path C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\.pytest_cache\v\cache\nodeids: [WinError 5] Access is denied: 'C:\\Users\\admin2\\Desktop\\MYCOSOFT\\CODE\\MINDEX\\mindex\\.pytest_cache\\v\\cache'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+..\..\..\..\..\..\..\Python313\Lib\site-packages\_pytest\cacheprovider.py:429
+  C:\Python313\Lib\site-packages\_pytest\cacheprovider.py:429: PytestCacheWarning: could not create cache path C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\.pytest_cache\v\cache\lastfailed: [WinError 5] Access is denied: 'C:\\Users\\admin2\\Desktop\\MYCOSOFT\\CODE\\MINDEX\\mindex\\.pytest_cache\\v\\cache'
+    config.cache.set("cache/lastfailed", self.lastfailed)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_sources_inat.py::test_iter_fungi_taxa_handles_pagination - ...
+1 failed, 100 passed, 2 skipped, 8 warnings in 3.47s

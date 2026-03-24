@@ -1,0 +1,19 @@
+{
+  "last_updated": "2026-03-20T18:14:00-07:00",
+  "mycosoft_active": [
+    { "id": "claude-4-6-sonnet", "name": "Claude 4.6 Sonnet", "role": "Primary" },
+    { "id": "llama-4-0", "name": "Llama 4.0 / 3.3", "role": "Active" },
+    { "id": "nemotron-4", "name": "Nemotron", "role": "Active" },
+    { "id": "gpt-4o", "name": "GPT-4o / GPT-4.5", "role": "Fallback" },
+    { "id": "gemini-3-1-pro", "name": "Gemini 3.1 Pro", "role": "Active" }
+  ],
+  "global_top_frontier": [
+    { "rank": 1, "name": "Claude 4.6 Sonnet", "tracked_volume": "Untracked" },
+    { "rank": 2, "name": "GPT-4o / 4.5", "tracked_volume": "Untracked" },
+    { "rank": 3, "name": "Gemini 3.1 Pro", "tracked_volume": "Untracked" },
+    { "rank": 4, "name": "DeepSeek R1 / V3", "tracked_volume": "Untracked" },
+    { "rank": 5, "name": "Llama 4.0 / 3.3", "tracked_volume": "Untracked" },
+    { "rank": 6, "name": "Nemotron-4 340B", "tracked_volume": "Untracked" },
+    { "rank": 7, "name": "Mistral Large 2", "tracked_volume": "Untracked" }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "last_updated": "2026-03-20T18:36:00-07:00",
+  "providers": [
+    {
+      "id": "cursor",
+      "name": "Cursor IDE",
+      "type": "app_internal",
+      "tokens": 15000000000,
+      "timeframe": "last_90_days",
+      "cost_estimate_usd": "Billed directly via Subscription",
+      "note": "Imported from user billing fact (internal app usage, not API)"
+    },
+    {
+      "id": "openai_api",
+      "name": "OpenAI API",
+      "type": "api",
+      "tokens": 0,
+      "timeframe": "current_month",
+      "cost_estimate_usd": 0,
+      "note": "Awaiting API Key or Gateway logs"
+    },
+    {
+      "id": "anthropic_api",
+      "name": "Anthropic API",
+      "type": "api",
+      "tokens": 0,
+      "timeframe": "current_month",
+      "cost_estimate_usd": 0,
+      "note": "Awaiting API Key or Gateway logs"
+    },
+    {
+      "id": "perplexity_api",
+      "name": "Perplexity API",
+      "type": "api",
+      "tokens": 0,
+      "timeframe": "current_month",
+      "cost_estimate_usd": 0,
+      "note": "Awaiting API Key or Gateway logs"
+    }
+  ],
+  "total_tokens_all_time": 15000000000
+}

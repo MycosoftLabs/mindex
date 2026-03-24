@@ -1,0 +1,124 @@
+tests/test_gpu_integration.py::TestGPUDetection::test_availability_flags_are_booleans
+tests/test_gpu_integration.py::TestGPUDetection::test_get_availability_returns_dict
+tests/test_gpu_integration.py::TestGPUDetection::test_gpu_config_loads
+tests/test_gpu_integration.py::TestGPURuntime::test_singleton
+tests/test_gpu_integration.py::TestGPURuntime::test_health_status_without_gpu
+tests/test_gpu_integration.py::TestGPURuntime::test_device_info_without_gpu
+tests/test_gpu_integration.py::TestCuDFEngine::test_backend_name
+tests/test_gpu_integration.py::TestCuDFEngine::test_from_records
+tests/test_gpu_integration.py::TestCuDFEngine::test_from_records_empty
+tests/test_gpu_integration.py::TestCuDFEngine::test_dedup
+tests/test_gpu_integration.py::TestCuDFEngine::test_aggregate
+tests/test_gpu_integration.py::TestCuDFEngine::test_sort_values
+tests/test_gpu_integration.py::TestCuDFEngine::test_merge
+tests/test_gpu_integration.py::TestCuDFEngine::test_filter_nulls
+tests/test_gpu_integration.py::TestCuDFEngine::test_read_json_file
+tests/test_gpu_integration.py::TestCuDFEngine::test_bulk_hash_blake3
+tests/test_gpu_integration.py::TestCuDFEngine::test_chunk_dataframe
+tests/test_gpu_integration.py::TestCuVSIndexManager::test_index_registry
+tests/test_gpu_integration.py::TestCuVSIndexManager::test_singleton
+tests/test_gpu_integration.py::TestCuVSIndexManager::test_available_indexes
+tests/test_gpu_integration.py::TestCuVSIndexManager::test_numpy_search
+tests/test_gpu_integration.py::TestCuVSIndexManager::test_compute_index_hash
+tests/test_gpu_integration.py::TestCuVSIndexManager::test_save_and_load_index
+tests/test_gpu_integration.py::TestCuVSIndexManager::test_add_vectors
+tests/test_gpu_integration.py::TestSTATICBridge::test_constraint_domain_enum
+tests/test_gpu_integration.py::TestSTATICBridge::test_constraint_set_hashing
+tests/test_gpu_integration.py::TestSTATICBridge::test_bridge_singleton
+tests/test_gpu_integration.py::TestSTATICBridge::test_bridge_disabled_by_default
+tests/test_gpu_integration.py::TestSTATICBridge::test_cache_management
+tests/test_gpu_integration.py::TestMICABridge::test_blake3_hash
+tests/test_gpu_integration.py::TestMICABridge::test_deterministic_cbor
+tests/test_gpu_integration.py::TestMICABridge::test_bridge_singleton
+tests/test_gpu_integration.py::TestMICABridge::test_device_id
+tests/test_gpu_integration.py::TestETLGPUTransforms::test_gpu_bulk_import_json
+tests/test_gpu_integration.py::TestETLGPUTransforms::test_gpu_bulk_import_with_schema_map
+tests/test_gpu_integration.py::TestETLGPUTransforms::test_gpu_dedup_compounds
+tests/test_gpu_integration.py::TestETLGPUTransforms::test_gpu_batch_h3_cells
+tests/test_gpu_integration.py::TestETLGPUTransforms::test_gpu_batch_upsert_prep
+tests/test_gpu_integration.py::TestETLGPUTransforms::test_gpu_batch_upsert_prep_empty
+tests/test_gpu_integration.py::TestGPUConfig::test_config_in_main_settings
+tests/test_gpu_integration.py::TestGPUConfig::test_gpu_config_standalone
+tests/test_sql_smoke.py::test_insert_taxon_and_query_traits_view
+tests/test_sql_smoke.py::test_insert_telemetry_and_query_latest_samples
+
+=================================== ERRORS ====================================
+_____________ ERROR collecting tests/test_api_contract_openapi.py _____________
+ImportError while importing test module 'C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\tests\test_api_contract_openapi.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python313\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_api_contract_openapi.py:5: in <module>
+    from mindex_api.main import create_app
+E   ModuleNotFoundError: No module named 'mindex_api'
+__________________ ERROR collecting tests/test_api_routes.py __________________
+ImportError while importing test module 'C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\tests\test_api_routes.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python313\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_api_routes.py:9: in <module>
+    from mindex_api.main import create_app
+E   ModuleNotFoundError: No module named 'mindex_api'
+_________________ ERROR collecting tests/test_mdp_protocol.py _________________
+ImportError while importing test module 'C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\tests\test_mdp_protocol.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python313\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_mdp_protocol.py:9: in <module>
+    from mindex_api.protocols.mdp_v1 import (
+E   ModuleNotFoundError: No module named 'mindex_api'
+_____________ ERROR collecting tests/test_mycorrhizae_protocol.py _____________
+ImportError while importing test module 'C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\tests\test_mycorrhizae_protocol.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python313\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_mycorrhizae_protocol.py:12: in <module>
+    from mindex_api.protocols.mycorrhizae import (
+E   ModuleNotFoundError: No module named 'mindex_api'
+_________________ ERROR collecting tests/test_sources_inat.py _________________
+ImportError while importing test module 'C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\tests\test_sources_inat.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python313\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_sources_inat.py:6: in <module>
+    from mindex_etl.config import settings
+E   ModuleNotFoundError: No module named 'mindex_etl'
+_____________ ERROR collecting tests/test_taxon_canonicalizer.py ______________
+ImportError while importing test module 'C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\tests\test_taxon_canonicalizer.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Python313\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_taxon_canonicalizer.py:5: in <module>
+    from mindex_etl.taxon_canonicalizer import normalize_name
+E   ModuleNotFoundError: No module named 'mindex_etl'
+============================== warnings summary ===============================
+..\..\..\..\..\..\..\Python313\Lib\site-packages\starlette\formparsers.py:12
+  C:\Python313\Lib\site-packages\starlette\formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+..\..\..\..\..\..\..\Python313\Lib\site-packages\_pytest\cacheprovider.py:429
+  C:\Python313\Lib\site-packages\_pytest\cacheprovider.py:429: PytestCacheWarning: could not create cache path C:\Users\admin2\Desktop\MYCOSOFT\CODE\MINDEX\mindex\.pytest_cache\v\cache\lastfailed: [WinError 5] Access is denied: 'C:\\Users\\admin2\\Desktop\\MYCOSOFT\\CODE\\MINDEX\\mindex\\.pytest_cache\\v\\cache'
+    config.cache.set("cache/lastfailed", self.lastfailed)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+ERROR tests/test_api_contract_openapi.py
+ERROR tests/test_api_routes.py
+ERROR tests/test_mdp_protocol.py
+ERROR tests/test_mycorrhizae_protocol.py
+ERROR tests/test_sources_inat.py
+ERROR tests/test_taxon_canonicalizer.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 6 errors during collection !!!!!!!!!!!!!!!!!!!
+43 tests collected, 6 errors in 0.55s

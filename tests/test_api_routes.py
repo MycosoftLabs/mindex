@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from mindex_api.main import create_app
 from mindex_api.dependencies import get_db_session, require_api_key
+from mindex_api.auth import require_internal_token
 
 
 class FakeMappingsResult:
@@ -58,6 +59,7 @@ def _db_override(responses: List[Any]):
 
 def _disable_api_key(app):
     app.dependency_overrides[require_api_key] = lambda: None
+    app.dependency_overrides[require_internal_token] = lambda: "internal-test-token"
 
 
 def test_list_taxa_route(app):
