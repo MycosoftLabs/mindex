@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
-from typing import Optional
-from uuid import UUID
+from typing import Any, List, Optional
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +18,8 @@ from ..dependencies import (
     require_api_key,
 )
 from ..contracts.v1.observations import ObservationListResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/observations",
@@ -131,3 +135,100 @@ async def list_observations(
             "total": total,
         },
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BULK INGEST — Clone-on-Display endpoint
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class BulkObservationItem(BaseModel):
+    source: str = "inat"
+    source_id: Optional[str] = None
+    observed_at: Optional[str] = None
+    observer: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    taxon_name: Optional[str] = None
+    taxon_common_name: Optional[str] = None
+    taxon_inat_id: Optional[int] = None
+    iconic_taxon_name: Optional[str] = None
+    photos: List[dict] = Field(default_factory=list)
+    notes: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class BulkIngestRequest(BaseModel):
+    observations: List[BulkObservationItem]
+
+
+class BulkIngestResponse(BaseModel):
+    inserted: int = 0
+    skipped: int = 0
+    errors: int = 0
+
+
+@router.post("/bulk", response_model=BulkIngestResponse)
+async def bulk_ingest_observations(
+    body: BulkIngestRequest = Body(...),
+    db: AsyncSession = Depends(get_db_session),
+) -> BulkIngestResponse:
+    """Bulk upsert observations from clone-on-display or external scrapers.
+
+    Deduplicates on (source, source_id) — existing rows are skipped.
+    """
+    inserted = 0
+    skipped = 0
+    errors = 0
+
+    for obs in body.observations:
+        try:
+            if not obs.source_id:
+                errors += 1
+                continue
+
+            # Check if already exists
+            exists = await db.execute(
+                text(
+                    "SELECT 1 FROM obs.observation WHERE source = :source AND source_id = :source_id LIMIT 1"
+                ),
+                {"source": obs.source, "source_id": obs.source_id},
+            )
+            if exists.scalar_one_or_none():
+                skipped += 1
+                continue
+
+            obs_id = str(uuid4())
+            media_json = json.dumps(obs.photos) if obs.photos else "[]"
+            meta_json = json.dumps(obs.metadata) if obs.metadata else "{}"
+
+            await db.execute(
+                text("""
+                    INSERT INTO obs.observation
+                        (id, source, source_id, observed_at, observer,
+                         latitude, longitude, media, notes, metadata)
+                    VALUES
+                        (:id, :source, :source_id, :observed_at, :observer,
+                         :lat, :lng, cast(:media as jsonb), :notes, cast(:meta as jsonb))
+                """),
+                {
+                    "id": obs_id,
+                    "source": obs.source,
+                    "source_id": obs.source_id,
+                    "observed_at": obs.observed_at,
+                    "observer": obs.observer,
+                    "lat": obs.lat,
+                    "lng": obs.lng,
+                    "media": media_json,
+                    "notes": obs.notes,
+                    "meta": meta_json,
+                },
+            )
+            inserted += 1
+        except Exception as exc:
+            logger.warning("Bulk ingest error for source_id=%s: %s", obs.source_id, exc)
+            errors += 1
+
+    await db.commit()
+    logger.info("Bulk ingest complete: inserted=%d skipped=%d errors=%d", inserted, skipped, errors)
+    return BulkIngestResponse(inserted=inserted, skipped=skipped, errors=errors)
