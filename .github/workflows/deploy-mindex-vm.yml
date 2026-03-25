@@ -94,8 +94,9 @@ jobs:
             echo "=== Pulling image ==="
             docker pull "$IMAGE_FULL"
             echo "=== Replacing container ==="
-            docker stop mindex-api 2>/dev/null || true
-            docker rm mindex-api 2>/dev/null || true
+            docker rm -f mindex-api mindex-api-old mindex-api-new 2>/dev/null || true
+            CONFLICTING=$(docker ps -q --filter "publish=8000")
+            if [ -n "$CONFLICTING" ]; then docker rm -f $CONFLICTING; fi
             MINDEX_DIR="/home/mycosoft/mindex"
             [ -d "/opt/mycosoft/mindex" ] && MINDEX_DIR="/opt/mycosoft/mindex"
             ENV_FILE_OPT=""
