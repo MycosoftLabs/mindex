@@ -43,9 +43,25 @@ output = run_cmd(ssh, "cd /home/mycosoft/mindex && git fetch origin && git reset
 print("  Code updated")
 
 print("\n[3] Restarting MINDEX API container...")
-run_sudo(ssh, "cd /home/mycosoft/mindex && docker compose stop mindex-api 2>/dev/null || true", VM_PASS, show=False)
-run_sudo(ssh, "cd /home/mycosoft/mindex && docker compose build --no-cache mindex-api 2>&1 | tail -10", VM_PASS, timeout=300)
-run_sudo(ssh, "cd /home/mycosoft/mindex && docker compose up -d mindex-api", VM_PASS)
+# cd is a shell builtin — use bash -lc under sudo (not "sudo cd ...")
+_mindex_root = "/home/mycosoft/mindex"
+run_sudo(
+    ssh,
+    f"bash -lc 'cd {_mindex_root} && docker compose stop mindex-api 2>/dev/null || true'",
+    VM_PASS,
+    show=False,
+)
+run_sudo(
+    ssh,
+    f"bash -lc 'cd {_mindex_root} && docker compose build --no-cache mindex-api 2>&1 | tail -10'",
+    VM_PASS,
+    timeout=300,
+)
+run_sudo(
+    ssh,
+    f"bash -lc 'cd {_mindex_root} && docker compose up -d mindex-api'",
+    VM_PASS,
+)
 print("  Container restarted")
 
 print("\n[4] Waiting 10s for startup...")
