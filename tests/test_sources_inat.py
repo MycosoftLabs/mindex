@@ -6,7 +6,8 @@ from unittest.mock import patch
 from mindex_etl.config import settings
 from mindex_etl.sources import inat
 
-def test_iter_fungi_taxa_handles_pagination():
+def test_iter_fungi_taxa_handles_pagination(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "local_data_dir", str(tmp_path))
     page1 = {
         "results": [
             {
