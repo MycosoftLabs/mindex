@@ -31,6 +31,8 @@ from ..dependencies import (
     require_api_key,
 )
 from ..protocols.mycorrhizae import MycorrhizaeMessage, get_protocol
+from ..utils.deep_agent_events import schedule_domain_event
+from ..pipeline_fanout import fanout_to_natureos_envelope, mirror_to_fusarium
 from ..schemas.mycobrain import (
     AutomationRuleCreate,
     AutomationRuleResponse,
@@ -230,6 +232,17 @@ async def register_mycobrain_device(
     })
     
     await db.commit()
+    schedule_domain_event(
+        domain="device",
+        task=f"MINDEX MycoBrain device registered: {device.serial_number}",
+        context={
+            "route": "/mycobrain/devices",
+            "serial_number": device.serial_number,
+            "device_type": device.device_type.value,
+            "telemetry_device_id": str(telemetry_device_id),
+        },
+        preferred_agent="ops-agent",
+    )
     
     row = result.mappings().one()
     return _build_device_response(dict(row), device.name, device.location)
@@ -550,8 +563,46 @@ async def ingest_telemetry(
         "device_id": str(device_id),
         "seq": request.sequence_number,
     })
+
+    telemetry_payload = payload.model_dump(exclude_none=True)
+    envelope = {
+        "hdr": {
+            "deviceId": device["serial_number"],
+            "msgId": request.raw_cobs_frame or f"mycobrain-{device_id}",
+        },
+        "seq": request.sequence_number or 0,
+        "ts": {"utc": recorded_at.isoformat()},
+        "pack": telemetry_payload.get("analog", []) or [],
+        "payload": telemetry_payload,
+    }
+    try:
+        await mirror_to_fusarium(
+            db,
+            source_id=device["serial_number"],
+            payload=telemetry_payload,
+            recorded_at=recorded_at,
+        )
+    except Exception as exc:
+        # Best effort mirror - ingestion must continue.
+        logger.warning("Fusarium mirror failed for mycobrain ingest: %s", exc)
     
     await db.commit()
+    try:
+        await fanout_to_natureos_envelope(envelope, source="mindex.mycobrain.telemetry")
+    except Exception as exc:
+        # Best effort fanout - ingestion must continue.
+        logger.warning("NatureOS fanout failed for mycobrain ingest: %s", exc)
+    schedule_domain_event(
+        domain="device",
+        task=f"MINDEX telemetry ingested for device {device['serial_number']}",
+        context={
+            "route": "/mycobrain/telemetry/ingest",
+            "serial_number": device["serial_number"],
+            "samples_created": samples_created,
+            "streams_updated": list(set(streams_updated)),
+        },
+        preferred_agent="ops-agent",
+    )
     
     # Publish to Mycorrhizae Protocol
     protocol = get_protocol()
@@ -643,6 +694,16 @@ async def queue_command(
     })
     
     await db.commit()
+    schedule_domain_event(
+        domain="device",
+        task=f"MINDEX queued device command: {request.command_type}",
+        context={
+            "route": "/mycobrain/commands",
+            "serial_number": device["serial_number"],
+            "command_type": request.command_type,
+        },
+        preferred_agent="ops-agent",
+    )
     row = result.mappings().one()
     
     return _build_command_response(dict(row), device["serial_number"])

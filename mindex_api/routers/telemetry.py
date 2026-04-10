@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -24,6 +25,7 @@ from ..schemas.telemetry import (
     ReplayUpdateRequest,
     TelemetrySampleRow,
 )
+from ..pipeline_fanout import fanout_to_natureos_envelope, mirror_to_fusarium
 
 telemetry_router = APIRouter(
     prefix="/telemetry",
@@ -326,7 +328,25 @@ async def ingest_envelope(
         else:
             deduped += 1
 
+    try:
+        combined_payload = {"hdr": hdr, "ts": ts, "pack": pack, "verification": verification_metadata}
+        await mirror_to_fusarium(
+            db,
+            source_id=device_slug,
+            payload=combined_payload,
+            recorded_at=recorded_at,
+        )
+    except Exception as exc:
+        # Keep primary telemetry ingest resilient even when fusarium mirror fails.
+        logger.warning("Fusarium mirror failed for telemetry envelope: %s", exc)
+
     await db.commit()
+
+    try:
+        await fanout_to_natureos_envelope(env, source="mindex.telemetry.envelope")
+    except Exception as exc:
+        # Best-effort fanout; do not fail ingestion.
+        logger.warning("NatureOS fanout failed for telemetry envelope: %s", exc)
 
     return EnvelopeIngestResponse(
         success=True,

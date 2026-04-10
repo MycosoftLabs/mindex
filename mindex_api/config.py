@@ -255,6 +255,18 @@ class Settings(BaseSettings):
         None,
         description="Shared secret for NatureOS webhook authentication.",
     )
+    natureos_api_key: Optional[str] = Field(
+        None,
+        description="Optional API key/header value used when forwarding telemetry from MINDEX to NatureOS.",
+    )
+    natureos_ingest_path: str = Field(
+        "/api/mycobrain/telemetry/envelope",
+        description="NatureOS ingest route used by MINDEX telemetry fanout.",
+    )
+    fusarium_fanout_enabled: bool = Field(
+        True,
+        description="When true, MINDEX mirrors incoming telemetry into Fusarium analytics tables.",
+    )
     
     # =========================================================================
     # MAS (MYCOSOFT AGENT SERVICE) INTEGRATION

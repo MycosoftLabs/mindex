@@ -13,6 +13,7 @@ from .knowledge import knowledge_router
 from .genetics import router as genetics_router
 from .compounds import router as compounds_router
 from .unified_search import router as unified_search_router
+from .rag_retrieve import router as rag_retrieve_router
 from .research import router as research_router
 from .investigation import router as investigation_router
 from .a2a_agent import router as a2a_agent_router
@@ -31,6 +32,11 @@ from .phylogeny import router as phylogeny_router
 from .genomes import router as genomes_router
 from .ledger import router as ledger_router
 from .mwave import router as mwave_router
+from .maritime import router as maritime_router
+from .taco import router as taco_router
+from .fusarium_analytics import router as fusarium_analytics_router
+from .fusarium_catalog import router as fusarium_catalog_router
+from .live_state import router as live_state_router
 
 __all__ = [
     "health_router",
@@ -49,6 +55,7 @@ __all__ = [
     "genetics_router",
     "compounds_router",
     "unified_search_router",
+    "rag_retrieve_router",
     "research_router",
     "investigation_router",
     "a2a_agent_router",
@@ -65,4 +72,11 @@ __all__ = [
     "genomes_router",
     "ledger_router",
     "mwave_router",
+    "maritime_router",
+    "taco_router",
+    "fusarium_analytics_router",
+    "fusarium_catalog_router",
+    "live_state_router",
 ]
+
+

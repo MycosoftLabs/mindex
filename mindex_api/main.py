@@ -39,6 +39,7 @@ from .routers import (
     taxon_router,
     telemetry_router,
     unified_search_router,
+    rag_retrieve_router,
     wifisense_router,
     drone_router,
     etl_router,
@@ -47,6 +48,11 @@ from .routers import (
     ledger_router,
     mwave_router,
     emissions_router,
+    maritime_router,
+    taco_router,
+    fusarium_analytics_router,
+    fusarium_catalog_router,
+    live_state_router,
 )
 from .routers.worldview import (
     worldview_search_router,
@@ -55,6 +61,7 @@ from .routers.worldview import (
     worldview_answers_router,
     worldview_research_router,
     worldview_manifest_router,
+    worldview_maritime_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -140,6 +147,7 @@ def create_app() -> FastAPI:
     app.include_router(grounding_router, prefix=internal_prefix, dependencies=internal_deps)
     app.include_router(plasticity_router, prefix=internal_prefix, dependencies=internal_deps)
     app.include_router(nlm_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(live_state_router, prefix=internal_prefix, dependencies=internal_deps)
 
     # Specialized hardware routers
     app.include_router(fci_router, prefix=internal_prefix, dependencies=internal_deps)
@@ -184,6 +192,7 @@ def create_app() -> FastAPI:
     app.include_router(worldview_answers_router, prefix=worldview_prefix)
     app.include_router(worldview_research_router, prefix=worldview_prefix)
     app.include_router(worldview_manifest_router, prefix=worldview_prefix)
+    app.include_router(worldview_maritime_router, prefix=worldview_prefix)
 
     # =========================================================================
     # BACKWARD COMPATIBILITY (deprecated — remove after all consumers migrate)
@@ -204,6 +213,7 @@ def create_app() -> FastAPI:
     app.include_router(genetics_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(compounds_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(unified_search_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(rag_retrieve_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(research_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(investigation_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(a2a_agent_router, prefix=prefix, dependencies=internal_deps)
@@ -213,6 +223,7 @@ def create_app() -> FastAPI:
     app.include_router(plasticity_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(nlm_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(search_answers_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(live_state_router, prefix=prefix, dependencies=internal_deps)
     
     # New integration routers
     app.include_router(etl_router, prefix=prefix, dependencies=internal_deps)
@@ -221,6 +232,10 @@ def create_app() -> FastAPI:
     app.include_router(ledger_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(mwave_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(emissions_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(maritime_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(taco_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(fusarium_analytics_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(fusarium_catalog_router, prefix=prefix, dependencies=internal_deps)
 
     return app
 
@@ -238,3 +253,5 @@ def run() -> None:
         port=settings.api_port,
         reload=True,
     )
+
+
