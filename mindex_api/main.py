@@ -61,8 +61,12 @@ from .routers.worldview import (
     worldview_answers_router,
     worldview_research_router,
     worldview_manifest_router,
-    worldview_maritime_router,
 )
+
+try:
+    from .routers.worldview import worldview_maritime_router
+except Exception:
+    worldview_maritime_router = None
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +196,8 @@ def create_app() -> FastAPI:
     app.include_router(worldview_answers_router, prefix=worldview_prefix)
     app.include_router(worldview_research_router, prefix=worldview_prefix)
     app.include_router(worldview_manifest_router, prefix=worldview_prefix)
-    app.include_router(worldview_maritime_router, prefix=worldview_prefix)
+    if worldview_maritime_router is not None:
+        app.include_router(worldview_maritime_router, prefix=worldview_prefix)
 
     # =========================================================================
     # BACKWARD COMPATIBILITY (deprecated — remove after all consumers migrate)
