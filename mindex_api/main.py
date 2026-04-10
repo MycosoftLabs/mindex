@@ -213,7 +213,8 @@ def create_app() -> FastAPI:
     app.include_router(genetics_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(compounds_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(unified_search_router, prefix=prefix, dependencies=internal_deps)
-    app.include_router(rag_retrieve_router, prefix=prefix, dependencies=internal_deps)
+    if rag_retrieve_router is not None:
+        app.include_router(rag_retrieve_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(research_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(investigation_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(a2a_agent_router, prefix=prefix, dependencies=internal_deps)
@@ -232,10 +233,14 @@ def create_app() -> FastAPI:
     app.include_router(ledger_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(mwave_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(emissions_router, prefix=prefix, dependencies=internal_deps)
-    app.include_router(maritime_router, prefix=prefix, dependencies=internal_deps)
-    app.include_router(taco_router, prefix=prefix, dependencies=internal_deps)
-    app.include_router(fusarium_analytics_router, prefix=prefix, dependencies=internal_deps)
-    app.include_router(fusarium_catalog_router, prefix=prefix, dependencies=internal_deps)
+    if maritime_router is not None:
+        app.include_router(maritime_router, prefix=prefix, dependencies=internal_deps)
+    if taco_router is not None:
+        app.include_router(taco_router, prefix=prefix, dependencies=internal_deps)
+    if fusarium_analytics_router is not None:
+        app.include_router(fusarium_analytics_router, prefix=prefix, dependencies=internal_deps)
+    if fusarium_catalog_router is not None:
+        app.include_router(fusarium_catalog_router, prefix=prefix, dependencies=internal_deps)
 
     return app
 

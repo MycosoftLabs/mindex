@@ -31,7 +31,11 @@ from ..dependencies import (
     require_api_key,
 )
 from ..protocols.mycorrhizae import MycorrhizaeMessage, get_protocol
-from ..utils.deep_agent_events import schedule_domain_event
+try:
+    from ..utils.deep_agent_events import schedule_domain_event
+except Exception:  # pragma: no cover - optional integration module
+    def schedule_domain_event(*args, **kwargs):  # type: ignore[no-redef]
+        return None
 from ..pipeline_fanout import fanout_to_natureos_envelope, mirror_to_fusarium
 from ..schemas.mycobrain import (
     AutomationRuleCreate,
