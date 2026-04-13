@@ -53,15 +53,17 @@ jobs:
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
             --image ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-
-    agentic-fallback:
-      if: always() && contains(needs.*.result, 'failure')
-      needs: ["runs-on", "steps"]
-      runs-on: ubuntu-latest
-      steps:
-        - name: Trigger Agentic Healing
-          run: |
-            curl -X POST https://api.mycosoft.com/agent/auto-fix \
-              -H "Content-Type: application/json" \
-              -H "Authorization: Bearer ${{ secrets.AGENT_API_KEY }}" \
-              -d '{"repo": "'$GITHUB_REPOSITORY'", "run_id": "'$GITHUB_RUN_ID'"}'
+  agentic-fallback:
+    if: failure()
+    needs: [build-test-push]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Agentic Healing
+        env:
+          AGENT_API_KEY: ${{ secrets.AGENT_API_KEY }}
+        run: |
+          if [ -z "$AGENT_API_KEY" ]; then echo "AGENT_API_KEY not set; skipping"; exit 0; fi
+          curl -fsS -X POST https://api.mycosoft.com/agent/auto-fix \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $AGENT_API_KEY" \
+            -d "{\"repo\": \"$GITHUB_REPOSITORY\", \"run_id\": \"$GITHUB_RUN_ID\"}"
