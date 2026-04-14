@@ -20,7 +20,7 @@ def _default_local_data_dir() -> str:
     # VM runs Linux; keep Windows defaults for local dev.
     if os.name == "nt":
         return "C:/Users/admin2/Desktop/MYCOSOFT/DATA/mindex_scrape"
-    return "/home/mycosoft/mindex/data/mindex_scrape"
+    return "/mnt/nas/mindex/scrapes/work"
 
 
 def _default_nas_data_dir() -> str:

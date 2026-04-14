@@ -69,6 +69,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session
+from ..utils.deep_agent_events import schedule_domain_event
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ ALL_DOMAINS = [
     # Telemetry
     "devices", "telemetry",
     # Knowledge
-    "research", "crep_entities",
+    "research", "crep_entities", "fusarium_tracks", "fusarium_correlations",
 ]
 
 # Grouped domain aliases for convenience
@@ -125,6 +126,7 @@ DOMAIN_GROUPS = {
     "monitoring": ["cameras"],
     "military": ["military_installations"],
     "telemetry": ["devices", "telemetry"],
+    "fusarium": ["fusarium_tracks", "fusarium_correlations", "crep_entities", "vessels", "buoys"],
 }
 
 
@@ -1210,6 +1212,71 @@ async def search_crep_entities(session: AsyncSession, query: str, limit: int,
     ]
 
 
+async def search_fusarium_tracks(
+    session: AsyncSession, query: str, limit: int, lat: Optional[float] = None, lng: Optional[float] = None,
+    radius: Optional[float] = None
+) -> List[dict]:
+    where = "latest_label ILIKE :query"
+    params: Dict[str, Any] = {"query": f"%{query}%", "limit": limit}
+    if lat is not None and lng is not None:
+        where += " OR ST_DWithin(last_position, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius_m)"
+        params.update({"lat": lat, "lng": lng, "radius_m": (radius or 100) * 1000})
+
+    sql = f"""
+        SELECT track_id, latest_label, confidence, first_seen::text, last_seen::text,
+               ST_Y(last_position::geometry) AS lat, ST_X(last_position::geometry) AS lng
+        FROM fusarium.entity_tracks
+        WHERE {where}
+        ORDER BY last_seen DESC
+        LIMIT :limit
+    """
+    rows = await _safe_query(session, sql, params, "fusarium_tracks")
+    return [
+        {
+            "id": str(r.track_id),
+            "domain": "fusarium",
+            "entity_type": "entity_track",
+            "name": r.latest_label,
+            "confidence": r.confidence,
+            "lat": r.lat,
+            "lng": r.lng,
+            "occurred_at": r.last_seen,
+            "source": "fusarium.entity_tracks",
+            "properties": {"first_seen": r.first_seen},
+        }
+        for r in rows
+    ]
+
+
+async def search_fusarium_correlations(session: AsyncSession, query: str, limit: int) -> List[dict]:
+    sql = """
+        SELECT event_id, entity_id, domains, confidence, payload, created_at::text
+        FROM fusarium.correlation_events
+        WHERE CAST(entity_id AS text) ILIKE :query
+           OR EXISTS (
+               SELECT 1
+               FROM unnest(domains) AS domain_name
+               WHERE domain_name ILIKE :query
+           )
+        ORDER BY created_at DESC
+        LIMIT :limit
+    """
+    rows = await _safe_query(session, sql, {"query": f"%{query}%", "limit": limit}, "fusarium_correlations")
+    return [
+        {
+            "id": str(r.event_id),
+            "domain": "fusarium",
+            "entity_type": "correlation_event",
+            "name": f"Correlation for {r.entity_id}",
+            "confidence": r.confidence,
+            "occurred_at": r.created_at,
+            "source": "fusarium.correlation_events",
+            "properties": {"domains": list(r.domains or []), "payload": r.payload},
+        }
+        for r in rows
+    ]
+
+
 # =============================================================================
 # DOMAIN DISPATCH TABLE
 # =============================================================================
@@ -1268,6 +1335,8 @@ def _build_dispatch(session, query, limit, lat, lng, radius, toxicity, kingdom, 
         # Knowledge
         "research": search_research(session, query, limit),
         "crep_entities": search_crep_entities(session, query, limit, lat, lng, radius),
+        "fusarium_tracks": search_fusarium_tracks(session, query, limit, lat, lng, radius),
+        "fusarium_correlations": search_fusarium_correlations(session, query, limit),
     }
 
 
@@ -1310,7 +1379,7 @@ async def unified_search(
             "power_grid, water_systems, internet_cables, antennas, wifi_hotspots, "
             "signal_measurements, aircraft, vessels, airports, ports, spaceports, "
             "launches, satellites, solar_events, cameras, military_installations, "
-            "devices, telemetry, research, crep_entities"
+            "devices, telemetry, research, crep_entities, fusarium_tracks, fusarium_correlations"
         ),
     ),
     limit: int = Query(20, ge=1, le=100, description="Max results per domain"),
@@ -1452,6 +1521,19 @@ async def unified_search(
     if supa.enabled and total_count > 0:
         asyncio.create_task(supa.sync_search_results(q, results))
 
+    schedule_domain_event(
+        domain="search",
+        task=f"MINDEX unified-search completed: {q}",
+        context={
+            "route": "/unified-search",
+            "query": q,
+            "domains_searched": task_names,
+            "total_count": total_count,
+            "timing_ms": timing_ms,
+        },
+        preferred_agent="myca-research",
+    )
+
     return UnifiedSearchResponse(
         query=q,
         domains_searched=task_names,
@@ -1570,6 +1652,19 @@ async def earth_search(
     if lat is not None and lng is not None:
         filters_applied["location"] = {"lat": lat, "lng": lng, "radius_km": radius}
 
+    schedule_domain_event(
+        domain="search",
+        task=f"MINDEX earth-search completed: {q}",
+        context={
+            "route": "/unified-search/earth",
+            "query": q,
+            "domains_searched": task_names,
+            "total_count": total_count,
+            "timing_ms": timing_ms,
+        },
+        preferred_agent="myca-research",
+    )
+
     return EarthSearchResponse(
         query=q,
         domains_searched=task_names,
@@ -1660,6 +1755,19 @@ async def search_nearby(
             total_count += len(result)
 
     timing_ms = int((time.time() - start_time) * 1000)
+
+    schedule_domain_event(
+        domain="search",
+        task="MINDEX nearby search completed",
+        context={
+            "route": "/unified-search/nearby",
+            "domains_searched": task_names,
+            "total_count": total_count,
+            "timing_ms": timing_ms,
+            "location": {"lat": lat, "lng": lng, "radius_km": radius},
+        },
+        preferred_agent="myca-research",
+    )
 
     return {
         "location": {"lat": lat, "lng": lng, "radius_km": radius},

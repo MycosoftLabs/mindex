@@ -12,6 +12,7 @@ All results carry lat/lng + entity_type for direct CREP map overlay rendering.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -582,3 +583,175 @@ async def infrastructure_status(session: AsyncSession = Depends(get_db_session))
     }
 
     return status
+
+
+# =============================================================================
+# INGEST — Push earth data into MINDEX from ETL pipelines or CREP collectors
+# =============================================================================
+
+class IngestEntity(BaseModel):
+    """Single entity to ingest into an earth domain table."""
+    source: str
+    source_id: Optional[str] = None
+    name: str
+    entity_type: str
+    lat: float
+    lng: float
+    occurred_at: Optional[str] = None
+    properties: Dict[str, Any] = {}
+
+
+class IngestRequest(BaseModel):
+    layer: str
+    entities: List[IngestEntity]
+
+
+class IngestResponse(BaseModel):
+    layer: str
+    inserted: int
+    errors: int
+
+
+@router.post("/ingest", response_model=IngestResponse)
+async def ingest_earth_data(
+    request: IngestRequest,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Bulk ingest entities into earth domain tables.
+
+    Supported layers: earthquakes, volcanoes, wildfires, facilities,
+    power_grid, internet_cables, antennas, aircraft, vessels, airports,
+    ports, satellites, solar_events, cameras, military, buoys
+    """
+    layer = request.layer
+    inserted = 0
+    errors = 0
+
+    # Map layer to insert SQL
+    insert_queries = {
+        "earthquakes": """
+            INSERT INTO earth.earthquakes (source, source_id, magnitude, depth_km,
+                location, place_name, occurred_at, properties)
+            VALUES (:source, :source_id, :magnitude, :depth_km,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :name, COALESCE(:occurred_at::timestamptz, NOW()), :props::jsonb)
+            ON CONFLICT (source_id) DO UPDATE SET
+                magnitude = EXCLUDED.magnitude, properties = EXCLUDED.properties
+        """,
+        "facilities": """
+            INSERT INTO infra.facilities (source, source_id, name, facility_type, sub_type,
+                location, operator, capacity, status, properties)
+            VALUES (:source, :source_id, :name, :entity_type, :sub_type,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :operator, :capacity, :status, :props::jsonb)
+            ON CONFLICT (source, source_id) DO UPDATE SET
+                name = EXCLUDED.name, properties = EXCLUDED.properties
+        """,
+        "power_grid": """
+            INSERT INTO infra.power_grid (source, source_id, asset_type, name, voltage_kv,
+                location, operator, properties)
+            VALUES (:source, :source_id, :entity_type, :name, :voltage_kv,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :operator, :props::jsonb)
+            ON CONFLICT DO NOTHING
+        """,
+        "airports": """
+            INSERT INTO transport.airports (source, source_id, name, airport_type,
+                icao_code, location, country, properties)
+            VALUES (:source, :source_id, :name, :entity_type,
+                :icao, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :country, :props::jsonb)
+            ON CONFLICT DO NOTHING
+        """,
+        "aircraft": """
+            INSERT INTO transport.aircraft (source, source_id, callsign, icao24,
+                location, heading, altitude_ft, ground_speed_kts, observed_at, properties)
+            VALUES (:source, :source_id, :name, :icao24,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :heading, :altitude, :speed, COALESCE(:occurred_at::timestamptz, NOW()), :props::jsonb)
+            ON CONFLICT DO NOTHING
+        """,
+        "vessels": """
+            INSERT INTO transport.vessels (source, source_id, name, mmsi,
+                location, speed_knots, heading, observed_at, properties)
+            VALUES (:source, :source_id, :name, :mmsi,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :speed, :heading, COALESCE(:occurred_at::timestamptz, NOW()), :props::jsonb)
+            ON CONFLICT DO NOTHING
+        """,
+        "satellites": """
+            INSERT INTO space.satellites (source, source_id, name, norad_id,
+                orbit_type, location, altitude_km, observed_at, properties)
+            VALUES (:source, :source_id, :name, :norad_id,
+                :orbit_type, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :altitude_km, COALESCE(:occurred_at::timestamptz, NOW()), :props::jsonb)
+            ON CONFLICT DO NOTHING
+        """,
+        "antennas": """
+            INSERT INTO signals.antennas (source, source_id, antenna_type,
+                location, operator, technology, properties)
+            VALUES (:source, :source_id, :entity_type,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :operator, :technology, :props::jsonb)
+            ON CONFLICT DO NOTHING
+        """,
+        "military": """
+            INSERT INTO military.installations (source, source_id, name, installation_type,
+                location, branch, country, properties)
+            VALUES (:source, :source_id, :name, :entity_type,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :branch, :country, :props::jsonb)
+            ON CONFLICT DO NOTHING
+        """,
+    }
+
+    sql_template = insert_queries.get(layer)
+    if not sql_template:
+        return IngestResponse(layer=layer, inserted=0, errors=len(request.entities))
+
+    for entity in request.entities:
+        props = entity.properties
+        params = {
+            "source": entity.source,
+            "source_id": entity.source_id,
+            "name": entity.name,
+            "entity_type": entity.entity_type,
+            "lat": entity.lat,
+            "lng": entity.lng,
+            "occurred_at": entity.occurred_at,
+            "props": json.dumps(props),
+            # Layer-specific fields from properties
+            "magnitude": props.get("magnitude", 0),
+            "depth_km": props.get("depth_km"),
+            "sub_type": props.get("sub_type"),
+            "operator": props.get("operator"),
+            "capacity": props.get("capacity"),
+            "status": props.get("status", "active"),
+            "voltage_kv": props.get("voltage_kv", 0),
+            "icao": props.get("icao"),
+            "country": props.get("country"),
+            "icao24": props.get("icao24"),
+            "heading": props.get("heading"),
+            "altitude": props.get("altitude"),
+            "speed": props.get("speed"),
+            "mmsi": props.get("mmsi"),
+            "norad_id": props.get("norad_id"),
+            "orbit_type": props.get("orbit_type"),
+            "altitude_km": props.get("altitude_km"),
+            "technology": props.get("technology"),
+            "branch": props.get("branch"),
+        }
+        try:
+            await session.execute(text(sql_template), params)
+            inserted += 1
+        except Exception as e:
+            errors += 1
+            if errors <= 3:
+                logger.warning(f"Ingest error for {layer}/{entity.source_id}: {e}")
+
+    if inserted > 0:
+        await session.commit()
+
+    logger.info(f"Earth ingest: {layer} — {inserted} inserted, {errors} errors")
+    return IngestResponse(layer=layer, inserted=inserted, errors=errors)

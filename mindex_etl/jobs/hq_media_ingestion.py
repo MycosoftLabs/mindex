@@ -47,6 +47,7 @@ from mindex_etl.images.derivatives import ImageDerivativeGenerator, generate_der
 from mindex_etl.images.phash import ImageHasher, compute_image_hashes
 from mindex_etl.images.quality import ImageQualityAnalyzer, analyze_image_quality, MIN_HQ_LONG_EDGE
 from mindex_etl.images.config import settings as image_settings
+from mindex_etl.config import settings as etl_settings
 
 # Configure logging
 logging.basicConfig(
@@ -57,7 +58,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Paths
-CHECKPOINT_FILE = Path("C:/Users/admin2/Desktop/MYCOSOFT/DATA/mindex_scrape/hq_ingestion_checkpoint.json")
+CHECKPOINT_FILE = Path(etl_settings.local_data_dir) / "hq_ingestion_checkpoint.json"
 IMAGE_STORAGE_BASE = Path(image_settings.local_image_dir)
 
 # Database

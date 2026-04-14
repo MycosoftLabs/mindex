@@ -4,10 +4,29 @@ Image Scraping Configuration
 Storage paths and API configurations for image scraping.
 """
 
+import os
 from pathlib import Path
 from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+
+def _default_local_image_dir() -> str:
+    if os.name == "nt":
+        return "C:/Users/admin2/Desktop/MYCOSOFT/DATA/mindex_images"
+    return "/mnt/nas/mindex/images"
+
+
+def _default_nas_image_dir() -> str:
+    if os.name == "nt":
+        return "\\\\192.168.1.50\\mindex_images"
+    return "/mnt/nas/mindex/images"
+
+
+def _default_dream_machine_dir() -> str:
+    if os.name == "nt":
+        return "\\\\192.168.1.1\\mindex_backup\\images"
+    return "/mnt/nas/mindex/images/backup"
 
 
 class ImageConfig(BaseSettings):
@@ -15,16 +34,16 @@ class ImageConfig(BaseSettings):
     
     # Local Storage Paths
     local_image_dir: str = Field(
-        default="C:/Users/admin2/Desktop/MYCOSOFT/DATA/mindex_images",
-        description="Primary local storage for images (12TB available)"
+        default_factory=_default_local_image_dir,
+        description="Primary image storage. Linux/VM defaults to NAS-backed image storage."
     )
     nas_image_dir: str = Field(
-        default="\\\\192.168.1.50\\mindex_images",
-        description="NAS backup storage for images (16TB)"
+        default_factory=_default_nas_image_dir,
+        description="NAS-backed image storage path."
     )
     dream_machine_dir: str = Field(
-        default="\\\\192.168.1.1\\mindex_backup\\images",
-        description="Dream Machine backup storage (27TB)"
+        default_factory=_default_dream_machine_dir,
+        description="Secondary/backup image storage path."
     )
     
     # Subdirectories by type
@@ -39,8 +58,8 @@ class ImageConfig(BaseSettings):
     # iNaturalist Config
     inat_base_url: str = "https://api.inaturalist.org/v1"
     inat_api_token: str = Field(
-        default="eyJhbGciOiJIUzUxMiJ9.eyJ1c2VyX2lkIjoxMDAxOTc2OSwiZXhwIjoxNzY1OTE1MDY2fQ.JXV3lLOyuuXeItfNUagixJCtKN3SI20_em1sl2gKFFDppHBNJXy79x6I6jJbiPG1a6n_-cj1JgysSmuKlbDKVg",
-        description="iNaturalist API token"
+        default="",
+        description="iNaturalist API token (set INAT_API_TOKEN in the environment; never hardcode)."
     )
     inat_fungi_taxon_id: int = 47170  # Fungi kingdom
     
@@ -87,7 +106,9 @@ class ImageConfig(BaseSettings):
     
     def get_storage_path(self, image_type: str = "field") -> Path:
         """Get the storage path for a specific image type."""
-        base = Path(self.local_image_dir)
+        local_base = Path(self.local_image_dir)
+        nas_base = Path(self.nas_image_dir)
+        base = local_base if local_base.exists() else nas_base
         type_map = {
             "field": self.field_subdir,
             "lab": self.lab_subdir,

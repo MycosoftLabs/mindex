@@ -35,7 +35,7 @@ WORLDVIEW_DOMAINS = [
     "satellites", "solar_events",
     "cameras",
     "military_installations",
-    "research", "crep_entities",
+    "research", "crep_entities", "fusarium_tracks", "fusarium_correlations",
 ]
 
 
@@ -115,6 +115,7 @@ async def worldview_domains(
                 "signals": ["antennas", "wifi_hotspots", "signal_measurements"],
                 "transport": ["aircraft", "vessels", "airports", "ports", "spaceports", "launches"],
                 "space": ["satellites", "solar_events"],
+                "fusarium": ["fusarium_tracks", "fusarium_correlations", "crep_entities", "vessels", "buoys"],
             },
         },
         plan=caller.plan,

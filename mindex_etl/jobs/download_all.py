@@ -17,6 +17,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from ..config import settings
 from ..sources.master_downloader import MasterDownloader, download_everything
 
 
@@ -47,7 +48,7 @@ Storage Requirements:
     
     parser.add_argument(
         "--output", "-o",
-        default="C:/Users/admin2/Desktop/MYCOSOFT/DATA/mindex_scrape",
+        default=settings.local_data_dir,
         help="Output directory for downloaded data",
     )
     

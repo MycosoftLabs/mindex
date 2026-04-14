@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 import logging
+from ..utils.deep_agent_events import schedule_domain_event
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,19 @@ async def search_research(
     except Exception as e:
         logger.error(f"Research search error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        schedule_domain_event(
+            domain="search",
+            task=f"MINDEX research search completed: {search}",
+            context={
+                "route": "/research",
+                "query": search,
+                "limit": limit,
+                "offset": offset,
+                "open_access_only": open_access_only,
+            },
+            preferred_agent="myca-research",
+        )
 
 
 @router.get("/{paper_id}", response_model=ResearchPaper)
@@ -146,7 +160,12 @@ async def get_paper_details(paper_id: str) -> ResearchPaper:
         paper = _parse_openalex_work(work)
         if not paper:
             raise HTTPException(status_code=404, detail="Paper not found")
-        
+        schedule_domain_event(
+            domain="search",
+            task=f"MINDEX research paper details requested: {paper_id}",
+            context={"route": "/research/{paper_id}", "paper_id": paper_id},
+            preferred_agent="myca-research",
+        )
         return paper
     
     except httpx.HTTPStatusError as e:

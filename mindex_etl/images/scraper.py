@@ -16,7 +16,9 @@ from dataclasses import dataclass
 
 import httpx
 
-LOCAL_IMAGE_DIR = Path("C:/Users/admin2/Desktop/MYCOSOFT/DATA/mindex_images")
+from .config import settings as image_settings
+
+LOCAL_IMAGE_DIR = Path(image_settings.local_image_dir)
 
 
 @dataclass

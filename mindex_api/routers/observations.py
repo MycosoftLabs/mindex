@@ -18,6 +18,7 @@ from ..dependencies import (
     require_api_key,
 )
 from ..contracts.v1.observations import ObservationListResponse
+from ..utils.deep_agent_events import schedule_domain_event
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,20 @@ async def list_observations(
             data["location"] = None
         observations.append(data)
 
+    schedule_domain_event(
+        domain="search",
+        task="MINDEX observations list requested",
+        context={
+            "route": "/observations",
+            "taxon_id": str(taxon_id) if taxon_id else None,
+            "start": start.isoformat() if start else None,
+            "end": end.isoformat() if end else None,
+            "total": total,
+            "limit": pagination.limit,
+            "offset": pagination.offset,
+        },
+        preferred_agent="myca-research",
+    )
     return ObservationListResponse(
         data=observations,
         pagination={
@@ -231,4 +246,16 @@ async def bulk_ingest_observations(
 
     await db.commit()
     logger.info("Bulk ingest complete: inserted=%d skipped=%d errors=%d", inserted, skipped, errors)
+    schedule_domain_event(
+        domain="search",
+        task="MINDEX observations bulk ingest completed",
+        context={
+            "route": "/observations/bulk",
+            "inserted": inserted,
+            "skipped": skipped,
+            "errors": errors,
+            "submitted_count": len(body.observations),
+        },
+        preferred_agent="myca-research",
+    )
     return BulkIngestResponse(inserted=inserted, skipped=skipped, errors=errors)

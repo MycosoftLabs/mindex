@@ -1,3 +1,4 @@
+import os
 from typing import List, Optional, Union
 
 import json
@@ -109,8 +110,8 @@ class Settings(BaseSettings):
         description="NAS mount point for cold storage (16TB base, expandable to ~178TB).",
     )
     local_staging_path: str = Field(
-        default="/tmp/mindex_staging",
-        description="Local staging area for data before NAS write.",
+        default="/mnt/nas/mindex/staging",
+        description="Staging area for data before durable NAS write.",
     )
 
     # Integrations
@@ -298,8 +299,8 @@ class Settings(BaseSettings):
 
     # cuVS vector index settings
     cuvs_index_dir: str = Field(
-        "/data/cuvs_indexes",
-        description="Persistent storage for cuVS vector indexes.",
+        "/mnt/nas/mindex/indexes/cuvs",
+        description="Persistent NAS-backed storage for cuVS vector indexes.",
     )
 
     # STATIC constrained decoding (via MAS)

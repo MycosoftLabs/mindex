@@ -81,6 +81,24 @@ class StorageManager:
             self.nas_training / "nlm",
             self.nas_training / "embeddings",
             self.nas_training / "datasets",
+            self.nas_training / "fusarium",
+            self.nas_training / "fusarium" / "registry",
+            self.nas_training / "fusarium" / "underwater_pam",
+            self.nas_training / "fusarium" / "vessel_uatr",
+            self.nas_training / "fusarium" / "marine_bio",
+            self.nas_training / "fusarium" / "aerial_bio_uav",
+            self.nas_training / "fusarium" / "threat_munitions",
+            self.nas_training / "fusarium" / "env_transfer_audio",
+            self.nas_training / "fusarium" / "oceanographic_grid",
+            self.nas_training / "fusarium" / "bathymetry",
+            self.nas_training / "fusarium" / "magnetic",
+            self.nas_training / "fusarium" / "ais_maritime",
+            self.nas_training / "fusarium" / "sonar_imagery",
+            self.nas_training / "fusarium" / "gas_chemistry",
+            self.nas_training / "fusarium" / "electromagnetics",
+            self.nas_training / "fusarium" / "vibration_touch",
+            self.nas_training / "fusarium" / "bioelectric_fci",
+            self.nas_training / "fusarium" / "model_registry",
             self.nas_scrapes / "raw",
             self.nas_scrapes / "processed",
             self.nas_images / "species",
@@ -204,6 +222,35 @@ class StorageManager:
             return str(target)
         except Exception as e:
             logger.error(f"Training export error: {e}")
+            return None
+
+    def export_fusarium_training_data(
+        self,
+        modality_silo: str,
+        dataset_name: str,
+        records: List[dict],
+        format: str = "jsonl",
+    ) -> Optional[str]:
+        """Export defense-compartmented training data for Fusarium/NLM workflows."""
+        if not self.nas_available():
+            return None
+
+        filename = f"{dataset_name}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.{format}"
+        target = self.nas_training / "fusarium" / modality_silo / filename
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "w", encoding="utf-8") as f:
+                if format == "jsonl":
+                    for record in records:
+                        f.write(json.dumps(record, default=str) + "\n")
+                else:
+                    json.dump(records, f, default=str, indent=2)
+
+            logger.info("Fusarium training export: %s (%s records)", target, len(records))
+            return str(target)
+        except Exception as e:
+            logger.error(f"Fusarium training export error: {e}")
             return None
 
     # =========================================================================
