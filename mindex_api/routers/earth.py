@@ -323,9 +323,15 @@ async def map_bbox_query(
         "power_grid": """
             SELECT id::text, asset_type as entity_type, 'infrastructure' as domain,
                    COALESCE(name, asset_type || ' ' || voltage_kv || 'kV') as name,
-                   ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
+                   ST_Y(ST_Centroid(location::geometry)) as lat,
+                   ST_X(ST_Centroid(location::geometry)) as lng,
                    created_at::text as occurred_at, source,
-                   jsonb_build_object('asset_type', asset_type, 'voltage_kv', voltage_kv, 'operator', operator) as properties
+                   jsonb_build_object(
+                       'asset_type', asset_type, 'voltage_kv', voltage_kv, 'operator', operator,
+                       'route', CASE WHEN ST_GeometryType(location::geometry) = 'ST_LineString'
+                                THEN ST_AsGeoJSON(location::geometry)::jsonb
+                                ELSE NULL END
+                   ) as properties
             FROM infra.power_grid
             WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
             LIMIT :limit

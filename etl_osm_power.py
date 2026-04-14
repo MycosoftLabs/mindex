@@ -439,12 +439,101 @@ async def load_military_bases(conn: asyncpg.Connection):
     return total
 
 
+async def load_transmission_lines(conn: asyncpg.Connection):
+    """Load transmission lines (power=line) from OSM — LINESTRING geometries."""
+    log.info("=" * 60)
+    log.info("Loading TRANSMISSION LINES from OpenStreetMap")
+    log.info("=" * 60)
+
+    total = 0
+    async with httpx.AsyncClient() as client:
+        # Use smaller regions for transmission lines — they're dense
+        tx_regions = [
+            ("US-NE", "38,-82,46,-66"),
+            ("US-SE", "28,-90,38,-74"),
+            ("US-MW", "38,-100,48,-82"),
+            ("US-SW", "28,-118,38,-100"),
+            ("US-NW", "42,-125,50,-108"),
+            ("US-TX", "25,-106,37,-93"),
+            ("EU-W", "42,-5,55,10"),
+            ("EU-C", "45,10,56,25"),
+            ("UK", "50,-6,58,2"),
+            ("East-Asia", "30,120,45,145"),
+            ("India", "8,68,35,90"),
+        ]
+
+        for region_name, bbox in tx_regions:
+            # Query transmission lines as ways with geometry
+            query = f'[out:json][timeout:120][bbox:{bbox}];way["power"="line"];out geom 5000;'
+            elements = await overpass_query(client, query, f"tx/{region_name}")
+
+            if not elements:
+                continue
+
+            log.info(f"  [{region_name}] Got {len(elements)} transmission lines")
+            inserted = 0
+
+            for el in elements:
+                geom = el.get("geometry", [])
+                if len(geom) < 2:
+                    continue
+
+                tags = el.get("tags", {})
+                voltage_str = tags.get("voltage", "0")
+                try:
+                    voltage_kv = max(float(v) / 1000 for v in voltage_str.replace(";", ",").split(",") if v.strip())
+                except (ValueError, TypeError):
+                    voltage_kv = 0
+
+                # Build LINESTRING from way geometry
+                coord_pairs = []
+                for pt in geom:
+                    lat = pt.get("lat")
+                    lon = pt.get("lon")
+                    if lat and lon:
+                        coord_pairs.append(f"{lon} {lat}")
+
+                if len(coord_pairs) < 2:
+                    continue
+
+                linestring_wkt = f"LINESTRING({', '.join(coord_pairs)})"
+                source_id = f"osm-way-{el.get('id', 0)}"
+                name = tags.get("name", f"TX Line {voltage_kv:.0f}kV")
+                operator = tags.get("operator")
+
+                try:
+                    await conn.execute("""
+                        INSERT INTO infra.power_grid (source, source_id, asset_type, name, voltage_kv,
+                            location, operator, properties)
+                        VALUES ('osm', $1, 'transmission_line', $2, $3,
+                            ST_GeogFromText($4),
+                            $5, $6::jsonb)
+                        ON CONFLICT DO NOTHING
+                    """,
+                        source_id, name, voltage_kv,
+                        linestring_wkt, operator,
+                        json.dumps({**tags, "voltage_kv": voltage_kv}),
+                    )
+                    inserted += 1
+                except Exception as e:
+                    if inserted == 0:
+                        log.error(f"  TX line insert error: {e}")
+
+            log.info(f"  [{region_name}] Inserted {inserted} transmission lines")
+            total += inserted
+            await asyncio.sleep(3)  # Rate limit
+
+    log.info(f"  TOTAL: {total} transmission lines loaded")
+    return total
+
+
 async def main():
     import argparse
     parser = argparse.ArgumentParser(description="MINDEX OSM Power Infrastructure ETL")
     parser.add_argument("--all", action="store_true", help="Load all data types")
     parser.add_argument("--plants", action="store_true")
     parser.add_argument("--substations", action="store_true")
+    parser.add_argument("--lines", action="store_true")
     parser.add_argument("--datacenters", action="store_true")
     parser.add_argument("--cables", action="store_true")
     parser.add_argument("--military", action="store_true")
@@ -472,6 +561,9 @@ async def main():
 
         if args.all or args.substations:
             results["substations"] = await load_substations(conn)
+
+        if args.all or args.lines:
+            results["transmission_lines"] = await load_transmission_lines(conn)
 
         if args.all or args.datacenters:
             results["datacenters"] = await load_datacenters(conn)
