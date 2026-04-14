@@ -320,6 +320,34 @@ async def map_bbox_query(
             WHERE s.location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
             ORDER BY s.observed_at DESC LIMIT :limit
         """,
+        "power_grid": """
+            SELECT id::text, asset_type as entity_type, 'infrastructure' as domain,
+                   COALESCE(name, asset_type || ' ' || voltage_kv || 'kV') as name,
+                   ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
+                   created_at::text as occurred_at, source,
+                   jsonb_build_object('asset_type', asset_type, 'voltage_kv', voltage_kv, 'operator', operator) as properties
+            FROM infra.power_grid
+            WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            LIMIT :limit
+        """,
+        "internet_cables": """
+            SELECT id::text, 'submarine_cable' as entity_type, 'infrastructure' as domain,
+                   name, NULL::double precision as lat, NULL::double precision as lng,
+                   created_at::text as occurred_at, source,
+                   jsonb_build_object('cable_type', cable_type, 'status', status,
+                       'length_km', length_km, 'capacity_tbps', capacity_tbps) as properties
+            FROM infra.internet_cables
+            LIMIT :limit
+        """,
+        "satellites": """
+            SELECT id::text, 'satellite' as entity_type, 'space' as domain,
+                   name, ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
+                   observed_at::text as occurred_at, source,
+                   jsonb_build_object('norad_id', norad_id, 'orbit_type', orbit_type, 'altitude_km', altitude_km) as properties
+            FROM space.satellites
+            WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            ORDER BY observed_at DESC LIMIT :limit
+        """,
     }
 
     sql = layer_queries.get(layer)
