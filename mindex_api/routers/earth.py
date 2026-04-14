@@ -332,11 +332,17 @@ async def map_bbox_query(
         """,
         "internet_cables": """
             SELECT id::text, 'submarine_cable' as entity_type, 'infrastructure' as domain,
-                   name, NULL::double precision as lat, NULL::double precision as lng,
+                   name,
+                   ST_Y(ST_Centroid(route::geometry)) as lat,
+                   ST_X(ST_Centroid(route::geometry)) as lng,
                    created_at::text as occurred_at, source,
-                   jsonb_build_object('cable_type', cable_type, 'status', status,
-                       'length_km', length_km, 'capacity_tbps', capacity_tbps) as properties
+                   jsonb_build_object(
+                       'cable_type', cable_type, 'status', status,
+                       'length_km', length_km, 'capacity_tbps', capacity_tbps,
+                       'route', ST_AsGeoJSON(route::geometry)::jsonb
+                   ) as properties
             FROM infra.internet_cables
+            WHERE route IS NOT NULL
             LIMIT :limit
         """,
         "satellites": """
