@@ -26,8 +26,11 @@ MINDEX regardless of whether external APIs are up or down.
 """
 
 import asyncio
+import csv
+import io
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timedelta
@@ -39,8 +42,8 @@ import asyncpg
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("earth-loader")
 
-# MINDEX database connection — NAS at 192.168.0.189, port 5434 (Docker-mapped)
-DB_DSN = "postgresql://mindex:mindex@192.168.0.189:5434/mindex"
+# MINDEX database connection — NAS at 192.168.0.189, port 5432
+DB_DSN = "postgresql://mycosoft:mycosoft_mindex_2026@192.168.0.189:5432/mindex"
 
 # Rate limiting
 RATE_LIMIT_DELAY = 0.5  # seconds between API calls
@@ -105,10 +108,17 @@ async def load_earthquakes(conn: asyncpg.Connection):
 async def load_wildfires(conn: asyncpg.Connection):
     log.info("Loading wildfires from NASA FIRMS...")
     # FIRMS CSV endpoint for last 7 days, VIIRS sensor
-    url = "https://firms.modaps.eosdis.nasa.gov/api/area/csv/DEMO_KEY/VIIRS_SNPP_NRT/world/7"
+    # Use NASA EarthData bearer token for authenticated access
+    earthdata_token = os.environ.get("NASA_EARTHDATA_TOKEN", "")
+    firms_key = os.environ.get("NASA_FIRMS_MAP_KEY", "DEMO_KEY")
+    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{firms_key}/VIIRS_SNPP_NRT/world/7"
+
+    headers = {}
+    if earthdata_token:
+        headers["Authorization"] = f"Bearer {earthdata_token}"
 
     async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.get(url)
+        resp = await client.get(url, headers=headers)
         lines = resp.text.strip().split("\n")
 
     if len(lines) < 2:
@@ -169,75 +179,84 @@ async def load_wildfires(conn: asyncpg.Connection):
 async def load_facilities(conn: asyncpg.Connection):
     log.info("Loading facilities from OpenStreetMap Overpass...")
 
+    # Region-bounded queries to avoid Overpass timeouts on global queries
+    # Each region covers a major continent/area
+    regions = [
+        ("NA", "24,-130,55,-60"),     # North America
+        ("EU", "35,-15,72,45"),       # Europe
+        ("AS", "0,60,60,150"),        # Asia
+        ("SA", "-60,-85,15,-30"),     # South America
+        ("AF", "-40,-20,40,55"),      # Africa
+        ("OC", "-50,100,0,180"),      # Oceania
+    ]
+
     queries = {
-        "power_plant": '[out:json][timeout:300];nwr["power"="plant"];out center 5000;',
-        "factory": '[out:json][timeout:300];nwr["man_made"="works"];out center 3000;',
-        "data_center": '[out:json][timeout:300];nwr["building"="data_centre"];out center 2000;',
-        "substation": '[out:json][timeout:300];nwr["power"="substation"];out center 5000;',
-        "refinery": '[out:json][timeout:300];nwr["man_made"="petroleum_well"];out center 2000;',
-        "mine": '[out:json][timeout:300];nwr["landuse"="quarry"];out center 2000;',
-        "water_treatment": '[out:json][timeout:300];nwr["man_made"="wastewater_plant"];out center 2000;',
+        "power_plant": 'nwr["power"="plant"]',
+        "data_center": 'nwr["building"="data_centre"]',
+        "substation": 'nwr["power"="substation"]',
     }
 
     overpass_url = "https://overpass-api.de/api/interpreter"
     total = 0
 
     async with httpx.AsyncClient(timeout=360) as client:
-        for facility_type, query in queries.items():
-            log.info(f"  Fetching {facility_type} from Overpass...")
-            try:
-                resp = await client.post(overpass_url, data={"data": query})
-                if resp.status_code != 200:
-                    log.warning(f"  Overpass returned {resp.status_code} for {facility_type}")
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
-                    continue
-
-                data = resp.json()
-                elements = data.get("elements", [])
-                log.info(f"  Got {len(elements)} {facility_type} elements")
-
-                inserted = 0
-                for el in elements:
-                    lat = el.get("lat") or el.get("center", {}).get("lat")
-                    lng = el.get("lon") or el.get("center", {}).get("lon")
-                    if not lat or not lng:
+        for facility_type, query_filter in queries.items():
+            for region_name, bbox in regions:
+                full_query = f'[out:json][timeout:120][bbox:{bbox}];{query_filter};out center 5000;'
+                log.info(f"  Fetching {facility_type} in {region_name} from Overpass...")
+                try:
+                    resp = await client.post(overpass_url, data={"data": full_query})
+                    if resp.status_code != 200:
+                        log.warning(f"  Overpass returned {resp.status_code} for {facility_type}/{region_name}")
+                        await asyncio.sleep(RATE_LIMIT_DELAY * 3)
                         continue
 
-                    tags = el.get("tags", {})
-                    name = tags.get("name", f"{facility_type.replace('_', ' ').title()}")
-                    operator = tags.get("operator", tags.get("company"))
-                    sub_type = tags.get("plant:source", tags.get("generator:source", tags.get("plant:type")))
-                    capacity = tags.get("plant:output:electricity", tags.get("generator:output:electricity"))
-                    status = tags.get("operational_status", "active")
+                    data = resp.json()
+                    elements = data.get("elements", [])
+                    log.info(f"  Got {len(elements)} {facility_type} in {region_name}")
 
-                    source_id = f"osm-{el.get('type', 'node')}-{el.get('id', 0)}"
+                    inserted = 0
+                    for el in elements:
+                        lat = el.get("lat") or el.get("center", {}).get("lat")
+                        lng = el.get("lon") or el.get("center", {}).get("lon")
+                        if not lat or not lng:
+                            continue
 
-                    try:
-                        await conn.execute("""
-                            INSERT INTO infra.facilities (source, source_id, name, facility_type, sub_type,
-                                location, operator, capacity, status, properties)
-                            VALUES ('osm', $1, $2, $3, $4,
-                                ST_SetSRID(ST_MakePoint($5, $6), 4326)::geography,
-                                $7, $8, $9, $10::jsonb)
-                            ON CONFLICT (source, source_id) DO UPDATE SET
-                                name = EXCLUDED.name, properties = EXCLUDED.properties
-                        """,
-                            source_id, name, facility_type, sub_type,
-                            lng, lat, operator, capacity, status,
-                            json.dumps(tags),
-                        )
-                        inserted += 1
-                    except Exception as e:
-                        if inserted == 0:
-                            log.error(f"  Facility insert error: {e}")
+                        tags = el.get("tags", {})
+                        name = tags.get("name", f"{facility_type.replace('_', ' ').title()}")
+                        operator = tags.get("operator", tags.get("company"))
+                        sub_type = tags.get("plant:source", tags.get("generator:source", tags.get("plant:type")))
+                        capacity = tags.get("plant:output:electricity", tags.get("generator:output:electricity"))
+                        status = tags.get("operational_status", "active")
 
-                log.info(f"  Inserted {inserted} {facility_type} facilities")
-                total += inserted
+                        source_id = f"osm-{el.get('type', 'node')}-{el.get('id', 0)}"
 
-            except Exception as e:
-                log.error(f"  Failed to fetch {facility_type}: {e}")
+                        try:
+                            await conn.execute("""
+                                INSERT INTO infra.facilities (source, source_id, name, facility_type, sub_type,
+                                    location, operator, capacity, status, properties)
+                                VALUES ('osm', $1, $2, $3, $4,
+                                    ST_SetSRID(ST_MakePoint($5, $6), 4326)::geography,
+                                    $7, $8, $9, $10::jsonb)
+                                ON CONFLICT (source, source_id) DO UPDATE SET
+                                    name = EXCLUDED.name, properties = EXCLUDED.properties
+                            """,
+                                source_id, name, facility_type, sub_type,
+                                lng, lat, operator, capacity, status,
+                                json.dumps(tags),
+                            )
+                            inserted += 1
+                        except Exception as e:
+                            if inserted == 0:
+                                log.error(f"  Facility insert error: {e}")
 
-            await asyncio.sleep(RATE_LIMIT_DELAY * 2)  # Be nice to Overpass
+                    log.info(f"  Inserted {inserted} {facility_type} in {region_name}")
+                    total += inserted
+
+                except Exception as e:
+                    log.error(f"  Failed to fetch {facility_type}/{region_name}: {e}")
+
+                await asyncio.sleep(RATE_LIMIT_DELAY * 3)  # Be nice to Overpass
 
     log.info(f"  Total facilities inserted: {total}")
     return total
@@ -311,7 +330,18 @@ async def load_submarine_cables(conn: asyncpg.Connection):
 
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.get(url)
-        cables = resp.json()
+        try:
+            cables = resp.json()
+        except Exception:
+            log.warning("  Submarine cable API returned non-JSON, trying alternate source")
+            # Try alternate URL
+            resp2 = await client.get("https://raw.githubusercontent.com/telegeography/www.submarinecablemap.com/master/web/public/api/v3/cable/cable-geo.json")
+            try:
+                data = resp2.json()
+                cables = data.get("features", []) if isinstance(data, dict) else data
+            except Exception:
+                log.error("  Both submarine cable sources failed")
+                return 0
 
     log.info(f"  Got {len(cables)} submarine cables")
     inserted = 0
@@ -370,34 +400,37 @@ async def load_airports(conn: asyncpg.Connection):
         resp = await client.get(url)
         lines = resp.text.strip().split("\n")
 
-    log.info(f"  Got {len(lines) - 1} airports")
+    reader = csv.DictReader(io.StringIO(resp.text))
+    rows = list(reader)
+    log.info(f"  Got {len(rows)} airports")
     inserted = 0
 
-    header = lines[0].split(",")
-    for line in lines[1:]:
-        cols = line.split(",")
-        if len(cols) < 9:
-            continue
+    for row in rows:
         try:
-            # CSV: id, ident, type, name, latitude_deg, longitude_deg, elevation_ft, continent, iso_country, ...
-            airport_type = cols[2].strip('"')
+            airport_type = row.get("type", "")
             if airport_type not in ("large_airport", "medium_airport", "small_airport"):
                 continue
-            name = cols[3].strip('"')
-            lat = float(cols[4].strip('"'))
-            lng = float(cols[5].strip('"'))
-            ident = cols[1].strip('"')
-            country = cols[8].strip('"') if len(cols) > 8 else ""
+            name = row.get("name", "Unknown Airport")
+            lat_str = row.get("latitude_deg", "")
+            lng_str = row.get("longitude_deg", "")
+            if not lat_str or not lng_str:
+                continue
+            lat = float(lat_str)
+            lng = float(lng_str)
+            ident = row.get("ident", "")
+            country = row.get("iso_country", "")
+            icao = row.get("icao_code") or row.get("gps_code") or ident
+            iata = row.get("iata_code", "")
 
             await conn.execute("""
-                INSERT INTO transport.airports (source, source_id, name, airport_type,
-                    icao_code, location, country, properties)
+                INSERT INTO transport.airports (source, name, airport_type,
+                    icao_code, iata_code, location, country, properties)
                 VALUES ('ourairports', $1, $2, $3, $4,
                     ST_SetSRID(ST_MakePoint($5, $6), 4326)::geography,
                     $7, '{}'::jsonb)
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (icao_code) DO NOTHING
             """,
-                ident, name, airport_type, ident, lng, lat, country,
+                name, airport_type, icao or None, iata or None, lng, lat, country,
             )
             inserted += 1
         except Exception:
@@ -440,6 +473,7 @@ async def load_solar_events(conn: asyncpg.Connection):
             log.warning(f"  Solar flares fetch failed: {e}")
 
     log.info("  Solar events loaded")
+    return 0
 
 
 # ============================================================================
