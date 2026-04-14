@@ -111,7 +111,9 @@ async def load_wildfires(conn: asyncpg.Connection):
     # Use NASA EarthData bearer token for authenticated access
     earthdata_token = os.environ.get("NASA_EARTHDATA_TOKEN", "")
     firms_key = os.environ.get("NASA_FIRMS_MAP_KEY", "DEMO_KEY")
-    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{firms_key}/VIIRS_SNPP_NRT/world/7"
+    # Use 1-day window per request to stay within size limits
+    # world/7 returns 400 for global (too much data), world/1 works
+    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{firms_key}/VIIRS_SNPP_NRT/world/1"
 
     headers = {}
     if earthdata_token:
