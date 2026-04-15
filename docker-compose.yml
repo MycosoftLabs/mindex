@@ -101,6 +101,10 @@ services:
       API_PREFIX: "/api/mindex"
       API_KEYS: '["${MINDEX_API_KEY:-change-me}"]'
 
+      # Internal service auth (MAS MQTT bridge, orchestrator — HMAC or PSK; from host .env)
+      MINDEX_INTERNAL_SECRET: ${MINDEX_INTERNAL_SECRET:-}
+      MINDEX_INTERNAL_TOKENS: ${MINDEX_INTERNAL_TOKENS:-}
+
       # CORS - Allow NatureOS, CREP, and other local services
       API_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002","http://127.0.0.1:3000","http://natureos-web:3000","http://crep-web:3000"]'
 
@@ -273,6 +277,9 @@ services:
       API_PREFIX: "/api/mindex"
       API_KEYS: '["${MINDEX_API_KEY:-change-me}"]'
       API_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002"]'
+
+      MINDEX_INTERNAL_SECRET: ${MINDEX_INTERNAL_SECRET:-}
+      MINDEX_INTERNAL_TOKENS: ${MINDEX_INTERNAL_TOKENS:-}
 
       # GPU Acceleration
       GPU_ENABLED: "true"
