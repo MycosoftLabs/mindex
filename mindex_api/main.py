@@ -53,6 +53,7 @@ from .routers import (
     fusarium_analytics_router,
     fusarium_catalog_router,
     live_state_router,
+    mycodao_zone_router,
 )
 from .routers.worldview import (
     worldview_search_router,
@@ -173,6 +174,10 @@ def create_app() -> FastAPI:
     # API key management (CRUD, rotation, usage, audit)
     app.include_router(key_management_router, prefix=internal_prefix, dependencies=internal_deps)
 
+    # MYCODAO schema (mycodao.*) + Mycosoft zone registry (mycosoft.*); MYCA sees both via internal token
+    if mycodao_zone_router is not None:
+        app.include_router(mycodao_zone_router, prefix=internal_prefix, dependencies=internal_deps)
+
     # GPU acceleration (cuDF, cuVS, STATIC) — optional, degrades to CPU
     try:
         from .gpu.router import gpu_router
@@ -246,6 +251,8 @@ def create_app() -> FastAPI:
         app.include_router(fusarium_analytics_router, prefix=prefix, dependencies=internal_deps)
     if fusarium_catalog_router is not None:
         app.include_router(fusarium_catalog_router, prefix=prefix, dependencies=internal_deps)
+    if mycodao_zone_router is not None:
+        app.include_router(mycodao_zone_router, prefix=prefix, dependencies=internal_deps)
 
     return app
 

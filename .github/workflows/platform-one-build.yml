@@ -36,6 +36,7 @@ jobs:
           echo "${IRON_BANK_PASSWORD}" | docker login "${IRON_BANK_REGISTRY}" -u "${IRON_BANK_USERNAME}" --password-stdin
 
       - name: Build hardened image
+        if: ${{ env.IRON_BANK_REGISTRY != '' }}
         run: |
           docker build \
             --build-arg BASE_IMAGE=${IRON_BANK_BASE_IMAGE} \

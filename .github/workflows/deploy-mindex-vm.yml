@@ -7,6 +7,10 @@
 #   GHCR_PULL_TOKEN      - (Optional) PAT with read:packages for VM to pull image
 #
 # On VM 189: ensure .env (or env passed to container) has POSTGRES/Redis/Qdrant URLs as required by mindex_api.
+#
+# GitHub-hosted runners cannot reach RFC1918 LAN addresses (e.g. 192.168.0.189). The deploy job is OFF by default.
+# Enable VM SSH deploy from Actions by setting repo variable MINDEX_ENABLE_GITHUB_SSH_DEPLOY=true when using a
+# self-hosted runner on the LAN, a public jump host in MINDEX_HOST, or Tailscale/WireGuard IP reachable from GitHub.
 
 name: Deploy MINDEX to VM 189
 
@@ -69,6 +73,7 @@ jobs:
     name: Deploy to MINDEX VM (189)
     runs-on: ubuntu-latest
     needs: build
+    if: ${{ vars.MINDEX_ENABLE_GITHUB_SSH_DEPLOY == 'true' }}
     environment: production
     steps:
       - name: Set image for deploy (GHCR uses lowercase)
@@ -118,8 +123,8 @@ jobs:
             curl -sf http://localhost:8000/health || exit 1
 
   agentic-fallback:
-    needs: [build, deploy]
-    if: always() && (needs.build.result == 'failure' || needs.deploy.result == 'failure')
+    needs: [build]
+    if: failure()
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Agentic Healing

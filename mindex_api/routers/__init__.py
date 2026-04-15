@@ -58,6 +58,11 @@ try:
 except Exception:
     fusarium_catalog_router = None
 
+try:
+    from .mycodao_zone import router as mycodao_zone_router
+except Exception:
+    mycodao_zone_router = None
+
 __all__ = [
     "health_router",
     "emissions_router",
@@ -97,6 +102,7 @@ __all__ = [
     "fusarium_analytics_router",
     "fusarium_catalog_router",
     "live_state_router",
+    "mycodao_zone_router",
 ]
 
 
