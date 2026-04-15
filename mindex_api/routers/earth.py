@@ -151,7 +151,7 @@ async def map_bbox_query(
     lat_max: float = Query(...),
     lng_min: float = Query(...),
     lng_max: float = Query(...),
-    limit: int = Query(500, ge=1, le=5000),
+    limit: int = Query(500, ge=1, le=50000),
     session: AsyncSession = Depends(get_db_session),
 ):
     """
@@ -334,6 +334,37 @@ async def map_bbox_query(
                    ) as properties
             FROM infra.power_grid
             WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            LIMIT :limit
+        """,
+        "substations": """
+            SELECT id::text, asset_type as entity_type, 'infrastructure' as domain,
+                   COALESCE(name, 'Substation ' || voltage_kv || 'kV') as name,
+                   ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
+                   created_at::text as occurred_at, source,
+                   jsonb_build_object(
+                       'voltage_kv', voltage_kv, 'operator', operator,
+                       'sub_type', asset_type, 'status', 'Active'
+                   ) as properties
+            FROM infra.power_grid
+            WHERE asset_type = 'substation'
+              AND ST_GeometryType(location::geometry) = 'ST_Point'
+              AND location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            LIMIT :limit
+        """,
+        "transmission_lines": """
+            SELECT id::text, asset_type as entity_type, 'infrastructure' as domain,
+                   COALESCE(name, 'Line ' || voltage_kv || 'kV') as name,
+                   ST_Y(ST_Centroid(location::geometry)) as lat,
+                   ST_X(ST_Centroid(location::geometry)) as lng,
+                   created_at::text as occurred_at, source,
+                   jsonb_build_object(
+                       'voltage_kv', voltage_kv, 'operator', operator,
+                       'route', ST_AsGeoJSON(location::geometry)::jsonb
+                   ) as properties
+            FROM infra.power_grid
+            WHERE asset_type = 'line'
+              AND ST_GeometryType(location::geometry) = 'ST_LineString'
+              AND location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
             LIMIT :limit
         """,
         "internet_cables": """
