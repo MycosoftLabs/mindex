@@ -196,7 +196,11 @@ async def map_bbox_query(
             SELECT id::text, facility_type as entity_type, 'infrastructure' as domain,
                    name, ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
                    created_at::text as occurred_at, source,
-                   jsonb_build_object('type', facility_type, 'sub_type', sub_type, 'operator', operator) as properties
+                   jsonb_build_object(
+                       'type', facility_type, 'sub_type', sub_type, 'operator', operator,
+                       'capacity_mw', capacity, 'status', status,
+                       'state', state_province, 'country', country
+                   ) as properties
             FROM infra.facilities
             WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
             LIMIT :limit
@@ -362,7 +366,7 @@ async def map_bbox_query(
                        'route', ST_AsGeoJSON(location::geometry)::jsonb
                    ) as properties
             FROM infra.power_grid
-            WHERE asset_type = 'line'
+            WHERE asset_type = 'transmission_line'
               AND ST_GeometryType(location::geometry) = 'ST_LineString'
               AND location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
             LIMIT :limit
