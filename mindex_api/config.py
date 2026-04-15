@@ -133,14 +133,16 @@ class Settings(BaseSettings):
     )
 
     # Internal service auth — HMAC secret for signed tokens
+    # Env must match bridge/deploy scripts: MINDEX_INTERNAL_SECRET (not only INTERNAL_AUTH_SECRET).
     internal_auth_secret: Optional[str] = Field(
         None,
+        validation_alias=AliasChoices("MINDEX_INTERNAL_SECRET", "INTERNAL_AUTH_SECRET"),
         description="HMAC-SHA256 shared secret for internal service tokens.",
     )
     # Internal service auth — pre-shared token list (simpler alternative)
     internal_tokens: Union[List[str], str] = Field(
         default_factory=list,
-        validation_alias=AliasChoices("MINDEX_INTERNAL_TOKENS"),
+        validation_alias=AliasChoices("MINDEX_INTERNAL_TOKENS", "MINDEX_INTERNAL_TOKEN"),
         description="Pre-shared internal service tokens (comma-separated or JSON list).",
     )
 
