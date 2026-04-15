@@ -4,13 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "mindex_api/**"
-      - "mindex_etl/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "Dockerfile"
-      - ".github/workflows/platform-one-build.yml"
   workflow_dispatch:
 
 concurrency:
