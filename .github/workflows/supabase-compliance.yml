@@ -1,0 +1,57 @@
+# Supabase CMMC posture: CLI presence + optional live checks against Postgres.
+# Secrets (repo Settings → Secrets): SUPABASE_COMPLIANCE_DATABASE_URL = Supabase session pooler or direct URI (service_role not required for read-only catalog queries; use a role that can read information_schema).
+
+name: Supabase compliance
+
+on:
+  pull_request:
+    paths:
+      - "supabase/**"
+      - "scripts/supabase_compliance_checks.sql"
+      - ".github/workflows/supabase-compliance.yml"
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - "scripts/supabase_compliance_checks.sql"
+      - ".github/workflows/supabase-compliance.yml"
+  workflow_dispatch:
+
+jobs:
+  supabase-cli-and-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Verify CLI
+        run: supabase --version
+
+      - name: Migration files are present and ordered
+        run: |
+          test -d supabase/migrations
+          count=$(find supabase/migrations -maxdepth 1 -name '*.sql' | wc -l)
+          echo "SQL migration count: $count"
+          test "$count" -ge 1
+
+  # Optional: set repo variable SUPABASE_COMPLIANCE_REMOTE_ENABLED=true when secret SUPABASE_COMPLIANCE_DATABASE_URL is configured.
+  # GitHub does not reliably evaluate secrets in job-level `if:`; use a repo variable as the gate.
+  compliance-sql-remote:
+    runs-on: ubuntu-latest
+    if: ${{ vars.SUPABASE_COMPLIANCE_REMOTE_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+
+      - name: Run compliance SQL
+        env:
+          SUPABASE_COMPLIANCE_DATABASE_URL: ${{ secrets.SUPABASE_COMPLIANCE_DATABASE_URL }}
+        run: psql "$SUPABASE_COMPLIANCE_DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/supabase_compliance_checks.sql

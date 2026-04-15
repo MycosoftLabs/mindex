@@ -21,6 +21,7 @@ on:
       - 'mindex_api/**'
       - 'mindex_etl/**'
       - 'migrations/**'
+      - 'tests/**'
       - 'pyproject.toml'
       - 'Dockerfile'
       - '.github/workflows/deploy-mindex-vm.yml'
