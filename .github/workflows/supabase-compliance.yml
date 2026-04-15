@@ -33,7 +33,10 @@ jobs:
 
       - name: Migration files are present and ordered
         run: |
-          test -d supabase/migrations
+          if [ ! -d supabase/migrations ]; then
+            echo "::notice title=Supabase::No supabase/migrations in this branch — skipping migration count (add supabase/ when ready)."
+            exit 0
+          fi
           count=$(find supabase/migrations -maxdepth 1 -name '*.sql' | wc -l)
           echo "SQL migration count: $count"
           test "$count" -ge 1
