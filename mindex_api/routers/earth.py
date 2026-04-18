@@ -695,9 +695,10 @@ async def ingest_earth_data(
     """
     Bulk ingest entities into earth domain tables.
 
-    Supported layers: earthquakes, volcanoes, wildfires, facilities,
-    power_grid, internet_cables, antennas, aircraft, vessels, airports,
-    ports, satellites, solar_events, cameras, military, buoys
+    Supported layers (insert_queries): earthquakes, facilities, power_grid,
+    airports, aircraft, vessels, satellites, antennas, military, ports.
+    CREP proxies may route many ingest types (events, weather, air-quality, …)
+    to ``facilities`` until dedicated tables exist.
     """
     layer = request.layer
     inserted = 0
