@@ -27,6 +27,8 @@ services:
   db:
     image: postgis/postgis:16-3.4
     container_name: mindex-postgres
+    # Raise connection ceiling for parallel ingest + web traffic (reload container to apply).
+    command: ["postgres", "-c", "max_connections=300"]
     environment:
       POSTGRES_DB: ${MINDEX_DB_NAME:-mindex}
       POSTGRES_USER: ${MINDEX_DB_USER:-mindex}

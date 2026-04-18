@@ -779,6 +779,14 @@ async def ingest_earth_data(
                 :branch, :country, :props::jsonb)
             ON CONFLICT DO NOTHING
         """,
+        # Seaports / WPI (transport.ports) — CREP registry + website ingest proxy
+        "ports": """
+            INSERT INTO transport.ports (source, source_id, name, port_type, unlocode,
+                location, country, max_vessel_size, properties)
+            VALUES (:source, :source_id, :name, COALESCE(:port_type, 'seaport'), :unlocode,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :country, :max_vessel_size, :props::jsonb)
+        """,
     }
 
     sql_template = insert_queries.get(layer)
@@ -816,6 +824,13 @@ async def ingest_earth_data(
             "altitude_km": props.get("altitude_km"),
             "technology": props.get("technology"),
             "branch": props.get("branch"),
+            # transport.ports (layer=ports)
+            "port_type": props.get("port_type") or props.get("harborType"),
+            "unlocode": props.get("unlocode"),
+            "country": props.get("country"),
+            "max_vessel_size": props.get("max_vessel_size")
+            or props.get("channelDepth")
+            or props.get("harborSize"),
         }
         try:
             await session.execute(text(sql_template), params)
