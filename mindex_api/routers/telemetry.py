@@ -220,7 +220,7 @@ async def ingest_envelope(
             text(
                 """
                 INSERT INTO telemetry.device (name, slug, status, metadata)
-                VALUES (:name, :slug, 'online', :metadata::jsonb)
+                VALUES (:name, :slug, 'online', CAST(:metadata AS jsonb))
                 RETURNING id
                 """
             ),
@@ -254,7 +254,7 @@ async def ingest_envelope(
             text(
                 """
                 INSERT INTO telemetry.stream (device_id, key, unit, metadata)
-                VALUES (:device_id, :key, :unit, :metadata::jsonb)
+                VALUES (:device_id, :key, :unit, CAST(:metadata AS jsonb))
                 ON CONFLICT (device_id, key) DO UPDATE SET updated_at = now()
                 RETURNING id
                 """
@@ -293,14 +293,14 @@ async def ingest_envelope(
                     :stream_id,
                     :recorded_at,
                     :value_numeric,
-                    :value_json::jsonb,
+                    CAST(:value_json AS jsonb),
                     :value_unit,
-                    :metadata::jsonb,
+                    CAST(:metadata AS jsonb),
                     :verified,
                     CASE WHEN :verified THEN now() ELSE NULL END,
                     :verified_by,
                     :verification_method,
-                    :verification_metadata::jsonb,
+                    CAST(:verification_metadata AS jsonb),
                     :envelope_msg_id,
                     :envelope_seq,
                     :envelope_hash,
@@ -391,7 +391,7 @@ async def replay_start(
                 playback_speed, is_playing, is_paused, filters, created_by
             ) VALUES (
                 :device_id, :stream_id, :replay_type, :start_time, :end_time, :current_position,
-                :playback_speed, true, false, :filters::jsonb, :created_by
+                :playback_speed, true, false, CAST(:filters AS jsonb), :created_by
             )
             RETURNING *
             """
@@ -433,7 +433,7 @@ async def replay_update(session_id: str, request: ReplayUpdateRequest, db: Async
             playback_speed = COALESCE(:playback_speed, playback_speed),
             is_playing = COALESCE(:is_playing, is_playing),
             is_paused = COALESCE(:is_paused, is_paused),
-            filters = COALESCE(:filters::jsonb, filters),
+            filters = COALESCE(CAST(:filters AS jsonb), filters),
             updated_at = now()
         WHERE id = :id
         RETURNING *
@@ -481,7 +481,7 @@ async def health_record(
                 device_id, recorded_at, status, health_score, metrics, alerts, metadata
             ) VALUES (
                 :device_id, COALESCE(:recorded_at, now()), :status, :health_score,
-                :metrics::jsonb, :alerts::jsonb, :metadata::jsonb
+                CAST(:metrics AS jsonb), CAST(:alerts AS jsonb), CAST(:metadata AS jsonb)
             )
             RETURNING *
             """
