@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,10 +28,14 @@ from ..schemas.telemetry import (
 )
 from ..pipeline_fanout import fanout_to_natureos_envelope, mirror_to_fusarium
 
+logger = logging.getLogger(__name__)
+
+# Router-level auth: main.py mounts this with ``dependencies=[require_internal_token]``.
+# Do not add ``require_api_key`` here — the MQTT bridge and MAS send ``X-Internal-Token``
+# only; a second legacy API-key gate caused 401 on ``POST /telemetry/envelope``.
 telemetry_router = APIRouter(
     prefix="/telemetry",
     tags=["telemetry"],
-    dependencies=[Depends(require_api_key)],
 )
 
 devices_router = APIRouter(

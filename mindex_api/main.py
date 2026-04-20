@@ -21,6 +21,7 @@ from .routers import (
     compounds_router,
     devices_router,
     earth_router,
+    ingest_alias_router,
     fci_router,
     genetics_router,
     health_router,
@@ -231,6 +232,7 @@ def create_app() -> FastAPI:
     app.include_router(grounding_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(fci_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(earth_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(ingest_alias_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(plasticity_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(nlm_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(search_answers_router, prefix=prefix, dependencies=internal_deps)

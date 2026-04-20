@@ -395,6 +395,47 @@ async def map_bbox_query(
             WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
             ORDER BY observed_at DESC LIMIT :limit
         """,
+        "rail_live": """
+            SELECT id::text, 'rail_vehicle' as entity_type, 'transport' as domain,
+                   COALESCE(payload->>'name', payload->>'routeName', 'Train') as name,
+                   ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
+                   observed_at::text as occurred_at, source,
+                   payload as properties
+            FROM crep.rail_live
+            WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            ORDER BY observed_at DESC LIMIT :limit
+        """,
+        "aircraft_live": """
+            SELECT id::text, 'aircraft' as entity_type, 'transport' as domain,
+                   COALESCE(payload->>'callsign', payload->>'icao', 'Aircraft') as name,
+                   ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
+                   observed_at::text as occurred_at, source,
+                   payload as properties
+            FROM crep.aircraft_live
+            WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            ORDER BY observed_at DESC LIMIT :limit
+        """,
+        "cctv_cameras": """
+            SELECT id::text, 'cctv' as entity_type, 'monitoring' as domain,
+                   COALESCE(payload->>'name', 'Camera') as name,
+                   ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
+                   observed_at::text as occurred_at, source,
+                   payload as properties
+            FROM crep.cctv_cameras
+            WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            ORDER BY observed_at DESC LIMIT :limit
+        """,
+        "organizations": """
+            SELECT id::text, 'organization' as entity_type, 'business' as domain,
+                   COALESCE(payload->>'name', 'Organization') as name,
+                   ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
+                   observed_at::text as occurred_at, source,
+                   payload as properties
+            FROM crep.organizations
+            WHERE location IS NOT NULL
+              AND location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            ORDER BY observed_at DESC LIMIT :limit
+        """,
     }
 
     sql = layer_queries.get(layer)
@@ -687,24 +728,40 @@ class IngestResponse(BaseModel):
     errors: int
 
 
-@router.post("/ingest", response_model=IngestResponse)
-async def ingest_earth_data(
-    request: IngestRequest,
-    session: AsyncSession = Depends(get_db_session),
-):
-    """
-    Bulk ingest entities into earth domain tables.
+CREP_JSONB_LAYERS = frozenset({"rail_live", "aircraft_live", "cctv_cameras", "organizations"})
 
-    Supported layers (insert_queries): earthquakes, facilities, power_grid,
-    airports, aircraft, vessels, satellites, antennas, military, ports.
-    CREP proxies may route many ingest types (events, weather, air-quality, …)
-    to ``facilities`` until dedicated tables exist.
-    """
-    layer = request.layer
+
+def _crep_row_id(entity: IngestEntity) -> str:
+    props = entity.properties or {}
+    sid = (
+        entity.source_id
+        or props.get("id")
+        or props.get("trainNum")
+        or props.get("icao24")
+        or props.get("mmsi")
+    )
+    raw = f"{entity.source}:{sid}" if sid else f"{entity.source}:{entity.name}"
+    return raw[:512]
+
+
+def _crep_payload(entity: IngestEntity) -> Dict[str, Any]:
+    props = dict(entity.properties or {})
+    props.setdefault("name", entity.name)
+    props.setdefault("entity_type", entity.entity_type)
+    if entity.source_id:
+        props.setdefault("source_id", entity.source_id)
+    return props
+
+
+async def _execute_earth_ingest(
+    session: AsyncSession,
+    layer: str,
+    entities: List[IngestEntity],
+) -> IngestResponse:
+    """Shared ingest implementation for /earth/ingest and /ingest/{layer}."""
     inserted = 0
     errors = 0
 
-    # Map layer to insert SQL
     insert_queries = {
         "earthquakes": """
             INSERT INTO earth.earthquakes (source, source_id, magnitude, depth_km,
@@ -788,52 +845,99 @@ async def ingest_earth_data(
                 ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
                 :country, :max_vessel_size, :props::jsonb)
         """,
+        "rail_live": """
+            INSERT INTO crep.rail_live (id, source, observed_at, location, payload)
+            VALUES (:id, :source, COALESCE(:occurred_at::timestamptz, NOW()),
+                    ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                    :props::jsonb)
+            ON CONFLICT (id) DO UPDATE SET
+                observed_at = EXCLUDED.observed_at,
+                location = EXCLUDED.location,
+                payload = EXCLUDED.payload
+        """,
+        "aircraft_live": """
+            INSERT INTO crep.aircraft_live (id, source, observed_at, location, payload)
+            VALUES (:id, :source, COALESCE(:occurred_at::timestamptz, NOW()),
+                    ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                    :props::jsonb)
+            ON CONFLICT (id) DO UPDATE SET
+                observed_at = EXCLUDED.observed_at,
+                location = EXCLUDED.location,
+                payload = EXCLUDED.payload
+        """,
+        "cctv_cameras": """
+            INSERT INTO crep.cctv_cameras (id, source, observed_at, location, payload)
+            VALUES (:id, :source, COALESCE(:occurred_at::timestamptz, NOW()),
+                    ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                    :props::jsonb)
+            ON CONFLICT (id) DO UPDATE SET
+                observed_at = EXCLUDED.observed_at,
+                location = EXCLUDED.location,
+                payload = EXCLUDED.payload
+        """,
+        "organizations": """
+            INSERT INTO crep.organizations (id, source, observed_at, location, payload)
+            VALUES (:id, :source, COALESCE(:occurred_at::timestamptz, NOW()),
+                    ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                    :props::jsonb)
+            ON CONFLICT (id) DO UPDATE SET
+                observed_at = EXCLUDED.observed_at,
+                location = EXCLUDED.location,
+                payload = EXCLUDED.payload
+        """,
     }
 
     sql_template = insert_queries.get(layer)
     if not sql_template:
-        return IngestResponse(layer=layer, inserted=0, errors=len(request.entities))
+        return IngestResponse(layer=layer, inserted=0, errors=len(entities))
 
-    for entity in request.entities:
-        props = entity.properties
-        params = {
-            "source": entity.source,
-            "source_id": entity.source_id,
-            "name": entity.name,
-            "entity_type": entity.entity_type,
-            "lat": entity.lat,
-            "lng": entity.lng,
-            "occurred_at": entity.occurred_at,
-            "props": json.dumps(props),
-            # Layer-specific fields from properties
-            "magnitude": props.get("magnitude", 0),
-            "depth_km": props.get("depth_km"),
-            "sub_type": props.get("sub_type"),
-            "operator": props.get("operator"),
-            "capacity": props.get("capacity"),
-            "status": props.get("status", "active"),
-            "voltage_kv": props.get("voltage_kv", 0),
-            "icao": props.get("icao"),
-            "country": props.get("country"),
-            "icao24": props.get("icao24"),
-            "heading": props.get("heading"),
-            "altitude": props.get("altitude"),
-            "speed": props.get("speed"),
-            "mmsi": props.get("mmsi"),
-            "norad_id": props.get("norad_id"),
-            "orbit_type": props.get("orbit_type"),
-            "altitude_km": props.get("altitude_km"),
-            "technology": props.get("technology"),
-            "branch": props.get("branch"),
-            # transport.ports (layer=ports)
-            "port_type": props.get("port_type") or props.get("harborType"),
-            "unlocode": props.get("unlocode"),
-            "country": props.get("country"),
-            "max_vessel_size": props.get("max_vessel_size")
-            or props.get("channelDepth")
-            or props.get("harborSize"),
-        }
+    for entity in entities:
+        props = entity.properties or {}
         try:
+            if layer in CREP_JSONB_LAYERS:
+                params = {
+                    "id": _crep_row_id(entity),
+                    "source": entity.source,
+                    "lat": entity.lat,
+                    "lng": entity.lng,
+                    "occurred_at": entity.occurred_at,
+                    "props": json.dumps(_crep_payload(entity)),
+                }
+            else:
+                params = {
+                    "source": entity.source,
+                    "source_id": entity.source_id,
+                    "name": entity.name,
+                    "entity_type": entity.entity_type,
+                    "lat": entity.lat,
+                    "lng": entity.lng,
+                    "occurred_at": entity.occurred_at,
+                    "props": json.dumps(props),
+                    "magnitude": props.get("magnitude", 0),
+                    "depth_km": props.get("depth_km"),
+                    "sub_type": props.get("sub_type"),
+                    "operator": props.get("operator"),
+                    "capacity": props.get("capacity"),
+                    "status": props.get("status", "active"),
+                    "voltage_kv": props.get("voltage_kv", 0),
+                    "icao": props.get("icao"),
+                    "country": props.get("country"),
+                    "icao24": props.get("icao24"),
+                    "heading": props.get("heading"),
+                    "altitude": props.get("altitude"),
+                    "speed": props.get("speed"),
+                    "mmsi": props.get("mmsi"),
+                    "norad_id": props.get("norad_id"),
+                    "orbit_type": props.get("orbit_type"),
+                    "altitude_km": props.get("altitude_km"),
+                    "technology": props.get("technology"),
+                    "branch": props.get("branch"),
+                    "port_type": props.get("port_type") or props.get("harborType"),
+                    "unlocode": props.get("unlocode"),
+                    "max_vessel_size": props.get("max_vessel_size")
+                    or props.get("channelDepth")
+                    or props.get("harborSize"),
+                }
             await session.execute(text(sql_template), params)
             inserted += 1
         except Exception as e:
@@ -846,3 +950,39 @@ async def ingest_earth_data(
 
     logger.info(f"Earth ingest: {layer} — {inserted} inserted, {errors} errors")
     return IngestResponse(layer=layer, inserted=inserted, errors=errors)
+
+
+class IngestBodyOnly(BaseModel):
+    """Body for POST /ingest/{layer_name} (layer in path)."""
+
+    entities: List[IngestEntity]
+
+
+@router.post("/ingest", response_model=IngestResponse)
+async def ingest_earth_data(
+    request: IngestRequest,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Bulk ingest entities into earth domain tables.
+
+    Supported layers (insert_queries): earthquakes, facilities, power_grid,
+    airports, aircraft, vessels, satellites, antennas, military, ports,
+    rail_live, aircraft_live, cctv_cameras, organizations.
+    CREP proxies may route many ingest types (events, weather, air-quality, …)
+    to ``facilities`` until dedicated tables exist.
+    """
+    return await _execute_earth_ingest(session, request.layer, request.entities)
+
+
+ingest_alias_router = APIRouter(tags=["Earth Data"])
+
+
+@ingest_alias_router.post("/ingest/{layer_name}", response_model=IngestResponse)
+async def ingest_earth_named_layer(
+    layer_name: str,
+    body: IngestBodyOnly,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Same as POST /earth/ingest but layer is taken from the path (CREP / website ETL)."""
+    return await _execute_earth_ingest(session, layer_name, body.entities)
