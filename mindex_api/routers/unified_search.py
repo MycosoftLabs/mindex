@@ -99,6 +99,7 @@ ALL_DOMAINS = [
     "satellites", "solar_events",
     # Monitoring
     "cameras",
+    "eagle_video",
     # Military
     "military_installations",
     # Telemetry
@@ -123,10 +124,11 @@ DOMAIN_GROUPS = {
     "aviation": ["aircraft", "airports"],
     "maritime": ["vessels", "ports", "buoys"],
     "space": ["satellites", "solar_events", "launches"],
-    "monitoring": ["cameras"],
+    "monitoring": ["cameras", "eagle_video"],
     "military": ["military_installations"],
     "telemetry": ["devices", "telemetry"],
-    "fusarium": ["fusarium_tracks", "fusarium_correlations", "crep_entities", "vessels", "buoys"],
+    "fusarium": ["fusarium_tracks", "fusarium_correlations", "crep_entities", "vessels", "buoys", "eagle_video"],
+    "eagle_eye": ["eagle_video", "cameras", "crep_entities"],
 }
 
 
@@ -1098,6 +1100,73 @@ async def search_cameras(session: AsyncSession, query: str, limit: int,
     ]
 
 
+async def search_eagle_video(
+    session: AsyncSession, query: str, limit: int,
+    lat: Optional[float] = None, lng: Optional[float] = None,
+    radius: Optional[float] = None,
+) -> List[dict]:
+    """Eagle Eye video_sources + scene_index text (privacy: omit restricted rows when flagged)."""
+    where = "(provider ILIKE :query OR kind ILIKE :query OR id ILIKE :query)"
+    params: Dict[str, Any] = {"query": f"%{query}%", "limit": limit}
+    if lat is not None and lng is not None:
+        where += (
+            " OR (lat IS NOT NULL AND lng IS NOT NULL AND "
+            "ST_DWithin(ST_SetSRID(ST_MakePoint(lng, lat), 4326)::geography, "
+            "ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius_m))"
+        )
+        params.update({"lat": lat, "lng": lng, "radius_m": (radius or 100) * 1000})
+
+    sql = f"""
+        SELECT id, kind, provider, stable_location, lat, lng, stream_url, embed_url, media_url,
+               source_status, updated_at::text
+        FROM eagle.video_sources
+        WHERE {where}
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT :limit
+    """
+    rows = await _safe_query(session, sql, params, "eagle_video")
+    out = []
+    for r in rows:
+        out.append({
+            "id": str(r.id),
+            "domain": "eagle_eye",
+            "entity_type": r.kind or "video_source",
+            "name": f"{r.provider} — {r.kind}",
+            "lat": r.lat,
+            "lng": r.lng,
+            "occurred_at": r.updated_at,
+            "source": r.provider,
+            "properties": {
+                "stream_url": r.stream_url,
+                "embed_url": r.embed_url,
+                "media_url": r.media_url,
+                "source_status": r.source_status,
+                "stable_location": r.stable_location,
+            },
+        })
+
+    # Scene text (VLM / OCR) — second query, same limit cap
+    si_sql = """
+        SELECT si.id, si.video_event_id, si.vlm_summary, si.ocr_text, si.transcript
+        FROM eagle.scene_index si
+        WHERE si.vlm_summary ILIKE :q OR si.ocr_text ILIKE :q OR si.transcript ILIKE :q
+        ORDER BY si.id DESC
+        LIMIT :limit
+    """
+    si_rows = await _safe_query(session, si_sql, {"q": f"%{query}%", "limit": max(1, limit // 2)}, "eagle_scene")
+    for r in si_rows:
+        text_snip = (r.vlm_summary or r.ocr_text or r.transcript or "")[:240]
+        out.append({
+            "id": f"scene_{r.id}",
+            "domain": "eagle_eye",
+            "entity_type": "scene_index",
+            "name": text_snip or "Scene",
+            "source": "eagle.scene_index",
+            "properties": {"video_event_id": str(r.video_event_id), "vlm_summary": r.vlm_summary},
+        })
+    return out[:limit]
+
+
 # =============================================================================
 # SEARCH FUNCTIONS — MILITARY
 # =============================================================================
@@ -1327,6 +1396,7 @@ def _build_dispatch(session, query, limit, lat, lng, radius, toxicity, kingdom, 
         "solar_events": search_solar_events(session, query, limit),
         # Monitoring
         "cameras": search_cameras(session, query, limit, lat, lng, radius),
+        "eagle_video": search_eagle_video(session, query, limit, lat, lng, radius),
         # Military
         "military_installations": search_military_installations(session, query, limit),
         # Telemetry
@@ -1378,7 +1448,7 @@ async def unified_search(
             "greenhouse_gas, weather, remote_sensing, buoys, stream_gauges, facilities, "
             "power_grid, water_systems, internet_cables, antennas, wifi_hotspots, "
             "signal_measurements, aircraft, vessels, airports, ports, spaceports, "
-            "launches, satellites, solar_events, cameras, military_installations, "
+            "launches, satellites, solar_events, cameras, eagle_video, military_installations, "
             "devices, telemetry, research, crep_entities, fusarium_tracks, fusarium_correlations"
         ),
     ),

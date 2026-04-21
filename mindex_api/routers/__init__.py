@@ -21,6 +21,7 @@ from .grounding import router as grounding_router
 from .fci import router as fci_router
 from .beta import router as beta_router
 from .earth import ingest_alias_router, router as earth_router
+from .eagle import router as eagle_router
 from .plasticity_router import plasticity_router
 from .nlm_router import nlm_router
 from .search_answers import router as search_answers_router
@@ -88,6 +89,7 @@ __all__ = [
     "fci_router",
     "beta_router",
     "earth_router",
+    "eagle_router",
     "ingest_alias_router",
     "plasticity_router",
     "nlm_router",

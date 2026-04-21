@@ -436,6 +436,45 @@ async def map_bbox_query(
               AND location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
             ORDER BY observed_at DESC LIMIT :limit
         """,
+        # Eagle Eye — permanent cameras (eagle.video_sources); CREP uses layer=eagle_video_sources
+        "eagle_video_sources": """
+            SELECT id::text, 'eagle_camera' as entity_type, 'eagle_eye' as domain,
+                   provider || ' — ' || kind as name,
+                   lat, lng,
+                   updated_at::text as occurred_at, provider as source,
+                   jsonb_build_object(
+                       'kind', kind, 'provider', provider, 'stable_location', stable_location,
+                       'stream_url', stream_url, 'embed_url', embed_url, 'media_url', media_url,
+                       'source_status', source_status, 'location_confidence', location_confidence,
+                       'permissions', permissions, 'retention_policy', retention_policy
+                   ) as properties
+            FROM eagle.video_sources
+            WHERE lat IS NOT NULL AND lng IS NOT NULL
+              AND lat BETWEEN :lat_min AND :lat_max
+              AND lng BETWEEN :lng_min AND :lng_max
+            ORDER BY updated_at DESC NULLS LAST
+            LIMIT :limit
+        """,
+        # Ephemeral clips with lat/lng in raw_metadata (social / live events)
+        "eagle_video_events": """
+            SELECT id::text, 'eagle_event' as entity_type, 'eagle_eye' as domain,
+                   COALESCE(text_context, 'Live video event') as name,
+                   (raw_metadata->>'lat')::double precision as lat,
+                   (raw_metadata->>'lng')::double precision as lng,
+                   observed_at::text as occurred_at,
+                   COALESCE(raw_metadata->>'provider', 'unknown') as source,
+                   jsonb_build_object(
+                       'video_source_id', video_source_id, 'thumbnail_url', thumbnail_url,
+                       'clip_ref', clip_ref, 'inference_confidence', inference_confidence,
+                       'raw_metadata', raw_metadata
+                   ) as properties
+            FROM eagle.video_events
+            WHERE raw_metadata ? 'lat' AND raw_metadata ? 'lng'
+              AND (raw_metadata->>'lat')::double precision BETWEEN :lat_min AND :lat_max
+              AND (raw_metadata->>'lng')::double precision BETWEEN :lng_min AND :lng_max
+            ORDER BY observed_at DESC
+            LIMIT :limit
+        """,
     }
 
     sql = layer_queries.get(layer)
