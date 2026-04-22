@@ -28,6 +28,10 @@ def _ensure_engine() -> None:
         settings.mindex_db_dsn,
         future=True,
         echo=False,
+        pool_size=settings.mindex_db_pool_size,
+        max_overflow=settings.mindex_db_max_overflow,
+        pool_pre_ping=True,
+        pool_recycle=settings.mindex_db_pool_recycle_seconds,
     )
     _session_factory = sessionmaker(
         bind=_engine,

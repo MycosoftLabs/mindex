@@ -14,6 +14,18 @@ class Settings(BaseSettings):
     mindex_db_user: str = "mindex"
     mindex_db_password: str = "mindex"
     mindex_db_name: str = "mindex"
+    mindex_db_pool_size: int = Field(
+        20,
+        description="SQLAlchemy async pool size (default was too small for concurrent bulk ingests).",
+    )
+    mindex_db_max_overflow: int = Field(
+        20,
+        description="Extra connections beyond pool_size when load spikes.",
+    )
+    mindex_db_pool_recycle_seconds: int = Field(
+        3600,
+        description="Recycle connections after this many seconds (avoids stale server-side sessions).",
+    )
 
     # API
     api_title: str = "MINDEX API"
