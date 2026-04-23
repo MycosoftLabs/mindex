@@ -284,6 +284,20 @@ class Settings(BaseSettings):
     )
     
     # =========================================================================
+    # INAT / CREP NATURE CACHE (iNaturalist warm-cache ingest)
+    # =========================================================================
+
+    inat_api_base: str = Field(
+        "https://api.inaturalist.org/v1",
+        description="iNaturalist API base URL (v1).",
+    )
+    inat_api_token: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("INAT_API_TOKEN", "MINDEX_INAT_API_TOKEN"),
+        description="Optional bearer token for iNaturalist (higher rate limits).",
+    )
+
+    # =========================================================================
     # MAS (MYCOSOFT AGENT SERVICE) INTEGRATION
     # =========================================================================
     

@@ -14,6 +14,7 @@ from .middleware import (
     RequestValidationMiddleware,
     SecurityHeadersMiddleware,
 )
+from .routers.v1_ingest import router as v1_ingest_router
 from .routers import (
     a2a_agent_router,
     beta_router,
@@ -179,6 +180,9 @@ def create_app() -> FastAPI:
     # MYCODAO schema (mycodao.*) + Mycosoft zone registry (mycosoft.*); MYCA sees both via internal token
     if mycodao_zone_router is not None:
         app.include_router(mycodao_zone_router, prefix=internal_prefix, dependencies=internal_deps)
+
+    # Versioned ingest surface (MYCA entities, iNat region cache) at /api/v1/ingest/...
+    app.include_router(v1_ingest_router, prefix="/api/v1", dependencies=internal_deps)
 
     # GPU acceleration (cuDF, cuVS, STATIC) — optional, degrades to CPU
     try:
