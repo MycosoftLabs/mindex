@@ -54,6 +54,10 @@ async def list_observations(
     pagination: PaginationParams = Depends(pagination_params),
     db: AsyncSession = Depends(get_db_session),
     taxon_id: Optional[UUID] = Query(None, description="Filter observations by taxon id."),
+    kingdom: Optional[str] = Query(
+        None,
+        description="Filter by taxon kingdom (joins core.taxon). Omit for all.",
+    ),
     start: Optional[datetime] = Query(None, description="ISO timestamp lower bound."),
     end: Optional[datetime] = Query(None, description="ISO timestamp upper bound."),
     bbox: Optional[str] = Query(
@@ -73,6 +77,9 @@ async def list_observations(
     if taxon_id:
         where_clauses.append("o.taxon_id = :taxon_id")
         params["taxon_id"] = str(taxon_id)
+    if kingdom and kingdom.strip().lower() not in ("all", "any", ""):
+        where_clauses.append("t.kingdom = :kingdom")
+        params["kingdom"] = kingdom.strip()
     if start:
         where_clauses.append("o.observed_at >= :start")
         params["start"] = start
@@ -104,12 +111,14 @@ async def list_observations(
             o.latitude,
             o.longitude
         FROM obs.observation o
+        LEFT JOIN core.taxon t ON t.id = o.taxon_id
         WHERE {where_sql}
         ORDER BY o.observed_at DESC
         LIMIT :limit OFFSET :offset
     """
     count_query = f"""
         SELECT count(*) FROM obs.observation o
+        LEFT JOIN core.taxon t ON t.id = o.taxon_id
         WHERE {where_sql}
     """
 

@@ -47,6 +47,7 @@ from .routers import (
     drone_router,
     etl_router,
     phylogeny_router,
+    all_life_router,
     genomes_router,
     ledger_router,
     mwave_router,
@@ -247,6 +248,7 @@ def create_app() -> FastAPI:
     # New integration routers
     app.include_router(etl_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(phylogeny_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(all_life_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(genomes_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(ledger_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(mwave_router, prefix=prefix, dependencies=internal_deps)

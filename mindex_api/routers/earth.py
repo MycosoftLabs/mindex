@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -124,7 +124,8 @@ async def earth_stats(session: AsyncSession = Depends(get_db_session)):
         "remote_sensing": "atmos.remote_sensing",
         "buoys": "hydro.buoys",
         "stream_gauges": "hydro.stream_gauges",
-        "cameras": "monitor.cameras",
+        # CREP + stats: canonical public camera count is Eagle Eye (eagle.video_sources)
+        "cameras": "eagle.video_sources",
         "military": "military.installations",
         "taxa": "core.taxon",
         "crep_entities": "crep.unified_entities",
@@ -147,11 +148,16 @@ async def earth_stats(session: AsyncSession = Depends(get_db_session)):
 @router.get("/map/bbox", response_model=MapLayerResponse)
 async def map_bbox_query(
     layer: str = Query(..., description="Entity type layer to query"),
-    lat_min: float = Query(...),
-    lat_max: float = Query(...),
-    lng_min: float = Query(...),
-    lng_max: float = Query(...),
+    id: Optional[str] = Query(
+        None,
+        description="When set (with eagle_video_sources or eagle_video_events), return one row by id; bbox not required",
+    ),
+    lat_min: Optional[float] = Query(None),
+    lat_max: Optional[float] = Query(None),
+    lng_min: Optional[float] = Query(None),
+    lng_max: Optional[float] = Query(None),
     limit: int = Query(500, ge=1, le=50000),
+    offset: int = Query(0, ge=0, le=1_000_000, description="Pagination for eagle_video_sources (and layers that support OFFSET)"),
     session: AsyncSession = Depends(get_db_session),
 ):
     """
@@ -160,7 +166,79 @@ async def map_bbox_query(
     Layers: earthquakes, volcanoes, wildfires, storms, species, facilities,
     antennas, aircraft, vessels, airports, ports, satellites, cameras,
     military, buoys, weather, air_quality, wifi_hotspots
+
+    `layer=eagle_video_sources&limit=2000` with a world-sized bbox: rows are interleaved
+    by `provider` (round-robin by provider rank) so one state DOT does not monopolize LIMIT.
+
+    For a single camera by id, use: `?layer=eagle_video_sources&id=<source_id>` (no bbox).
     """
+    id_s = (id or "").strip()
+    if id_s:
+        if layer == "eagle_video_sources":
+            sql = """
+            SELECT id::text, 'eagle_camera' as entity_type, 'eagle_eye' as domain,
+                   provider || ' — ' || kind as name,
+                   lat, lng,
+                   updated_at::text as occurred_at, provider as source,
+                   jsonb_build_object(
+                       'kind', kind, 'provider', provider, 'stable_location', stable_location,
+                       'stream_url', stream_url, 'embed_url', embed_url, 'media_url', media_url,
+                       'source_status', source_status, 'location_confidence', location_confidence,
+                       'permissions', permissions, 'retention_policy', retention_policy
+                   ) as properties
+            FROM eagle.video_sources
+            WHERE id = :eid
+            """
+            rows = await _safe_query(session, sql, {"eid": id_s}, "map_eagle_source_id")
+        elif layer == "eagle_video_events":
+            sql = """
+            SELECT id::text, 'eagle_event' as entity_type, 'eagle_eye' as domain,
+                   COALESCE(text_context, 'Live video event') as name,
+                   (raw_metadata->>'lat')::double precision as lat,
+                   (raw_metadata->>'lng')::double precision as lng,
+                   observed_at::text as occurred_at,
+                   COALESCE(raw_metadata->>'provider', 'unknown') as source,
+                   jsonb_build_object(
+                       'video_source_id', video_source_id, 'thumbnail_url', thumbnail_url,
+                       'clip_ref', clip_ref, 'inference_confidence', inference_confidence,
+                       'raw_metadata', raw_metadata
+                   ) as properties
+            FROM eagle.video_events
+            WHERE id = :eid
+            """
+            rows = await _safe_query(session, sql, {"eid": id_s}, "map_eagle_event_id")
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail="id= is only supported for layer=eagle_video_sources or eagle_video_events",
+            )
+        entities = []
+        for r in rows:
+            entities.append(
+                MapEntity(
+                    id=r.id,
+                    entity_type=r.entity_type,
+                    domain=r.domain,
+                    name=r.name,
+                    lat=r.lat,
+                    lng=r.lng,
+                    occurred_at=r.occurred_at,
+                    source=r.source,
+                    properties=r.properties if isinstance(r.properties, dict) else {},
+                )
+            )
+        bds: Optional[MapBounds] = None
+        if rows and rows[0].lat is not None and rows[0].lng is not None:
+            la = float(rows[0].lat)
+            ln = float(rows[0].lng)
+            bds = MapBounds(lat_min=la, lat_max=la, lng_min=ln, lng_max=ln)
+        return MapLayerResponse(layer=layer, entities=entities, total=len(entities), bounds=bds)
+
+    if any(x is None for x in (lat_min, lat_max, lng_min, lng_max)):
+        raise HTTPException(
+            status_code=422,
+            detail="Bounding box (lat_min, lat_max, lng_min, lng_max) is required unless id= is set for an Eagle layer",
+        )
     layer_queries = {
         "earthquakes": """
             SELECT id::text, 'earthquake' as entity_type, 'earth_events' as domain,
@@ -437,7 +515,17 @@ async def map_bbox_query(
             ORDER BY observed_at DESC LIMIT :limit
         """,
         # Eagle Eye — permanent cameras (eagle.video_sources); CREP uses layer=eagle_video_sources
+        # Fair ordering: one row per provider before repeating (avoids a single state DOT monopolizing LIMIT).
         "eagle_video_sources": """
+            WITH ranked AS (
+                SELECT id, kind, provider, stable_location, lat, lng, location_confidence,
+                       stream_url, embed_url, media_url, source_status, permissions, retention_policy, updated_at,
+                       ROW_NUMBER() OVER (PARTITION BY provider ORDER BY updated_at DESC NULLS LAST) AS per_provider_rank
+                FROM eagle.video_sources
+                WHERE lat IS NOT NULL AND lng IS NOT NULL
+                  AND lat BETWEEN :lat_min AND :lat_max
+                  AND lng BETWEEN :lng_min AND :lng_max
+            )
             SELECT id::text, 'eagle_camera' as entity_type, 'eagle_eye' as domain,
                    provider || ' — ' || kind as name,
                    lat, lng,
@@ -448,12 +536,9 @@ async def map_bbox_query(
                        'source_status', source_status, 'location_confidence', location_confidence,
                        'permissions', permissions, 'retention_policy', retention_policy
                    ) as properties
-            FROM eagle.video_sources
-            WHERE lat IS NOT NULL AND lng IS NOT NULL
-              AND lat BETWEEN :lat_min AND :lat_max
-              AND lng BETWEEN :lng_min AND :lng_max
-            ORDER BY updated_at DESC NULLS LAST
-            LIMIT :limit
+            FROM ranked
+            ORDER BY per_provider_rank ASC, provider ASC, updated_at DESC NULLS LAST
+            LIMIT :limit OFFSET :offset
         """,
         # Ephemeral clips with lat/lng in raw_metadata (social / live events)
         "eagle_video_events": """
@@ -484,7 +569,15 @@ async def map_bbox_query(
             bounds=MapBounds(lat_min=lat_min, lat_max=lat_max, lng_min=lng_min, lng_max=lng_max),
         )
 
-    params = {"lat_min": lat_min, "lat_max": lat_max, "lng_min": lng_min, "lng_max": lng_max, "limit": limit}
+    params: Dict[str, Any] = {
+        "lat_min": lat_min,
+        "lat_max": lat_max,
+        "lng_min": lng_min,
+        "lng_max": lng_max,
+        "limit": limit,
+    }
+    if layer == "eagle_video_sources":
+        params["offset"] = offset
     rows = await _safe_query(session, sql, params, f"map_{layer}")
 
     entities = []

@@ -26,6 +26,21 @@ class TaxonBase(TimestampedModel):
     description: Optional[str] = None
     source: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
+    # All-life / universal taxonomy (from migration 20260502, bio.taxon_full)
+    kingdom: Optional[str] = None
+    lineage: Optional[List[str]] = None
+    lineage_ids: Optional[List[UUID]] = None
+    external_ids: dict = Field(default_factory=dict)
+    # Aggregates from bio.taxon_full (list/detail when selected from view)
+    obs_count: Optional[int] = None
+    image_count: Optional[int] = None
+    video_count: Optional[int] = None
+    audio_count: Optional[int] = None
+    genome_count: Optional[int] = None
+    compound_link_count: Optional[int] = None
+    interaction_count: Optional[int] = None
+    publication_count: Optional[int] = None
+    characteristic_count: Optional[int] = None
 
 
 class TaxonResponse(TaxonBase):

@@ -29,6 +29,7 @@ from .key_management import router as key_management_router
 
 from .etl import router as etl_router
 from .phylogeny import router as phylogeny_router
+from .all_life import router as all_life_router
 from .genomes import router as genomes_router
 from .ledger import router as ledger_router
 from .mwave import router as mwave_router
@@ -97,6 +98,7 @@ __all__ = [
     "key_management_router",
     "etl_router",
     "phylogeny_router",
+    "all_life_router",
     "genomes_router",
     "ledger_router",
     "mwave_router",

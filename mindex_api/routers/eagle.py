@@ -157,6 +157,32 @@ async def list_video_sources(
     return {"sources": sources, "total": len(sources)}
 
 
+@router.get("/video-sources/{source_id}", response_model=Dict[str, Any])
+async def get_video_source_by_id(
+    source_id: str,
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Return a single `eagle.video_sources` row by id (for `/api/eagle/stream/{id}` and clients)."""
+    sql = """
+        SELECT id, kind, provider, stable_location, lat, lng, location_confidence,
+               stream_url, embed_url, media_url, source_status, permissions, retention_policy,
+               provenance_method, privacy_class, updated_at::text
+        FROM eagle.video_sources
+        WHERE id = :id
+    """
+    try:
+        result = await session.execute(text(sql), {"id": source_id})
+        row = result.fetchone()
+    except Exception as e:
+        if "does not exist" in str(e):
+            return {"source": None, "found": False, "note": "eagle.video_sources not migrated"}
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    if not row:
+        raise HTTPException(status_code=404, detail="video_source not found")
+    return {"source": dict(row._mapping), "found": True}
+
+
 @router.get("/video-events", response_model=Dict[str, Any])
 async def list_video_events(
     observed_after: Optional[str] = Query(None, description="ISO8601"),

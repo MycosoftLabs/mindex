@@ -1,0 +1,50 @@
+{
+  "name": "MINDEX All-Life ETL (GBIF iNat kingdom rotation)",
+  "meta": {
+    "templateCredsSetupEnabled": true
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "sched",
+      "name": "Every24h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/mycosoft/mindex && set -a && [ -f .env ] && . ./.env; set +a && python -m mindex_etl.jobs.run_all_kingdoms --skip-backfill 2>&1 | tee -a /var/log/mindex_all_life_ingest.log"
+      },
+      "id": "exec",
+      "name": "RunAllKingdomsOnMindexHost",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [420, 300],
+      "notesInFlow": true,
+      "notes": "Point SSH/Execute to MAS or MINDEX host where mindex repo + venv live. Adjust path. Per-kingdom slicing: set env MINDEX_KINGDOM_SLICE in future job versions."
+    }
+  ],
+  "connections": {
+    "Every24h": {
+      "main": [
+        [
+          {
+            "node": "RunAllKingdomsOnMindexHost",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

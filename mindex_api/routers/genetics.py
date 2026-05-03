@@ -115,6 +115,10 @@ async def list_genetic_sequences(
     gene: Optional[str] = Query(None, description="Filter by gene (e.g., ITS, LSU, RPB1)"),
     source: Optional[str] = Query(None, description="Filter by source (e.g., genbank, ncbi)"),
     species: Optional[str] = Query(None, description="Filter by species name"),
+    kingdom: Optional[str] = Query(
+        None,
+        description="Filter by resolved taxon kingdom (requires taxon_id linkage). Omit for all.",
+    ),
     min_length: Optional[int] = Query(None, ge=1, description="Minimum sequence length"),
     max_length: Optional[int] = Query(None, ge=1, description="Maximum sequence length"),
 ) -> GeneticSequenceListResponse:
@@ -147,58 +151,66 @@ async def list_genetic_sequences(
     if search:
         search_pattern = f"%{search}%"
         where_clauses.append(
-            "(species_name ILIKE :search OR gene ILIKE :search OR accession ILIKE :search)"
+            "(gs.species_name ILIKE :search OR gs.gene ILIKE :search OR gs.accession ILIKE :search)"
         )
         params["search"] = search_pattern
     
     if gene:
-        where_clauses.append("gene = :gene")
+        where_clauses.append("gs.gene = :gene")
         params["gene"] = gene
     
     if source:
-        where_clauses.append("source = :source")
+        where_clauses.append("gs.source = :source")
         params["source"] = source
     
     if species:
         species_pattern = f"%{species}%"
-        where_clauses.append("species_name ILIKE :species")
+        where_clauses.append("gs.species_name ILIKE :species")
         params["species"] = species_pattern
     
     if min_length:
-        where_clauses.append("sequence_length >= :min_length")
+        where_clauses.append("gs.sequence_length >= :min_length")
         params["min_length"] = min_length
     
     if max_length:
-        where_clauses.append("sequence_length <= :max_length")
+        where_clauses.append("gs.sequence_length <= :max_length")
         params["max_length"] = max_length
+
+    if kingdom and kingdom.strip().lower() not in ("all", "any", ""):
+        where_clauses.append("t.kingdom = :kingdom")
+        params["kingdom"] = kingdom.strip()
     
     where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
     
     # Count query
-    count_stmt = text(f"SELECT COUNT(*) FROM bio.genetic_sequence WHERE {where_sql}")
+    count_stmt = text(
+        f"SELECT COUNT(*) FROM bio.genetic_sequence gs "
+        f"LEFT JOIN core.taxon t ON t.id = gs.taxon_id WHERE {where_sql}"
+    )
     count_result = await db.execute(count_stmt, params)
     total = count_result.scalar_one()
     
     # Data query
     stmt = text(f"""
         SELECT
-            id,
-            accession,
-            species_name,
-            gene,
-            region,
-            sequence,
-            sequence_length,
-            sequence_type,
-            source,
-            source_url,
-            definition,
-            organism,
-            pubmed_id,
-            doi
-        FROM bio.genetic_sequence
+            gs.id,
+            gs.accession,
+            gs.species_name,
+            gs.gene,
+            gs.region,
+            gs.sequence,
+            gs.sequence_length,
+            gs.sequence_type,
+            gs.source,
+            gs.source_url,
+            gs.definition,
+            gs.organism,
+            gs.pubmed_id,
+            gs.doi
+        FROM bio.genetic_sequence gs
+        LEFT JOIN core.taxon t ON t.id = gs.taxon_id
         WHERE {where_sql}
-        ORDER BY species_name NULLS LAST, gene, accession
+        ORDER BY gs.species_name NULLS LAST, gs.gene, gs.accession
         LIMIT :limit OFFSET :offset
     """)
     

@@ -24,6 +24,7 @@ def upsert_taxon(
     description: Optional[str] = None,
     source: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    kingdom: Optional[str] = None,
 ) -> int:
     """
     Upsert a taxon record.
@@ -52,6 +53,7 @@ def upsert_taxon(
                 "description": description,
                 "source": source,
                 "metadata": json.dumps(metadata) if metadata else None,
+                "kingdom": kingdom,
             }
             set_parts = [f"{col} = %s" for col, value in updates.items() if value is not None]
             params = [value for value in updates.values() if value is not None]
@@ -63,19 +65,31 @@ def upsert_taxon(
                 )
             return taxon_id
 
-        # Insert new record - scientific_name is required, canonical_name is optional
-        columns = ["scientific_name", "canonical_name", "rank", "metadata"]
-        values = [canonical, canonical, rank, json.dumps(metadata)]
+        # Insert: prefer canonical_name (core.taxon); scientific_name if column exists
+        columns = ["canonical_name", "rank", "metadata"]
+        values: list = [canonical, rank, json.dumps(metadata)]
         optional_fields = {
             "common_name": common_name,
             "author": authority,  # DB column is 'author', not 'authority'
             "description": description,
             "source": source,
+            "kingdom": kingdom,
         }
         for col, value in optional_fields.items():
             if value is not None:
                 columns.append(col)
                 values.append(value)
+        if "scientific_name" not in columns:
+            try:
+                cur.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema='core' AND table_name='taxon' AND column_name='scientific_name'"
+                )
+                if cur.fetchone():
+                    columns = ["scientific_name"] + [c for c in columns if c != "scientific_name"]
+                    values = [canonical] + values
+            except Exception:
+                pass
 
         placeholders = ", ".join(["%s"] * len(values))
         cur.execute(

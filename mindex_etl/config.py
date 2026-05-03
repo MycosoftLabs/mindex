@@ -67,8 +67,8 @@ class ETLSettings(BaseSettings):
     inat_rate_limit: float = 0.3  # Faster with API token (3 req/sec)
     # Domain selector: "all" = all life (taxon_id=1), "fungi" = Fungi only (taxon_id=47170, default)
     inat_domain_mode: str = Field(
-        default="fungi",
-        description="iNaturalist root filter: 'all' for all life (taxon_id=1), 'fungi' for fungi-only (default).",
+        default="all",
+        description="iNaturalist root filter: 'all' for all life (taxon_id=1) (default); 'fungi' for fungi-only.",
     )
 
     # MycoBank
@@ -87,8 +87,8 @@ class ETLSettings(BaseSettings):
     gbif_base_url: str = "https://api.gbif.org/v1"
     # Domain selector: "all" = all life, "fungi" = Kingdom Fungi only (default), or list of kingdom keys for future per-kingdom mode
     gbif_domain_mode: str = Field(
-        default="fungi",
-        description="GBIF root filter: 'all' for all life, 'fungi' for fungi-only (default). Future: comma-separated kingdom keys.",
+        default="all",
+        description="GBIF root filter: 'all' for all life (default), 'fungi' for fungi-only. Future: comma-separated kingdom keys.",
     )
 
     # Index Fungorum

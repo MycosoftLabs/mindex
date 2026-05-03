@@ -26,6 +26,14 @@ async def list_taxa(
     rank: Optional[str] = Query(None, description="Exact rank filter."),
     source: Optional[str] = Query(None, description="Exact source filter (e.g., inat, gbif, mycobank)."),
     prefix: Optional[str] = Query(None, description="Prefix match on canonical_name (e.g., 'A' for A*)."),
+    kingdom: Optional[str] = Query(
+        None,
+        description="Filter by high-level kingdom (Fungi, Plantae, Animalia, ...). Omit for all kingdoms.",
+    ),
+    lineage_contains: Optional[str] = Query(
+        None,
+        description="Match if any name in the materialized lineage array contains this substring (case-insensitive).",
+    ),
     order_by: str = Query(
         "canonical_name",
         description="Sort field. Allowed: canonical_name, observations_count.",
@@ -58,16 +66,25 @@ async def list_taxa(
         if id_list:
             where_clauses.append("id = ANY(CAST(STRING_TO_ARRAY(:ids_csv, ',') AS uuid[]))")
             params["ids_csv"] = ",".join(id_list)
+    if kingdom and kingdom.strip().lower() not in ("all", "any", ""):
+        where_clauses.append("kingdom = :kingdom")
+        params["kingdom"] = kingdom.strip()
+    if lineage_contains and lineage_contains.strip():
+        where_clauses.append(
+            "EXISTS (SELECT 1 FROM unnest(COALESCE(lineage, ARRAY[]::text[])) x "
+            "WHERE x ILIKE :lcp)"
+        )
+        params["lcp"] = f"%{lineage_contains.strip()}%"
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
 
     order_by_normalized = (order_by or "").strip().lower()
     order_normalized = (order or "").strip().lower()
 
-    if order_by_normalized not in {"canonical_name", "observations_count"}:
+    if order_by_normalized not in {"canonical_name", "observations_count", "obs_count"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid order_by. Allowed: canonical_name, observations_count.",
+            detail="Invalid order_by. Allowed: canonical_name, observations_count, obs_count.",
         )
     if order_normalized not in {"asc", "desc"}:
         raise HTTPException(
@@ -78,14 +95,13 @@ async def list_taxa(
     if order_by_normalized == "canonical_name":
         order_expr = "canonical_name"
     else:
-        # observations_count is stored under metadata->>'observations_count' as a string.
-        # Guard casts to avoid non-numeric values throwing.
+        # Prefer bio.taxon_full.obs_count; fall back to metadata for legacy rows.
         order_expr = (
+            "COALESCE(obs_count, "
             "CASE "
             "WHEN (metadata->>'observations_count') ~ '^[0-9]+$' "
             "THEN (metadata->>'observations_count')::int "
-            "ELSE 0 "
-            "END"
+            "ELSE 0 END)"
         )
 
     stmt = text(
@@ -99,9 +115,22 @@ async def list_taxa(
             description,
             source,
             metadata,
+            kingdom,
+            lineage,
+            lineage_ids,
+            external_ids,
             created_at,
-            updated_at
-        FROM core.taxon
+            updated_at,
+            obs_count,
+            image_count,
+            video_count,
+            audio_count,
+            genome_count,
+            compound_link_count,
+            interaction_count,
+            publication_count,
+            characteristic_count
+        FROM bio.taxon_full
         WHERE {where_sql}
         ORDER BY {order_expr} {order_normalized}, canonical_name ASC
         LIMIT :limit OFFSET :offset
@@ -109,7 +138,7 @@ async def list_taxa(
     )
     count_stmt = text(
         f"""
-        SELECT count(*) FROM core.taxon
+        SELECT count(*) FROM bio.taxon_full
         WHERE {where_sql}
         """
     )
@@ -167,6 +196,10 @@ async def get_taxon(
             t.description,
             t.source,
             t.metadata,
+            t.kingdom,
+            t.lineage,
+            t.lineage_ids,
+            t.external_ids,
             t.created_at,
             t.updated_at,
             COALESCE(

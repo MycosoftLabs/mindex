@@ -1,0 +1,12 @@
+# Supabase CLI — migrations for hosted project (link before push).
+#   cd mindex && supabase link --project-ref hnevnsxnhfibhbsipqvz
+#   supabase db push
+# Project ref hnevnsxnhfibhbsipqvz is public (dashboard URL); DB passwords stay in secrets only.
+
+project_id = "mycosoft"
+
+[api]
+enabled = true
+
+[db]
+major_version = 15

@@ -20,3 +20,4 @@ dist/
 
 # Test output
 test_output.txt
+pytest_out*.txt

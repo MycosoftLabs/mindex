@@ -50,6 +50,10 @@ async def list_compounds(
     chemical_class: Optional[str] = None,
     compound_type: Optional[str] = None,
     search: Optional[str] = None,
+    kingdom: Optional[str] = Query(
+        None,
+        description="Only compounds linked to a taxon in this kingdom (via bio.taxon_compound).",
+    ),
     session: AsyncSession = Depends(get_db_session),
 ):
     """
@@ -60,40 +64,51 @@ async def list_compounds(
     - **chemical_class**: Filter by chemical class
     - **compound_type**: Filter by compound type
     - **search**: Search in compound names
+    - **kingdom**: Filter by taxon kingdom for linked taxa
     """
     # Build query with filters
     where_clauses = []
-    params = {"skip": skip, "limit": limit}
+    params: dict = {"skip": skip, "limit": limit}
     
     if chemical_class:
-        where_clauses.append("chemical_class = :chemical_class")
+        where_clauses.append("c.chemical_class = :chemical_class")
         params["chemical_class"] = chemical_class
     
     if compound_type:
-        where_clauses.append("compound_type = :compound_type")
+        where_clauses.append("c.compound_type = :compound_type")
         params["compound_type"] = compound_type
     
     if search:
-        where_clauses.append("name ILIKE :search")
+        where_clauses.append("c.name ILIKE :search")
         params["search"] = f"%{search}%"
+
+    if kingdom and kingdom.strip().lower() not in ("all", "any", ""):
+        where_clauses.append(
+            "c.id IN ("
+            "SELECT tc.compound_id FROM bio.taxon_compound tc "
+            "INNER JOIN core.taxon t ON t.id = tc.taxon_id "
+            "WHERE t.kingdom = :filter_kingdom"
+            ")"
+        )
+        params["filter_kingdom"] = kingdom.strip()
     
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     
     # Get total count
-    count_sql = f"SELECT COUNT(*) FROM bio.compound {where_sql}"
+    count_sql = f"SELECT COUNT(*) FROM bio.compound c {where_sql}"
     count_result = await session.execute(text(count_sql), params)
     total_count = count_result.scalar() or 0
     
     # Get compounds
     query_sql = f"""
         SELECT 
-            id, name, iupac_name, formula, molecular_weight, monoisotopic_mass,
-            smiles, inchi, inchikey, chemspider_id, pubchem_id, cas_number,
-            chebi_id, chemical_class, compound_type, source, metadata,
-            created_at, updated_at
-        FROM bio.compound
+            c.id, c.name, c.iupac_name, c.formula, c.molecular_weight, c.monoisotopic_mass,
+            c.smiles, c.inchi, c.inchikey, c.chemspider_id, c.pubchem_id, c.cas_number,
+            c.chebi_id, c.chemical_class, c.compound_type, c.source, c.metadata,
+            c.created_at, c.updated_at
+        FROM bio.compound c
         {where_sql}
-        ORDER BY name
+        ORDER BY c.name
         OFFSET :skip LIMIT :limit
     """
     
