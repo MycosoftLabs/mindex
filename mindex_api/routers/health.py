@@ -4,6 +4,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +35,58 @@ def _get_git_sha() -> str | None:
     except Exception:
         pass
     return None
+
+
+@router.get("/health/all")
+async def health_all(db: AsyncSession = Depends(get_db_session)) -> dict:
+    """Aggregate status for MINDEX App dashboard (DB counts + optional MAS + Redis)."""
+    out: dict = {"service": "mindex", "timestamp": datetime.now(timezone.utc).isoformat(), "components": {}}
+
+    try:
+        await db.execute(text("SELECT 1"))
+        out["components"]["database"] = "ok"
+    except Exception as e:
+        out["components"]["database"] = f"error:{str(e)[:120]}"
+
+    counts: dict[str, int | None] = {}
+    for key, sql in [
+        ("taxon", "SELECT COUNT(*)::int FROM core.taxon"),
+        ("genome", "SELECT COUNT(*)::int FROM bio.genome"),
+        ("taxon_compound", "SELECT COUNT(*)::int FROM bio.taxon_compound"),
+        ("ledger_anchors", "SELECT COUNT(*)::int FROM ledger.anchor"),
+        ("telemetry_devices", "SELECT COUNT(*)::int FROM telemetry.device"),
+    ]:
+        try:
+            counts[key] = (await db.execute(text(sql))).scalar()
+        except Exception:
+            counts[key] = None
+    out["counts"] = counts
+
+    if settings.mas_api_endpoint:
+        url = str(settings.mas_api_endpoint).rstrip("/") + "/health"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(url)
+                out["components"]["mas"] = {"url": url, "status_code": r.status_code, "ok": r.status_code < 400}
+        except Exception as e:
+            out["components"]["mas"] = {"url": url, "ok": False, "error": str(e)[:120]}
+    else:
+        out["components"]["mas"] = {"ok": False, "reason": "MAS_API_URL not configured"}
+
+    try:
+        if settings.redis_url:
+            import redis.asyncio as aioredis
+
+            r = aioredis.from_url(settings.redis_url)
+            await r.ping()
+            await r.aclose()
+            out["components"]["redis"] = "ok"
+        else:
+            out["components"]["redis"] = "not_configured"
+    except Exception as e:
+        out["components"]["redis"] = f"error:{str(e)[:120]}"
+
+    return out
 
 
 @router.get("/health", response_model=HealthResponse)

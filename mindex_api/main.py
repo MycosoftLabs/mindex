@@ -51,6 +51,10 @@ from .routers import (
     genomes_router,
     ledger_router,
     mwave_router,
+    network_router,
+    devices_inventory_router,
+    integrity_router,
+    integrity_verify_router,
     emissions_router,
     maritime_router,
     taco_router,
@@ -58,6 +62,7 @@ from .routers import (
     fusarium_catalog_router,
     live_state_router,
     mycodao_zone_router,
+    meshtastic_internal_router,
 )
 from .routers.worldview import (
     worldview_search_router,
@@ -151,6 +156,7 @@ def create_app() -> FastAPI:
     app.include_router(mycobrain_router, prefix=internal_prefix, dependencies=internal_deps)
     app.include_router(telemetry_router, prefix=internal_prefix, dependencies=internal_deps)
     app.include_router(devices_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(meshtastic_internal_router, prefix=internal_prefix, dependencies=internal_deps)
 
     # AI/ML routers
     app.include_router(grounding_router, prefix=internal_prefix, dependencies=internal_deps)
@@ -219,6 +225,7 @@ def create_app() -> FastAPI:
     app.include_router(taxon_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(telemetry_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(devices_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(meshtastic_internal_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(mycobrain_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(observations_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(ip_assets_router, prefix=prefix, dependencies=internal_deps)
@@ -252,6 +259,10 @@ def create_app() -> FastAPI:
     app.include_router(genomes_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(ledger_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(mwave_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(network_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(devices_inventory_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(integrity_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(integrity_verify_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(emissions_router, prefix=prefix, dependencies=internal_deps)
     if maritime_router is not None:
         app.include_router(maritime_router, prefix=prefix, dependencies=internal_deps)

@@ -12,7 +12,7 @@ async def get_mwave():
         "last_updated": datetime.now().isoformat(),
         "sensor_count": 0,
         "active_correlations": 0,
-        "prediction_confidence": 30,
+        "prediction_confidence": None,
         "earthquakes": {
             "hour": [],
             "count_hour": 0,
@@ -80,3 +80,53 @@ async def get_mwave():
         status["data_source"] = "unavailable"
     
     return status
+
+
+@router.get("/mwave/correlations")
+async def mwave_correlations():
+    """
+    Lightweight correlation stats from the live USGS hour feed (inter-event spacing in minutes).
+    No device time-series yet — returns empty `device_pairs` until telemetry joins land.
+    """
+    base = await get_mwave()
+    hour = (base.get("earthquakes") or {}).get("hour") or []
+    times_ms: list[int] = []
+    for ev in hour:
+        t = ev.get("time")
+        if isinstance(t, (int, float)):
+            times_ms.append(int(t))
+    times_ms.sort()
+    gaps: list[float] = []
+    for a, b in zip(times_ms, times_ms[1:]):
+        gaps.append(max(0.0, (b - a) / 60000.0))
+    return {
+        "status": base.get("status"),
+        "last_updated": base.get("last_updated"),
+        "event_count_hour": len(hour),
+        "inter_event_minutes": {"count": len(gaps), "mean": sum(gaps) / len(gaps) if gaps else None},
+        "device_pairs": [],
+        "data_source": base.get("data_source"),
+    }
+
+
+@router.get("/mwave/summary")
+async def mwave_summary():
+    """Compact card payload for FUSARIUM / MYCA embeds — USGS-backed only, no synthetic quake data."""
+    full = await get_mwave()
+    eq = full.get("earthquakes") or {}
+    hour = eq.get("hour") or []
+    top = sorted(
+        [x for x in hour if isinstance(x.get("magnitude"), (int, float))],
+        key=lambda x: float(x["magnitude"]),
+        reverse=True,
+    )[:5]
+    return {
+        "status": full.get("status"),
+        "last_updated": full.get("last_updated"),
+        "count_hour": eq.get("count_hour"),
+        "count_day": eq.get("count_day"),
+        "max_magnitude_24h": eq.get("max_magnitude_24h"),
+        "top_events": top,
+        "alerts": full.get("alerts") or [],
+        "data_source": full.get("data_source"),
+    }

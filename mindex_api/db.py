@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, Optional
 
 import asyncpg
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -41,6 +42,15 @@ def _ensure_engine() -> None:
 
 
 async def get_db():
+    _ensure_engine()
+    assert _session_factory is not None
+    async with _session_factory() as session:
+        yield session
+
+
+@asynccontextmanager
+async def async_session_scope() -> AsyncIterator[AsyncSession]:
+    """Public async SQLAlchemy session scope (SSE/long-lived tasks use this per tick)."""
     _ensure_engine()
     assert _session_factory is not None
     async with _session_factory() as session:

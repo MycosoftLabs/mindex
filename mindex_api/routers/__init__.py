@@ -33,6 +33,9 @@ from .all_life import router as all_life_router
 from .genomes import router as genomes_router
 from .ledger import router as ledger_router
 from .mwave import router as mwave_router
+from .network import router as network_router
+from .devices_inventory import router as devices_inventory_router
+from .integrity import router as integrity_router, verify_router as integrity_verify_router
 from .live_state import router as live_state_router
 
 try:
@@ -64,6 +67,8 @@ try:
     from .mycodao_zone import router as mycodao_zone_router
 except Exception:
     mycodao_zone_router = None
+
+from .meshtastic_internal import meshtastic_router as meshtastic_internal_router
 
 __all__ = [
     "health_router",
@@ -102,12 +107,17 @@ __all__ = [
     "genomes_router",
     "ledger_router",
     "mwave_router",
+    "network_router",
+    "devices_inventory_router",
+    "integrity_router",
+    "integrity_verify_router",
     "maritime_router",
     "taco_router",
     "fusarium_analytics_router",
     "fusarium_catalog_router",
     "live_state_router",
     "mycodao_zone_router",
+    "meshtastic_internal_router",
 ]
 
 

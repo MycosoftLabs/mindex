@@ -131,6 +131,60 @@ class Settings(BaseSettings):
     bitcoin_ordinal_endpoint: Optional[AnyHttpUrl] = None
     solana_rpc_url: Optional[AnyHttpUrl] = None
 
+    # -------------------------------------------------------------------------
+    # MINDEX App Overhaul (May 03, 2026) — chain + federation (env-only secrets)
+    # -------------------------------------------------------------------------
+    solana_keypair_path: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("SOLANA_KEYPAIR_PATH"),
+        description="Path to Solana keypair JSON on the API host (never commit the file).",
+    )
+    solana_network: str = Field(
+        default="mainnet-beta",
+        validation_alias=AliasChoices("SOLANA_NETWORK"),
+        description="Solana cluster name for status reporting.",
+    )
+    btc_ordinals_wallet: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("BTC_ORDINALS_WALLET"),
+        description="Ordinals-capable wallet address or descriptor handle (no WIF in env files that ship to git).",
+    )
+    bitcoin_rpc_url: Optional[AnyHttpUrl] = Field(
+        default=None,
+        validation_alias=AliasChoices("BITCOIN_RPC_URL"),
+        description="Optional Bitcoin Core RPC base URL.",
+    )
+    p1_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("P1_API_KEY"),
+        description="Platform One API key (set only in .env on secure hosts).",
+    )
+    p1_base_url: Optional[AnyHttpUrl] = Field(
+        default=None,
+        validation_alias=AliasChoices("P1_BASE_URL"),
+        description="Platform One API base URL.",
+    )
+    nas_host: str = Field(
+        default="192.168.0.105",
+        validation_alias=AliasChoices("NAS_HOST"),
+        description="Primary UniFi NAS host for federation metadata.",
+    )
+    aws_s3_mindex_bucket: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("AWS_S3_MINDEX_BUCKET"),
+        description="S3 bucket used for MINDEX cold copies / federation.",
+    )
+    prometheus_pushgateway_url: Optional[AnyHttpUrl] = Field(
+        default=None,
+        validation_alias=AliasChoices("PROMETHEUS_PUSHGATEWAY_URL"),
+        description="Optional Prometheus pushgateway for MINDEX job metrics.",
+    )
+    prometheus_metrics_path: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("PROMETHEUS_METRICS_PATH"),
+        description="Optional filesystem path for node_exporter textfile metrics.",
+    )
+
     # =========================================================================
     # API COMPARTMENTALIZATION — Internal / Worldview zones
     # =========================================================================
@@ -303,6 +357,7 @@ class Settings(BaseSettings):
     
     mas_api_endpoint: Optional[AnyHttpUrl] = Field(
         None,
+        validation_alias=AliasChoices("MAS_API_URL", "MAS_API_ENDPOINT", "MINDEX_MAS_API_URL"),
         description="MAS API endpoint for agent coordination.",
     )
     mas_device_agent_enabled: bool = Field(
