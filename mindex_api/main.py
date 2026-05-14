@@ -71,6 +71,7 @@ from .routers.worldview import (
     worldview_answers_router,
     worldview_research_router,
     worldview_manifest_router,
+    worldview_snapshots_router,
 )
 
 try:
@@ -183,13 +184,14 @@ def create_app() -> FastAPI:
 
     # API key management (CRUD, rotation, usage, audit)
     app.include_router(key_management_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(worldview_snapshots_router, prefix=internal_prefix, dependencies=internal_deps)
 
     # MYCODAO schema (mycodao.*) + Mycosoft zone registry (mycosoft.*); MYCA sees both via internal token
     if mycodao_zone_router is not None:
         app.include_router(mycodao_zone_router, prefix=internal_prefix, dependencies=internal_deps)
 
-    # Versioned ingest surface (MYCA entities, iNat region cache) at /api/v1/ingest/...
-    app.include_router(v1_ingest_router, prefix="/api/v1", dependencies=internal_deps)
+    # Versioned ingest surface (MYCA entities, iNat region cache) under the MINDEX namespace.
+    app.include_router(v1_ingest_router, prefix=f"{prefix}/v1", dependencies=internal_deps)
 
     # GPU acceleration (cuDF, cuVS, STATIC) — optional, degrades to CPU
     try:
@@ -291,5 +293,3 @@ def run() -> None:
         port=settings.api_port,
         reload=True,
     )
-
-

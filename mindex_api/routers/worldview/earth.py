@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...auth import CallerIdentity, require_worldview_key
 from ...dependencies import get_db_session
-from .response_envelope import wrap_response
+from .response_envelope import wrap_governed_response
 
 router = APIRouter(prefix="/earth", tags=["Worldview Earth Data"])
 
@@ -31,7 +31,7 @@ async def worldview_earth_stats(
     request.state.caller_identity = caller
     result = await earth_stats(session=session)
     data = result.model_dump() if hasattr(result, "model_dump") else result
-    return wrap_response(data=data, plan=caller.plan)
+    return await wrap_governed_response(data=data, caller=caller, source_domains=["earth"])
 
 
 @router.get("/map/bbox")
@@ -58,7 +58,12 @@ async def worldview_map_bbox(
         session=session,
     )
     data = result.model_dump() if hasattr(result, "model_dump") else result
-    return wrap_response(data=data, plan=caller.plan)
+    return await wrap_governed_response(
+        data=data,
+        caller=caller,
+        source_domains=[layer],
+        region={"lat_min": lat_min, "lat_max": lat_max, "lng_min": lng_min, "lng_max": lng_max},
+    )
 
 
 @router.get("/map/layers")
@@ -73,7 +78,7 @@ async def worldview_map_layers(
     request.state.caller_identity = caller
     result = await list_map_layers(session=session)
     data = result if isinstance(result, (dict, list)) else result
-    return wrap_response(data=data, plan=caller.plan)
+    return await wrap_governed_response(data=data, caller=caller, source_domains=["earth_map_layers"])
 
 
 @router.get("/earthquakes/recent")
@@ -93,7 +98,7 @@ async def worldview_recent_earthquakes(
         hours=hours, min_magnitude=min_magnitude, limit=limit, session=session,
     )
     data = result if isinstance(result, (dict, list)) else (result.model_dump() if hasattr(result, "model_dump") else result)
-    return wrap_response(data=data, plan=caller.plan)
+    return await wrap_governed_response(data=data, caller=caller, source_domains=["earthquakes"])
 
 
 @router.get("/satellites/active")
@@ -109,7 +114,7 @@ async def worldview_active_satellites(
     request.state.caller_identity = caller
     result = await active_satellites(limit=limit, session=session)
     data = result if isinstance(result, (dict, list)) else (result.model_dump() if hasattr(result, "model_dump") else result)
-    return wrap_response(data=data, plan=caller.plan)
+    return await wrap_governed_response(data=data, caller=caller, source_domains=["satellites"])
 
 
 @router.get("/solar/recent")
@@ -126,7 +131,7 @@ async def worldview_recent_solar(
     request.state.caller_identity = caller
     result = await recent_solar_events(hours=hours, limit=limit, session=session)
     data = result if isinstance(result, (dict, list)) else (result.model_dump() if hasattr(result, "model_dump") else result)
-    return wrap_response(data=data, plan=caller.plan)
+    return await wrap_governed_response(data=data, caller=caller, source_domains=["solar_events"])
 
 
 @router.get("/infrastructure")
@@ -152,4 +157,9 @@ async def worldview_infrastructure(
         session=session,
     )
     data = result if isinstance(result, (dict, list)) else (result.model_dump() if hasattr(result, "model_dump") else result)
-    return wrap_response(data=data, plan=caller.plan)
+    return await wrap_governed_response(
+        data=data,
+        caller=caller,
+        source_domains=["infrastructure", infra_type] if infra_type else ["infrastructure"],
+        region={"lat_min": lat_min, "lat_max": lat_max, "lng_min": lng_min, "lng_max": lng_max},
+    )
