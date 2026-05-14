@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...auth import CallerIdentity, require_worldview_key
 from ...dependencies import get_db_session
-from .response_envelope import wrap_response
+from .response_envelope import wrap_governed_response, wrap_response
 
 router = APIRouter(prefix="/search", tags=["Worldview Search"])
 
@@ -95,7 +95,13 @@ async def worldview_search(
     else:
         response_data = result.model_dump() if hasattr(result, "model_dump") else result
 
-    return wrap_response(data=response_data, plan=caller.plan)
+    review_domains = safe_domains if domains else WORLDVIEW_DOMAINS
+    return await wrap_governed_response(
+        data=response_data,
+        caller=caller,
+        source_domains=review_domains,
+        region={"lat": lat, "lng": lng, "radius_km": radius_km} if lat is not None and lng is not None else None,
+    )
 
 
 @router.get("/domains")

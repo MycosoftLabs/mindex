@@ -164,6 +164,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("P1_BASE_URL"),
         description="Platform One API base URL.",
     )
+    avani_api_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("AVANI_API_URL"),
+        description="MAS or standalone AVANI base URL for Worldview governance review.",
+    )
+    avani_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("AVANI_API_KEY", "MINDEX_AVANI_API_KEY"),
+        description="Scoped AVANI API key with avani:evaluate for Worldview governance.",
+    )
     nas_host: str = Field(
         default="192.168.0.105",
         validation_alias=AliasChoices("NAS_HOST"),

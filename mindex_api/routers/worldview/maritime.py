@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...auth import CallerIdentity, require_worldview_key
 from ...dependencies import get_db_session
-from .response_envelope import wrap_response
+from .response_envelope import wrap_governed_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/worldview/maritime", tags=["worldview", "maritime"])
@@ -49,15 +49,18 @@ async def get_acoustic_environment(
         {"lat": lat, "lon": lon, "radius_m": radius_nm * 1852},
     )
     rows = result.mappings().all()
-    return wrap_response(
-        data={
-            "location": {"lat": lat, "lon": lon},
-            "radius_nm": radius_nm,
-            "acoustic_environment": [dict(row) for row in rows],
-            "source": "ocean_environments",
-        },
+    data = {
+        "location": {"lat": lat, "lon": lon},
+        "radius_nm": radius_nm,
+        "acoustic_environment": [dict(row) for row in rows],
+        "source": "ocean_environments",
+    }
+    return await wrap_governed_response(
+        data=data,
         count=len(rows),
-        plan=caller.plan,
+        caller=caller,
+        source_domains=["maritime", "buoys"],
+        region={"lat": lat, "lon": lon, "radius_nm": radius_nm},
     )
 
 
@@ -82,10 +85,11 @@ async def get_threat_assessment(
         {"sector": sector},
     )
     rows = result.mappings().all()
-    return wrap_response(
+    return await wrap_governed_response(
         data={"sector": sector, "threats": [dict(row) for row in rows], "total": len(rows), "source": "taco_assessments"},
         count=len(rows),
-        plan=caller.plan,
+        caller=caller,
+        source_domains=["maritime", "fusarium_tracks"],
     )
 
 
@@ -108,10 +112,11 @@ async def get_sensor_health(
     )
     rows = result.mappings().all()
     sensors = [dict(row) for row in rows]
-    return wrap_response(
+    return await wrap_governed_response(
         data={"sensors": sensors, "total": len(sensors), "network_status": "online" if sensors else "degraded", "source": "taco_observations"},
         count=len(sensors),
-        plan=caller.plan,
+        caller=caller,
+        source_domains=["maritime", "sensor_health"],
     )
 
 
@@ -133,8 +138,9 @@ async def get_decision_aid(
         )
     )
     rows = result.mappings().all()
-    return wrap_response(
+    return await wrap_governed_response(
         data={"recommendations": [dict(row) for row in rows], "total": len(rows), "source": "taco_assessments"},
         count=len(rows),
-        plan=caller.plan,
+        caller=caller,
+        source_domains=["maritime", "fusarium_correlations"],
     )

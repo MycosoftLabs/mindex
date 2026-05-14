@@ -15,6 +15,7 @@ from .answers import router as worldview_answers_router
 from .research import router as worldview_research_router
 from .manifest import router as worldview_manifest_router
 from .maritime import router as worldview_maritime_router
+from .snapshots import router as worldview_snapshots_router
 
 __all__ = [
     "worldview_search_router",
@@ -24,4 +25,5 @@ __all__ = [
     "worldview_research_router",
     "worldview_manifest_router",
     "worldview_maritime_router",
+    "worldview_snapshots_router",
 ]

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...auth import CallerIdentity, require_worldview_key
 from ...dependencies import get_db_session
-from .response_envelope import wrap_response
+from .response_envelope import wrap_governed_response
 
 router = APIRouter(prefix="/answers", tags=["Worldview Answers & Knowledge"])
 
@@ -37,7 +37,7 @@ async def worldview_search_answers(
 
     request.state.caller_identity = caller
     results = await search_answers(q=q, limit=limit, db=db)
-    return wrap_response(data=results, plan=caller.plan)
+    return await wrap_governed_response(data=results, caller=caller, source_domains=["answers"])
 
 
 @router.get("/qa")
@@ -53,7 +53,7 @@ async def worldview_list_qa(
 
     request.state.caller_identity = caller
     results = await list_qa(q=q, limit=limit, db=db)
-    return wrap_response(data=results, plan=caller.plan)
+    return await wrap_governed_response(data=results, caller=caller, source_domains=["answers"])
 
 
 @router.get("/worldview-facts")
@@ -109,4 +109,4 @@ async def worldview_facts(
     except Exception:
         facts = []
 
-    return wrap_response(data=facts, plan=caller.plan)
+    return await wrap_governed_response(data=facts, caller=caller, source_domains=["worldview_facts"])

@@ -1,5 +1,5 @@
 """
-Versioned public ingest surface under /api/v1/ingest/*.
+Versioned internal ingest surface under /api/mindex/v1/ingest/*.
 
 - MYCA verified entities → crep.unified_entities (defense/infra waypoints)
 - iNaturalist region warm-cache → crep.project_nature_cache

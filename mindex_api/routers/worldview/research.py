@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...auth import CallerIdentity, require_worldview_key
 from ...db import get_db
 from ...dependencies import get_db_session
-from .response_envelope import wrap_response
+from .response_envelope import wrap_governed_response
 
 router = APIRouter(prefix="/research", tags=["Worldview Research & Stats"])
 
@@ -32,7 +32,7 @@ async def worldview_search_papers(
     request.state.caller_identity = caller
     result = await search_research(q=q, page=1, per_page=limit)
     data = result.model_dump() if hasattr(result, "model_dump") else result
-    return wrap_response(data=data, plan=caller.plan)
+    return await wrap_governed_response(data=data, caller=caller, source_domains=["research"])
 
 
 @router.get("/papers/{paper_id}")
@@ -47,7 +47,7 @@ async def worldview_get_paper(
     request.state.caller_identity = caller
     result = await get_paper_detail(paper_id=paper_id)
     data = result.model_dump() if hasattr(result, "model_dump") else result
-    return wrap_response(data=data, count=1, plan=caller.plan)
+    return await wrap_governed_response(data=data, caller=caller, source_domains=["research"], count=1)
 
 
 @router.get("/stats")
@@ -62,4 +62,4 @@ async def worldview_stats(
     request.state.caller_identity = caller
     result = await get_statistics(db=db)
     data = result.model_dump() if hasattr(result, "model_dump") else result
-    return wrap_response(data=data, count=1, plan=caller.plan)
+    return await wrap_governed_response(data=data, caller=caller, source_domains=["research", "stats"], count=1)
