@@ -22,6 +22,16 @@ from ..utils.deep_agent_events import schedule_domain_event
 
 logger = logging.getLogger(__name__)
 
+# core.taxon has kingdom + fungi_type; iconic_taxon_name lives in observation metadata (iNat).
+FUNGI_KINGDOM_SQL = (
+    "("
+    "lower(coalesce(t.kingdom, '')) LIKE 'fung%%' "
+    "OR lower(coalesce(o.metadata->>'kingdom', '')) LIKE 'fung%%' "
+    "OR lower(coalesce(o.metadata->>'iconic_taxon_name', '')) = 'fungi' "
+    "OR t.fungi_type IS NOT NULL"
+    ")"
+)
+
 router = APIRouter(
     prefix="/observations",
     tags=["observations"],
@@ -78,8 +88,18 @@ async def list_observations(
         where_clauses.append("o.taxon_id = :taxon_id")
         params["taxon_id"] = str(taxon_id)
     if kingdom and kingdom.strip().lower() not in ("all", "any", ""):
-        where_clauses.append("t.kingdom = :kingdom")
-        params["kingdom"] = kingdom.strip()
+        kingdom_norm = kingdom.strip().lower()
+        if kingdom_norm in ("fungi", "fungus"):
+            where_clauses.append(FUNGI_KINGDOM_SQL)
+        else:
+            where_clauses.append(
+                "("
+                "lower(coalesce(t.kingdom, '')) = :kingdom "
+                "OR lower(coalesce(o.metadata->>'kingdom', '')) = :kingdom "
+                "OR lower(coalesce(o.metadata->>'iconic_taxon_name', '')) = :kingdom"
+                ")"
+            )
+            params["kingdom"] = kingdom_norm
     if start:
         where_clauses.append("o.observed_at >= :start")
         params["start"] = start
@@ -88,14 +108,30 @@ async def list_observations(
         params["end"] = end
     if bbox_params:
         where_clauses.append(
-            "o.latitude IS NOT NULL AND o.longitude IS NOT NULL "
-            "AND o.latitude BETWEEN :min_lat AND :max_lat AND o.longitude BETWEEN :min_lon AND :max_lon"
+            "("
+            "(o.location IS NOT NULL "
+            "AND ST_Y(o.location::geometry) BETWEEN :min_lat AND :max_lat "
+            "AND ST_X(o.location::geometry) BETWEEN :min_lon AND :max_lon) "
+            "OR (o.location IS NULL "
+            "AND COALESCE("
+            "NULLIF(to_jsonb(o)->>'latitude', '')::double precision, "
+            "(o.metadata->>'latitude')::double precision"
+            ") BETWEEN :min_lat AND :max_lat "
+            "AND COALESCE("
+            "NULLIF(to_jsonb(o)->>'longitude', '')::double precision, "
+            "(o.metadata->>'longitude')::double precision"
+            ") BETWEEN :min_lon AND :max_lon)"
+            ")"
         )
         params.update(bbox_params)
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
 
-    # Support both PostGIS (location) and plain lat/lng schema
+    # PostGIS-first coordinate projection.
+    # Some historical codepaths assumed latitude/longitude columns directly on
+    # obs.observation, but canonical schema stores geography in `location`.
+    # Reading via to_jsonb(o)->>'latitude' keeps compatibility if those fields
+    # are ever present without hard-failing when they are absent.
     data_query = f"""
         SELECT
             o.id,
@@ -108,8 +144,14 @@ async def list_observations(
             o.media,
             o.notes,
             o.metadata,
-            o.latitude,
-            o.longitude
+            COALESCE(
+                NULLIF(to_jsonb(o)->>'latitude', '')::double precision,
+                CASE WHEN o.location IS NOT NULL THEN ST_Y(o.location::geometry) END
+            ) AS latitude,
+            COALESCE(
+                NULLIF(to_jsonb(o)->>'longitude', '')::double precision,
+                CASE WHEN o.location IS NOT NULL THEN ST_X(o.location::geometry) END
+            ) AS longitude
         FROM obs.observation o
         LEFT JOIN core.taxon t ON t.id = o.taxon_id
         WHERE {where_sql}
@@ -230,10 +272,24 @@ async def bulk_ingest_observations(
                 text("""
                     INSERT INTO obs.observation
                         (id, source, source_id, observed_at, observer,
-                         latitude, longitude, media, notes, metadata)
+                         location, media, notes, metadata)
                     VALUES
-                        (:id, :source, :source_id, :observed_at, :observer,
-                         :lat, :lng, cast(:media as jsonb), :notes, cast(:meta as jsonb))
+                        (:id, :source, :source_id,
+                         COALESCE(NULLIF(:observed_at, '')::timestamptz, NOW()),
+                         :observer,
+                         CASE
+                           WHEN CAST(:lat AS double precision) IS NOT NULL
+                            AND CAST(:lng AS double precision) IS NOT NULL
+                           THEN ST_SetSRID(
+                             ST_MakePoint(
+                               CAST(:lng AS double precision),
+                               CAST(:lat AS double precision)
+                             ),
+                             4326
+                           )::geography
+                           ELSE NULL
+                         END,
+                         cast(:media as jsonb), :notes, cast(:meta as jsonb))
                 """),
                 {
                     "id": obs_id,
@@ -250,6 +306,8 @@ async def bulk_ingest_observations(
             )
             inserted += 1
         except Exception as exc:
+            # Roll back failed statement so subsequent rows can continue.
+            await db.rollback()
             logger.warning("Bulk ingest error for source_id=%s: %s", obs.source_id, exc)
             errors += 1
 

@@ -35,6 +35,8 @@ from .ledger import router as ledger_router
 from .mwave import router as mwave_router
 from .network import router as network_router
 from .devices_inventory import router as devices_inventory_router
+from .fungal_overlays import router as fungal_overlays_router
+from .civic_unified import router as civic_unified_router
 from .integrity import router as integrity_router, verify_router as integrity_verify_router
 from .live_state import router as live_state_router
 
@@ -109,6 +111,8 @@ __all__ = [
     "mwave_router",
     "network_router",
     "devices_inventory_router",
+    "fungal_overlays_router",
+    "civic_unified_router",
     "integrity_router",
     "integrity_verify_router",
     "maritime_router",

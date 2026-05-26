@@ -65,6 +65,7 @@ def create_job_registry() -> Dict[str, ETLJob]:
     from .sync_chemspider_compounds import run_full_sync as chemspider_sync
     from .publications import run_publications_etl
     from .hq_media_ingestion import HQMediaIngestionPipeline
+    from .civic_viewport_sync import sync_civic_viewport_intel
     
     # Wrapper for async publications job
     def run_publications_sync(**kwargs) -> int:
@@ -182,6 +183,13 @@ def create_job_registry() -> Dict[str, ETLJob]:
             run_func=run_chemspider_sync,
             priority=90,
             description="Sync fungal compound data from ChemSpider",
+        ),
+        "civic_viewport": ETLJob(
+            name="civic_viewport",
+            source="Civic/Government",
+            run_func=sync_civic_viewport_intel,
+            priority=95,
+            description="Batch-sync civic viewport intelligence (officials, elections, facilities) into civic.*",
         ),
     }
 

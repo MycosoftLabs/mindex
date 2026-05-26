@@ -53,6 +53,8 @@ from .routers import (
     mwave_router,
     network_router,
     devices_inventory_router,
+    fungal_overlays_router,
+    civic_unified_router,
     integrity_router,
     integrity_verify_router,
     emissions_router,
@@ -263,6 +265,8 @@ def create_app() -> FastAPI:
     app.include_router(mwave_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(network_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(devices_inventory_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(fungal_overlays_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(civic_unified_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(integrity_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(integrity_verify_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(emissions_router, prefix=prefix, dependencies=internal_deps)
