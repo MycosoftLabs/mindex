@@ -74,6 +74,10 @@ async def list_observations(
         None,
         description="Bounding box filter minLon,minLat,maxLon,maxLat in WGS84.",
     ),
+    include_total: bool = Query(
+        False,
+        description="When true, run an exact count. Keep false for low-latency map viewport reads.",
+    ),
 ) -> ObservationListResponse:
     bbox_params = _parse_bbox(bbox)
 
@@ -110,8 +114,10 @@ async def list_observations(
         where_clauses.append(
             "("
             "(o.location IS NOT NULL "
-            "AND ST_Y(o.location::geometry) BETWEEN :min_lat AND :max_lat "
-            "AND ST_X(o.location::geometry) BETWEEN :min_lon AND :max_lon) "
+            "AND ST_Intersects("
+            "o.location, "
+            "ST_SetSRID(ST_MakeEnvelope(:min_lon, :min_lat, :max_lon, :max_lat), 4326)::geography"
+            ")) "
             "OR (o.location IS NULL "
             "AND COALESCE("
             "NULLIF(to_jsonb(o)->>'latitude', '')::double precision, "
@@ -143,7 +149,13 @@ async def list_observations(
             o.accuracy_m,
             o.media,
             o.notes,
-            o.metadata,
+            COALESCE(o.metadata, '{{}}'::jsonb) ||
+              jsonb_strip_nulls(jsonb_build_object(
+                'taxon_name', t.canonical_name,
+                'taxon_common_name', t.common_name,
+                'kingdom', t.kingdom,
+                'iconic_taxon_name', COALESCE(t.kingdom, o.metadata->>'iconic_taxon_name')
+              )) AS metadata,
             COALESCE(
                 NULLIF(to_jsonb(o)->>'latitude', '')::double precision,
                 CASE WHEN o.location IS NOT NULL THEN ST_Y(o.location::geometry) END
@@ -165,8 +177,10 @@ async def list_observations(
     """
 
     result = await db.execute(text(data_query), params)
-    count_result = await db.execute(text(count_query), params)
-    total = count_result.scalar_one()
+    total = None
+    if include_total:
+        count_result = await db.execute(text(count_query), params)
+        total = count_result.scalar_one()
 
     observations = []
     for row in result.mappings().all():
@@ -234,6 +248,15 @@ class BulkIngestResponse(BaseModel):
     errors: int = 0
 
 
+def _kingdom_from_iconic(iconic: Optional[str]) -> Optional[str]:
+    value = (iconic or "").strip()
+    if not value:
+        return None
+    if value.lower() in ("fungi", "plantae", "animalia", "bacteria", "archaea", "protista", "viruses"):
+        return value
+    return value
+
+
 @router.post("/bulk", response_model=BulkIngestResponse)
 async def bulk_ingest_observations(
     body: BulkIngestRequest = Body(...),
@@ -253,28 +276,147 @@ async def bulk_ingest_observations(
                 errors += 1
                 continue
 
+            kingdom = _kingdom_from_iconic(obs.iconic_taxon_name) or obs.metadata.get("kingdom")
+            metadata = dict(obs.metadata or {})
+            if obs.taxon_name:
+                metadata.setdefault("taxon_name", obs.taxon_name)
+                metadata.setdefault("scientific_name", obs.taxon_name)
+            if obs.taxon_common_name:
+                metadata.setdefault("taxon_common_name", obs.taxon_common_name)
+                metadata.setdefault("common_name", obs.taxon_common_name)
+            if obs.taxon_inat_id:
+                metadata.setdefault("taxon_inat_id", obs.taxon_inat_id)
+            if obs.iconic_taxon_name:
+                metadata.setdefault("iconic_taxon_name", obs.iconic_taxon_name)
+                metadata.setdefault("kingdom", kingdom or obs.iconic_taxon_name)
+
+            taxon_id: Optional[str] = None
+            if obs.taxon_name:
+                taxon_row = await db.execute(
+                    text(
+                        """
+                        SELECT id FROM core.taxon
+                        WHERE canonical_name = :canonical_name
+                        LIMIT 1
+                        """
+                    ),
+                    {"canonical_name": obs.taxon_name},
+                )
+                existing_taxon_id = taxon_row.scalar_one_or_none()
+                taxon_meta_json = json.dumps(
+                    {
+                        "source": obs.source,
+                        "inat_id": obs.taxon_inat_id,
+                        "iconic_taxon_name": obs.iconic_taxon_name,
+                    }
+                )
+                if existing_taxon_id:
+                    taxon_id = str(existing_taxon_id)
+                    await db.execute(
+                        text(
+                            """
+                            UPDATE core.taxon
+                            SET
+                                common_name = COALESCE(:common_name, common_name),
+                                source = COALESCE(source, :source),
+                                kingdom = COALESCE(:kingdom, kingdom),
+                                metadata = COALESCE(metadata, '{}'::jsonb) || CAST(:metadata AS jsonb),
+                                updated_at = NOW()
+                            WHERE id = :taxon_id
+                            """
+                        ),
+                        {
+                            "taxon_id": taxon_id,
+                            "common_name": obs.taxon_common_name,
+                            "source": obs.source,
+                            "kingdom": kingdom,
+                            "metadata": taxon_meta_json,
+                        },
+                    )
+                else:
+                    inserted_taxon = await db.execute(
+                        text(
+                            """
+                            INSERT INTO core.taxon
+                                (canonical_name, rank, common_name, source, kingdom, metadata)
+                            VALUES
+                                (:canonical_name, 'species', :common_name, :source, :kingdom, CAST(:metadata AS jsonb))
+                            RETURNING id
+                            """
+                        ),
+                        {
+                            "canonical_name": obs.taxon_name,
+                            "common_name": obs.taxon_common_name,
+                            "source": obs.source,
+                            "kingdom": kingdom,
+                            "metadata": taxon_meta_json,
+                        },
+                    )
+                    taxon_id = str(inserted_taxon.scalar_one())
+
             # Check if already exists
             exists = await db.execute(
                 text(
-                    "SELECT 1 FROM obs.observation WHERE source = :source AND source_id = :source_id LIMIT 1"
+                    "SELECT id FROM obs.observation WHERE source = :source AND source_id = :source_id LIMIT 1"
                 ),
                 {"source": obs.source, "source_id": obs.source_id},
             )
-            if exists.scalar_one_or_none():
+            existing_observation_id = exists.scalar_one_or_none()
+            media_json = json.dumps(obs.photos) if obs.photos else "[]"
+            meta_json = json.dumps(metadata) if metadata else "{}"
+
+            if existing_observation_id:
+                await db.execute(
+                    text("""
+                        UPDATE obs.observation
+                        SET
+                            taxon_id = COALESCE(taxon_id, CAST(NULLIF(:taxon_id, '') AS uuid)),
+                            observed_at = COALESCE(NULLIF(:observed_at, '')::timestamptz, observed_at),
+                            observer = COALESCE(:observer, observer),
+                            location = CASE
+                              WHEN CAST(:lat AS double precision) IS NOT NULL
+                               AND CAST(:lng AS double precision) IS NOT NULL
+                              THEN ST_SetSRID(
+                                ST_MakePoint(
+                                  CAST(:lng AS double precision),
+                                  CAST(:lat AS double precision)
+                                ),
+                                4326
+                              )::geography
+                              ELSE location
+                            END,
+                            media = CASE
+                              WHEN CAST(:media AS jsonb) <> '[]'::jsonb THEN CAST(:media AS jsonb)
+                              ELSE media
+                            END,
+                            notes = COALESCE(:notes, notes),
+                            metadata = COALESCE(metadata, '{}'::jsonb) || CAST(:meta AS jsonb)
+                        WHERE id = :id
+                    """),
+                    {
+                        "id": str(existing_observation_id),
+                        "taxon_id": taxon_id or "",
+                        "observed_at": obs.observed_at,
+                        "observer": obs.observer,
+                        "lat": obs.lat,
+                        "lng": obs.lng,
+                        "media": media_json,
+                        "notes": obs.notes,
+                        "meta": meta_json,
+                    },
+                )
                 skipped += 1
                 continue
 
             obs_id = str(uuid4())
-            media_json = json.dumps(obs.photos) if obs.photos else "[]"
-            meta_json = json.dumps(obs.metadata) if obs.metadata else "{}"
 
             await db.execute(
                 text("""
                     INSERT INTO obs.observation
-                        (id, source, source_id, observed_at, observer,
+                        (id, taxon_id, source, source_id, observed_at, observer,
                          location, media, notes, metadata)
                     VALUES
-                        (:id, :source, :source_id,
+                        (:id, CAST(NULLIF(:taxon_id, '') AS uuid), :source, :source_id,
                          COALESCE(NULLIF(:observed_at, '')::timestamptz, NOW()),
                          :observer,
                          CASE
@@ -293,6 +435,7 @@ async def bulk_ingest_observations(
                 """),
                 {
                     "id": obs_id,
+                    "taxon_id": taxon_id or "",
                     "source": obs.source,
                     "source_id": obs.source_id,
                     "observed_at": obs.observed_at,

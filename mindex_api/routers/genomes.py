@@ -11,14 +11,25 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..dependencies import get_db_session, require_api_key
+from ..dependencies import get_db_session
 
-router = APIRouter(tags=["Genomes"], dependencies=[Depends(require_api_key)])
+router = APIRouter(tags=["Genomes"])
 
 
-async def _table_exists(db: AsyncSession) -> bool:
-    r = await db.execute(text("SELECT to_regclass('bio.genome')"))
-    return r.scalar_one_or_none() is not None
+async def _genome_table_ready(db: AsyncSession) -> bool:
+    try:
+        r = await db.execute(
+            text(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = 'bio' AND table_name = 'genome'"
+                ")"
+            )
+        )
+        return bool(r.scalar())
+    except Exception:
+        await db.rollback()
+        return False
 
 
 @router.get("/genomes")
@@ -36,11 +47,11 @@ async def get_genomes(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
-    if not await _table_exists(session):
+    if not await _genome_table_ready(session):
         return {
             "genomes": [],
             "pagination": {"limit": limit, "offset": offset, "total": 0},
-            "message": "bio.genome not available in this environment",
+            "message": "bio.genome table missing; run genetics/fungidb ETL",
         }
 
     where_parts: List[str] = ["TRUE"]
@@ -56,11 +67,19 @@ async def get_genomes(
         params["kingdom"] = kingdom.strip()
 
     wh = " AND ".join(where_parts)
-    count_sql = text(
-        f"SELECT COUNT(*) FROM bio.genome g "
-        f"JOIN core.taxon t ON t.id = g.taxon_id WHERE {wh}"
-    )
-    total = (await session.execute(count_sql, params)).scalar_one()
+    try:
+        count_sql = text(
+            f"SELECT COUNT(*) FROM bio.genome g "
+            f"JOIN core.taxon t ON t.id = g.taxon_id WHERE {wh}"
+        )
+        total = int((await session.execute(count_sql, params)).scalar() or 0)
+    except Exception:
+        await session.rollback()
+        return {
+            "genomes": [],
+            "pagination": {"limit": limit, "offset": offset, "total": 0},
+            "message": "bio.genome query unavailable",
+        }
 
     data_sql = text(
         f"""
@@ -83,7 +102,15 @@ async def get_genomes(
         LIMIT :limit OFFSET :offset
         """
     )
-    res = await session.execute(data_sql, params)
+    try:
+        res = await session.execute(data_sql, params)
+    except Exception:
+        await session.rollback()
+        return {
+            "genomes": [],
+            "pagination": {"limit": limit, "offset": offset, "total": 0},
+            "message": "bio.genome query unavailable",
+        }
     rows: List[dict[str, Any]] = []
     for row in res.mappings().all():
         r = dict(row)

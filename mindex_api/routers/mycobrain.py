@@ -64,6 +64,9 @@ from ..schemas.mycobrain import (
     TelemetryIngestRequest,
     TelemetryIngestResponse,
     TelemetryIntervalRequest,
+    BoardSensorUpsertRequest,
+    SensorDatasetBindRequest,
+    SensorInstanceUpsert,
 )
 
 # ============================================================================
@@ -82,6 +85,7 @@ telemetry_router = APIRouter(prefix="/telemetry", tags=["mycobrain-telemetry"])
 commands_router = APIRouter(prefix="/commands", tags=["mycobrain-commands"])
 automation_router = APIRouter(prefix="/automation", tags=["mycobrain-automation"])
 mycorrhizae_router = APIRouter(prefix="/mycorrhizae", tags=["mycorrhizae-protocol"])
+sensors_router = APIRouter(prefix="/sensors", tags=["mycobrain-sensors"])
 
 
 # ============================================================================
@@ -406,6 +410,229 @@ async def get_latest_readings(
 
 
 # ============================================================================
+# SENSOR IDENTITY (board nodes + sensor instances + NLM dataset bindings)
+# ============================================================================
+
+
+async def _upsert_board_node(db: AsyncSession, body: BoardSensorUpsertRequest) -> None:
+    await db.execute(
+        text(
+            """
+            INSERT INTO mycobrain.board_node (
+                board_id, portal_device_id, serial_number, firmware_version, board_role, last_seen_at
+            ) VALUES (
+                :board_id, :portal_device_id, :serial_number, :firmware_version, :board_role, now()
+            )
+            ON CONFLICT (board_id) DO UPDATE SET
+                portal_device_id = EXCLUDED.portal_device_id,
+                serial_number = COALESCE(EXCLUDED.serial_number, mycobrain.board_node.serial_number),
+                firmware_version = COALESCE(EXCLUDED.firmware_version, mycobrain.board_node.firmware_version),
+                board_role = COALESCE(EXCLUDED.board_role, mycobrain.board_node.board_role),
+                last_seen_at = now()
+            """
+        ),
+        {
+            "board_id": body.board_id,
+            "portal_device_id": body.portal_device_id,
+            "serial_number": body.serial_number or body.board_id.replace("mycobrain-", "", 1),
+            "firmware_version": body.firmware_version,
+            "board_role": body.device_role,
+        },
+    )
+
+
+@sensors_router.post("/upsert")
+async def upsert_board_sensors(
+    body: BoardSensorUpsertRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Upsert board node and sensor instances (called from MAS heartbeats)."""
+    await _upsert_board_node(db, body)
+    upserted = 0
+    for inst in body.sensor_instances:
+        await db.execute(
+            text(
+                """
+                INSERT INTO mycobrain.sensor_instance (
+                    sensor_id, board_id, portal_device_id, sensor_slot, peripheral_uid,
+                    sensor_type, i2c_address, chip_id, bus, status, metadata, last_seen_at
+                ) VALUES (
+                    :sensor_id, :board_id, :portal_device_id, :sensor_slot, :peripheral_uid,
+                    :sensor_type, :i2c_address, :chip_id, :bus, :status, CAST(:metadata AS jsonb), now()
+                )
+                ON CONFLICT (sensor_id) DO UPDATE SET
+                    portal_device_id = EXCLUDED.portal_device_id,
+                    sensor_slot = EXCLUDED.sensor_slot,
+                    peripheral_uid = EXCLUDED.peripheral_uid,
+                    sensor_type = EXCLUDED.sensor_type,
+                    i2c_address = EXCLUDED.i2c_address,
+                    chip_id = COALESCE(EXCLUDED.chip_id, mycobrain.sensor_instance.chip_id),
+                    bus = EXCLUDED.bus,
+                    status = EXCLUDED.status,
+                    metadata = EXCLUDED.metadata,
+                    last_seen_at = now()
+                """
+            ),
+            {
+                "sensor_id": inst.sensor_id,
+                "board_id": inst.board_id,
+                "portal_device_id": inst.portal_device_id or body.portal_device_id,
+                "sensor_slot": inst.sensor_slot,
+                "peripheral_uid": inst.peripheral_uid,
+                "sensor_type": inst.sensor_type,
+                "i2c_address": inst.i2c_address,
+                "chip_id": inst.chip_id,
+                "bus": inst.bus,
+                "status": inst.status,
+                "metadata": json.dumps(inst.metadata or {}),
+            },
+        )
+        upserted += 1
+    await db.commit()
+    return {
+        "success": True,
+        "board_id": body.board_id,
+        "sensor_instances_upserted": upserted,
+    }
+
+
+@sensors_router.get("")
+async def list_sensor_instances(
+    board_id: Optional[str] = Query(None),
+    portal_device_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    stmt = text(
+        """
+        SELECT * FROM mycobrain.sensor_instance
+        WHERE (:board_id IS NULL OR board_id = :board_id)
+          AND (:portal_device_id IS NULL OR portal_device_id = :portal_device_id)
+        ORDER BY board_id, sensor_slot
+        """
+    )
+    rows = (await db.execute(
+        stmt,
+        {"board_id": board_id, "portal_device_id": portal_device_id},
+    )).mappings().all()
+    return {"sensors": [dict(r) for r in rows], "count": len(rows)}
+
+
+@sensors_router.post("/datasets/bind")
+async def bind_sensor_dataset(
+    body: SensorDatasetBindRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Bind sensor_id -> dataset_id for NLM training provenance."""
+    exists = await db.execute(
+        text("SELECT 1 FROM mycobrain.sensor_instance WHERE sensor_id = :sensor_id"),
+        {"sensor_id": body.sensor_id},
+    )
+    if not exists.first():
+        raise HTTPException(status_code=404, detail=f"Unknown sensor_id: {body.sensor_id}")
+    await db.execute(
+        text(
+            """
+            INSERT INTO nlm.sensor_dataset_binding (
+                sensor_id, dataset_id, dataset_name, purpose, metadata
+            ) VALUES (
+                :sensor_id, :dataset_id, :dataset_name, :purpose, CAST(:metadata AS jsonb)
+            )
+            ON CONFLICT (sensor_id, dataset_id) DO UPDATE SET
+                dataset_name = EXCLUDED.dataset_name,
+                purpose = EXCLUDED.purpose,
+                metadata = EXCLUDED.metadata
+            """
+        ),
+        {
+            "sensor_id": body.sensor_id,
+            "dataset_id": body.dataset_id,
+            "dataset_name": body.dataset_name,
+            "purpose": body.purpose,
+            "metadata": json.dumps(body.metadata or {}),
+        },
+    )
+    await db.commit()
+    return {"success": True, "sensor_id": body.sensor_id, "dataset_id": body.dataset_id}
+
+
+@sensors_router.get("/datasets/{dataset_id}/telemetry")
+async def list_dataset_telemetry(
+    dataset_id: str,
+    limit: int = Query(500, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Fetch BME688 readings for all sensors bound to an NLM dataset."""
+    stmt = text(
+        """
+        SELECT r.*, s.sensor_id, s.board_id, s.sensor_slot, d.dataset_id
+        FROM nlm.sensor_dataset_binding d
+        JOIN mycobrain.sensor_instance s ON s.sensor_id = d.sensor_id
+        JOIN mycobrain.bme688_reading r ON r.sensor_id = s.sensor_id
+        WHERE d.dataset_id = :dataset_id
+        ORDER BY r.recorded_at DESC
+        LIMIT :limit
+        """
+    )
+    rows = (await db.execute(stmt, {"dataset_id": dataset_id, "limit": limit})).mappings().all()
+    return {"dataset_id": dataset_id, "readings": [dict(r) for r in rows], "count": len(rows)}
+
+
+async def _insert_bme688_reading(
+    db: AsyncSession,
+    device_id: UUID,
+    telemetry_device_id: Optional[UUID],
+    bme: Any,
+    recorded_at: datetime,
+    device_timestamp_ms: Optional[int],
+) -> None:
+    bme_stmt = text(
+        """
+        INSERT INTO mycobrain.bme688_reading (
+            device_id, sensor_id, chip_id, i2c_address,
+            temperature_c, humidity_percent, pressure_hpa,
+            gas_resistance_ohms, iaq_index, altitude_m, dew_point_c,
+            recorded_at, device_timestamp_ms
+        ) VALUES (
+            :device_id, :sensor_id, :chip_id, :i2c_address,
+            :temperature_c, :humidity_percent, :pressure_hpa,
+            :gas_resistance_ohms, :iaq_index, :altitude_m, :dew_point_c,
+            :recorded_at, :device_timestamp_ms
+        )
+        """
+    )
+    await db.execute(
+        bme_stmt,
+        {
+            "device_id": str(device_id),
+            "sensor_id": getattr(bme, "sensor_id", None),
+            "chip_id": getattr(bme, "chip_id", None),
+            "i2c_address": getattr(bme, "i2c_address", None),
+            "temperature_c": getattr(bme, "temperature_c", None),
+            "humidity_percent": getattr(bme, "humidity_percent", None),
+            "pressure_hpa": getattr(bme, "pressure_hpa", None),
+            "gas_resistance_ohms": getattr(bme, "gas_resistance_ohms", None),
+            "iaq_index": getattr(bme, "iaq_index", None),
+            "altitude_m": getattr(bme, "altitude_m", None),
+            "dew_point_c": getattr(bme, "dew_point_c", None),
+            "recorded_at": recorded_at,
+            "device_timestamp_ms": device_timestamp_ms,
+        },
+    )
+    if telemetry_device_id:
+        await _upsert_telemetry_samples(
+            db,
+            telemetry_device_id,
+            recorded_at,
+            {
+                "temperature": getattr(bme, "temperature_c", None),
+                "humidity": getattr(bme, "humidity_percent", None),
+                "pressure": getattr(bme, "pressure_hpa", None),
+                "iaq": getattr(bme, "iaq_index", None),
+            },
+        )
+
+
+# ============================================================================
 # TELEMETRY INGESTION
 # ============================================================================
 
@@ -433,51 +660,22 @@ async def ingest_telemetry(
     payload = request.payload
     recorded_at = request.recorded_at or datetime.now(timezone.utc)
     
-    # Process BME688 readings
-    if payload.bme688:
-        bme = payload.bme688
-        bme_stmt = text("""
-            INSERT INTO mycobrain.bme688_reading (
-                device_id, chip_id, i2c_address,
-                temperature_c, humidity_percent, pressure_hpa,
-                gas_resistance_ohms, iaq_index, altitude_m, dew_point_c,
-                recorded_at, device_timestamp_ms
-            ) VALUES (
-                :device_id, :chip_id, :i2c_address,
-                :temperature_c, :humidity_percent, :pressure_hpa,
-                :gas_resistance_ohms, :iaq_index, :altitude_m, :dew_point_c,
-                :recorded_at, :device_timestamp_ms
-            )
-        """)
-        
-        await db.execute(bme_stmt, {
-            "device_id": str(device_id),
-            "chip_id": bme.chip_id,
-            "i2c_address": bme.i2c_address,
-            "temperature_c": bme.temperature_c,
-            "humidity_percent": bme.humidity_percent,
-            "pressure_hpa": bme.pressure_hpa,
-            "gas_resistance_ohms": bme.gas_resistance_ohms,
-            "iaq_index": bme.iaq_index,
-            "altitude_m": bme.altitude_m,
-            "dew_point_c": bme.dew_point_c,
-            "recorded_at": recorded_at,
-            "device_timestamp_ms": request.device_timestamp_ms,
-        })
+    bme_readings = []
+    if payload.bme688_readings:
+        bme_readings.extend(payload.bme688_readings)
+    if payload.bme688_a:
+        bme_readings.append(payload.bme688_a)
+    if payload.bme688_b:
+        bme_readings.append(payload.bme688_b)
+    if payload.bme688 and not bme_readings:
+        bme_readings.append(payload.bme688)
+
+    for bme in bme_readings:
+        await _insert_bme688_reading(
+            db, device_id, telemetry_device_id, bme, recorded_at, request.device_timestamp_ms
+        )
         samples_created += 1
         streams_updated.append("bme688")
-        
-        # Also insert into telemetry.sample for unified view
-        if telemetry_device_id:
-            await _upsert_telemetry_samples(
-                db, telemetry_device_id, recorded_at,
-                {
-                    "temperature": bme.temperature_c,
-                    "humidity": bme.humidity_percent,
-                    "pressure": bme.pressure_hpa,
-                    "iaq": bme.iaq_index,
-                }
-            )
     
     # Process analog readings
     analog_readings = payload.analog or []
@@ -1162,5 +1360,6 @@ mycobrain_router.include_router(telemetry_router)
 mycobrain_router.include_router(commands_router)
 mycobrain_router.include_router(automation_router)
 mycobrain_router.include_router(mycorrhizae_router)
+mycobrain_router.include_router(sensors_router)
 
 

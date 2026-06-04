@@ -22,7 +22,21 @@ async def _safe_count(db: AsyncSession, sql: str) -> int | None:
     try:
         return (await db.execute(text(sql))).scalar()
     except Exception:
+        await db.rollback()
         return None
+
+
+async def _safe_anchor_query(
+    db: AsyncSession,
+    sql: str,
+    params: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    try:
+        r = await db.execute(text(sql), params or {})
+        return [dict(x) for x in r.mappings().all()]
+    except Exception:
+        await db.rollback()
+        return []
 
 
 @router.get("/summary")
@@ -50,36 +64,33 @@ async def recent_anchors(
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db_session),
 ):
-    r = await db.execute(
-        text(
-            """
+    items = await _safe_anchor_query(
+        db,
+        """
             SELECT id::text, entity_type, entity_id::text, encode(content_hash, 'hex') AS content_hash_hex,
                    tier, solana_signature, ordinal_inscription_id, platform_one_ref, created_at
             FROM ledger.anchor
             ORDER BY created_at DESC
             LIMIT :lim
-            """
-        ),
+            """,
         {"lim": limit},
     )
-    return {"items": [dict(x) for x in r.mappings().all()]}
+    return {"items": items}
 
 
 @router.get("/entity/{entity_type}/{entity_id}")
 async def integrity_for_entity(entity_type: str, entity_id: str, db: AsyncSession = Depends(get_db_session)):
-    r = await db.execute(
-        text(
-            """
+    rows = await _safe_anchor_query(
+        db,
+        """
             SELECT id::text, entity_type, entity_id::text, encode(content_hash, 'hex') AS content_hash_hex,
                    tier, solana_signature, ordinal_inscription_id, platform_one_ref, created_at, metadata
             FROM ledger.anchor
             WHERE entity_type = :et AND entity_id = :eid::uuid
             ORDER BY created_at DESC
-            """
-        ),
+            """,
         {"et": entity_type, "eid": entity_id},
     )
-    rows = [dict(x) for x in r.mappings().all()]
     ch = None
     if entity_type == "taxon":
         t = (
@@ -142,18 +153,17 @@ def _metadata_dict(raw: Any) -> dict[str, Any]:
 @router.get("/record/{record_id}")
 async def integrity_record_for_chain(record_id: str, db: AsyncSession = Depends(get_db_session)):
     """Map ledger.anchor row to website hash-chain MINDEXRecord (or embedded mindex_record in metadata)."""
-    r = await db.execute(
-        text(
-            """
+    rows = await _safe_anchor_query(
+        db,
+        """
             SELECT id::text, entity_type, entity_id::text, encode(content_hash, 'hex') AS ch_hex,
                    metadata, created_at
             FROM ledger.anchor
             WHERE id = CAST(:id AS uuid)
-            """
-        ),
+            """,
         {"id": record_id},
     )
-    row = r.mappings().first()
+    row = rows[0] if rows else None
     if not row:
         raise HTTPException(status_code=404, detail="anchor_not_found")
     meta = _metadata_dict(row.get("metadata"))
@@ -201,17 +211,16 @@ async def integrity_record_for_chain(record_id: str, db: AsyncSession = Depends(
 @router.get("/proof/{record_id}")
 async def integrity_proof(record_id: str, db: AsyncSession = Depends(get_db_session)):
     """Merkle placeholder: single-leaf proof from anchor content_hash (full batch roots use DAG ingest)."""
-    r = await db.execute(
-        text(
-            """
+    rows = await _safe_anchor_query(
+        db,
+        """
             SELECT encode(content_hash, 'hex') AS leaf_hex, created_at
             FROM ledger.anchor
             WHERE id = CAST(:id AS uuid)
-            """
-        ),
+            """,
         {"id": record_id},
     )
-    row = r.mappings().first()
+    row = rows[0] if rows else None
     if not row:
         raise HTTPException(status_code=404, detail="anchor_not_found")
     leaf_hex = str(row["leaf_hex"] or "")
@@ -228,20 +237,63 @@ async def integrity_proof(record_id: str, db: AsyncSession = Depends(get_db_sess
     }
 
 
+@router.get("/records/recent")
+async def records_recent_alias(
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Website hash-chain visualizer expects /integrity/records/recent."""
+    return await recent_anchors(limit=limit, db=db)
+
+
+@router.get("/records/{record_id}")
+async def records_record_alias(record_id: str, db: AsyncSession = Depends(get_db_session)):
+    """Alias for /integrity/record/{record_id}."""
+    return await integrity_record_for_chain(record_id=record_id, db=db)
+
+
+@router.get("/days/{date}/leaves")
+async def integrity_day_leaves(
+    date: str,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Merkle day leaves from ledger.anchor content hashes (YYYY-MM-DD)."""
+    items = await _safe_anchor_query(
+        db,
+        """
+            SELECT encode(content_hash, 'hex') AS leaf_hex, created_at
+            FROM ledger.anchor
+            WHERE created_at::date = CAST(:d AS date)
+            ORDER BY created_at ASC
+            """,
+        {"d": date},
+    )
+    leaves = [f"sha256:{r['leaf_hex']}" for r in items if r.get("leaf_hex")]
+    root = leaves[0] if len(leaves) == 1 else None
+    if len(leaves) > 1:
+        import hashlib
+
+        acc = leaves[0]
+        for nxt in leaves[1:]:
+            h = hashlib.sha256(f"{acc}{nxt}".encode()).hexdigest()
+            acc = f"sha256:{h}"
+        root = acc
+    return {"date": date, "leaves": leaves, "root": root, "count": len(leaves)}
+
+
 @verify_router.get("/{record_id}")
 async def verify_integrity_record(record_id: str, db: AsyncSession = Depends(get_db_session)):
     """Lightweight verification flags from ledger.anchor (layer-2 refs + optional ed25519 metadata)."""
-    r = await db.execute(
-        text(
-            """
+    rows = await _safe_anchor_query(
+        db,
+        """
             SELECT solana_signature, ordinal_inscription_id, platform_one_ref, metadata
             FROM ledger.anchor
             WHERE id = CAST(:id AS uuid)
-            """
-        ),
+            """,
         {"id": record_id},
     )
-    row = r.mappings().first()
+    row = rows[0] if rows else None
     if not row:
         raise HTTPException(status_code=404, detail="anchor_not_found")
     has_layer = bool(row.get("solana_signature") or row.get("ordinal_inscription_id") or row.get("platform_one_ref"))

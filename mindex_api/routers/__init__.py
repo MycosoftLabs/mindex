@@ -38,6 +38,9 @@ from .devices_inventory import router as devices_inventory_router
 from .fungal_overlays import router as fungal_overlays_router
 from .civic_unified import router as civic_unified_router
 from .integrity import router as integrity_router, verify_router as integrity_verify_router
+from .handoff_jun03 import router as handoff_jun03_router
+from .library import router as library_router
+from .sine_acoustic import router as sine_acoustic_router
 from .live_state import router as live_state_router
 
 try:
@@ -115,6 +118,8 @@ __all__ = [
     "civic_unified_router",
     "integrity_router",
     "integrity_verify_router",
+    "library_router",
+    "sine_acoustic_router",
     "maritime_router",
     "taco_router",
     "fusarium_analytics_router",

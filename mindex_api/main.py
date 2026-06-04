@@ -57,6 +57,9 @@ from .routers import (
     civic_unified_router,
     integrity_router,
     integrity_verify_router,
+    handoff_jun03_router,
+    library_router,
+    sine_acoustic_router,
     emissions_router,
     maritime_router,
     taco_router,
@@ -269,6 +272,9 @@ def create_app() -> FastAPI:
     app.include_router(civic_unified_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(integrity_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(integrity_verify_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(handoff_jun03_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(library_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(sine_acoustic_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(emissions_router, prefix=prefix, dependencies=internal_deps)
     if maritime_router is not None:
         app.include_router(maritime_router, prefix=prefix, dependencies=internal_deps)

@@ -33,19 +33,25 @@ class ETLScheduler:
         self.last_run: Dict[str, datetime] = {}
 
         # Schedule configuration (job_name -> interval_hours)
+        # Policy (Jun 2026): no 168h; active jobs <=24h unless publications/civic at 48h.
         self.schedule = {
-            # Core taxonomy sources
-            "inat_taxa": 24,           # Daily
-            "mycobank": 168,           # Weekly
-            "fungidb": 168,            # Weekly
-            "traits": 168,             # Weekly
-            "inat_obs": 6,             # Every 6 hours
-            "gbif": 24,                # Daily
-            # Additional data sources (from remediation plan)
-            "hq_media": 12,            # Every 12 hours - high quality images
-            "publications": 48,        # Every 2 days - research publications
-            "chemspider": 168,         # Weekly - chemical compounds
-            "genetics": 168,           # Weekly - genetic sequences from GenBank
+            "inat_taxa": 24,
+            "mycobank": 24,
+            "theyeasts": 24,
+            "fusarium": 24,
+            "mushroom_world": 24,
+            "fungidb": 24,
+            "traits": 24,
+            "inat_obs": 1 / 12,  # ~5 minutes
+            "gbif": 24,
+            "hq_media": 12,
+            "publications": 48,
+            "chemspider": 24,
+            "pubchem": 24,
+            "genetics": 24,
+            "taxon_photos": 24,
+            "ancestry": 1,  # hourly profile enrichment
+            "civic_viewport": 48,
         }
 
     def should_run(self, job_name: str) -> bool:
@@ -70,7 +76,21 @@ class ETLScheduler:
 
             logger.info(f"Running scheduled job: {job_name}")
             try:
-                count = job.run(max_pages=max_pages)
+                job_kwargs: Dict[str, object] = {"max_pages": max_pages}
+                if job_name == "inat_obs":
+                    # Live map data must be hydrated by MINDEX, not by the
+                    # website request path. Keep a rolling overlap so restarts
+                    # do not leave gaps, while upsert dedupe keeps it cheap.
+                    job_kwargs.update(
+                        {
+                            "domain_mode": "all",
+                            "per_page": 50,
+                            "lookback_hours": 24,
+                            "backfill_records": 1000,
+                        }
+                    )
+
+                count = job.run(**job_kwargs)
                 results[job_name] = count
                 self.last_run[job_name] = datetime.now()
                 logger.info(f"Job {job_name} completed: {count} records")

@@ -195,6 +195,9 @@ class BME688Reading(BaseModel):
     """BME688 environmental sensor reading."""
     chip_id: Optional[str] = None
     i2c_address: Optional[int] = None
+    sensor_id: Optional[str] = None
+    sensor_slot: Optional[str] = None
+    board_id: Optional[str] = None
     temperature_c: Optional[float] = None
     humidity_percent: Optional[float] = None
     pressure_hpa: Optional[float] = None
@@ -217,6 +220,9 @@ class TelemetryPayload(BaseModel):
     """Telemetry payload from a MycoBrain device."""
     # Environmental sensors
     bme688: Optional[BME688Reading] = None
+    bme688_a: Optional[BME688Reading] = None
+    bme688_b: Optional[BME688Reading] = None
+    bme688_readings: Optional[List[BME688Reading]] = None
     
     # Analog inputs
     analog: Optional[List[AnalogReading]] = None
@@ -550,4 +556,34 @@ class LatestReadingsResponse(BaseModel):
     usb_power_connected: bool = False
     battery_voltage: Optional[float] = None
 
+
+class SensorInstanceUpsert(BaseModel):
+    sensor_id: str
+    board_id: str
+    portal_device_id: Optional[str] = None
+    sensor_slot: str
+    peripheral_uid: str
+    sensor_type: str = "bme688"
+    i2c_address: Optional[int] = None
+    chip_id: Optional[str] = None
+    bus: str = "i2c0"
+    status: str = "unknown"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class BoardSensorUpsertRequest(BaseModel):
+    board_id: str
+    portal_device_id: Optional[str] = None
+    serial_number: Optional[str] = None
+    device_role: Optional[str] = None
+    firmware_version: Optional[str] = None
+    sensor_instances: List[SensorInstanceUpsert] = Field(default_factory=list)
+
+
+class SensorDatasetBindRequest(BaseModel):
+    sensor_id: str
+    dataset_id: str
+    dataset_name: Optional[str] = None
+    purpose: str = "nlm_training"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 

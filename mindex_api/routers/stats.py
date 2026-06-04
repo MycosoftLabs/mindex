@@ -17,6 +17,23 @@ from typing import Dict, Optional
 router = APIRouter(prefix="/stats", tags=["statistics"])
 
 
+async def _scalar_count(db: AsyncSession, sql: str) -> int:
+    try:
+        return int((await db.execute(text(sql))).scalar() or 0)
+    except Exception:
+        await db.rollback()
+        return 0
+
+
+async def _group_counts(db: AsyncSession, sql: str) -> Dict[str, int]:
+    try:
+        rows = await db.execute(text(sql))
+        return {str(r[0]): int(r[1]) for r in rows.fetchall()}
+    except Exception:
+        await db.rollback()
+        return {}
+
+
 class MINDEXStatsResponse(BaseModel):
     """Database statistics and ETL status."""
     total_taxa: int
@@ -45,97 +62,82 @@ async def get_statistics(db: AsyncSession = Depends(get_db)):
     - Observation quality metrics
     - ETL sync status
     """
-    stats = {}
-    
-    # Total counts
-    result = await db.execute(text("SELECT count(*) FROM core.taxon"))
-    stats["total_taxa"] = result.scalar() or 0
-    
-    result = await db.execute(text("SELECT count(*) FROM obs.observation"))
-    stats["total_observations"] = result.scalar() or 0
-    
-    result = await db.execute(text("SELECT count(*) FROM core.taxon_external_id"))
-    stats["total_external_ids"] = result.scalar() or 0
-    
-    # Taxa by source
-    result = await db.execute(text("""
-        SELECT source, count(*) as count 
-        FROM core.taxon 
-        GROUP BY source 
+    stats: dict = {}
+
+    stats["total_taxa"] = await _scalar_count(db, "SELECT count(*) FROM core.taxon")
+    stats["total_observations"] = await _scalar_count(db, "SELECT count(*) FROM obs.observation")
+    stats["total_external_ids"] = await _scalar_count(
+        db, "SELECT count(*) FROM core.taxon_external_id"
+    )
+
+    stats["taxa_by_source"] = await _group_counts(
+        db,
+        """
+        SELECT source, count(*) AS count
+        FROM core.taxon
+        GROUP BY source
         ORDER BY count DESC
-    """))
-    stats["taxa_by_source"] = {row[0]: row[1] for row in result.fetchall()}
-    
-    # Observations by source
-    result = await db.execute(text("""
-        SELECT source, count(*) as count 
-        FROM obs.observation 
-        GROUP BY source 
+        """,
+    )
+    stats["observations_by_source"] = await _group_counts(
+        db,
+        """
+        SELECT source, count(*) AS count
+        FROM obs.observation
+        GROUP BY source
         ORDER BY count DESC
-    """))
-    stats["observations_by_source"] = {row[0]: row[1] for row in result.fetchall()}
-    
-    # Observations with location (support both PostGIS location and lat/lng columns)
+        """,
+    )
+
+    loc = await _scalar_count(
+        db, "SELECT count(*) FROM obs.observation WHERE location IS NOT NULL"
+    )
+    if loc == 0:
+        loc = await _scalar_count(
+            db,
+            "SELECT count(*) FROM obs.observation "
+            "WHERE latitude IS NOT NULL AND longitude IS NOT NULL",
+        )
+    stats["observations_with_location"] = loc
+
+    stats["observations_with_images"] = await _scalar_count(
+        db,
+        """
+        SELECT count(*) FROM obs.observation
+        WHERE media IS NOT NULL AND media::text != '[]'
+        """,
+    )
+    stats["taxa_with_observations"] = await _scalar_count(
+        db, "SELECT count(DISTINCT taxon_id) FROM obs.observation"
+    )
+
     try:
-        result = await db.execute(text("""
-            SELECT count(*) FROM obs.observation WHERE location IS NOT NULL
-        """))
-        stats["observations_with_location"] = result.scalar() or 0
+        result = await db.execute(
+            text(
+                """
+                SELECT min(observed_at), max(observed_at)
+                FROM obs.observation
+                WHERE observed_at IS NOT NULL
+                """
+            )
+        )
+        row = result.fetchone()
+        if row and row[0]:
+            stats["observation_date_range"] = {
+                "earliest": row[0].isoformat() if row[0] else None,
+                "latest": row[1].isoformat() if row[1] else None,
+            }
+        else:
+            stats["observation_date_range"] = {"earliest": None, "latest": None}
     except Exception:
         await db.rollback()
-        result = await db.execute(text("""
-            SELECT count(*) FROM obs.observation WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-        """))
-        stats["observations_with_location"] = result.scalar() or 0
-    
-    # Observations with images
-    result = await db.execute(text("""
-        SELECT count(*) FROM obs.observation 
-        WHERE media IS NOT NULL AND media::text != '[]'
-    """))
-    stats["observations_with_images"] = result.scalar() or 0
-    
-    # Unique taxa with observations
-    result = await db.execute(text("""
-        SELECT count(DISTINCT taxon_id) FROM obs.observation
-    """))
-    stats["taxa_with_observations"] = result.scalar() or 0
-    
-    # Date range
-    result = await db.execute(text("""
-        SELECT min(observed_at), max(observed_at)
-        FROM obs.observation
-        WHERE observed_at IS NOT NULL
-    """))
-    row = result.fetchone()
-    if row and row[0]:
-        stats["observation_date_range"] = {
-            "earliest": row[0].isoformat() if row[0] else None,
-            "latest": row[1].isoformat() if row[1] else None,
-        }
-    else:
-        stats["observation_date_range"] = {
-            "earliest": None,
-            "latest": None,
-        }
-    
-    # Genome records (bio schema may not exist on all deployments)
-    try:
-        result = await db.execute(text("SELECT count(*) FROM bio.genome"))
-        stats["genome_records"] = result.scalar() or 0
-    except Exception:
-        stats["genome_records"] = 0
+        stats["observation_date_range"] = {"earliest": None, "latest": None}
 
-    # Trait records (bio schema may not exist on all deployments)
-    try:
-        result = await db.execute(text("SELECT count(*) FROM bio.taxon_trait"))
-        stats["trait_records"] = result.scalar() or 0
-    except Exception:
-        stats["trait_records"] = 0
-    
-    # Synonym records
-    result = await db.execute(text("SELECT count(*) FROM core.taxon_synonym"))
-    stats["synonym_records"] = result.scalar() or 0
+    stats["genome_records"] = await _scalar_count(db, "SELECT count(*) FROM bio.genome")
+    stats["trait_records"] = await _scalar_count(db, "SELECT count(*) FROM bio.taxon_trait")
+    stats["synonym_records"] = await _scalar_count(
+        db, "SELECT count(*) FROM core.taxon_synonym"
+    )
     
     # ETL Status - Check if sync container is running
     import subprocess

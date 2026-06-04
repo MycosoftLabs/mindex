@@ -93,12 +93,24 @@ async def list_compounds(
         params["filter_kingdom"] = kingdom.strip()
     
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-    
+
+    try:
+        reg = await session.execute(text("SELECT to_regclass('bio.compound')"))
+        if reg.scalar_one_or_none() is None:
+            return CompoundListResponse(data=[], limit=limit, offset=skip, total=0)
+    except Exception:
+        await session.rollback()
+        return CompoundListResponse(data=[], limit=limit, offset=skip, total=0)
+
     # Get total count
-    count_sql = f"SELECT COUNT(*) FROM bio.compound c {where_sql}"
-    count_result = await session.execute(text(count_sql), params)
-    total_count = count_result.scalar() or 0
-    
+    try:
+        count_sql = f"SELECT COUNT(*) FROM bio.compound c {where_sql}"
+        count_result = await session.execute(text(count_sql), params)
+        total_count = count_result.scalar() or 0
+    except Exception:
+        await session.rollback()
+        return CompoundListResponse(data=[], limit=limit, offset=skip, total=0)
+
     # Get compounds
     query_sql = f"""
         SELECT 
@@ -111,10 +123,14 @@ async def list_compounds(
         ORDER BY c.name
         OFFSET :skip LIMIT :limit
     """
-    
-    result = await session.execute(text(query_sql), params)
-    rows = result.fetchall()
-    
+
+    try:
+        result = await session.execute(text(query_sql), params)
+        rows = result.fetchall()
+    except Exception:
+        await session.rollback()
+        return CompoundListResponse(data=[], limit=limit, offset=skip, total=0)
+
     compounds = []
     for row in rows:
         compounds.append(CompoundResponse(

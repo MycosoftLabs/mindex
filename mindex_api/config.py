@@ -55,6 +55,40 @@ class Settings(BaseSettings):
     max_page_size: int = 1000
     telemetry_latest_limit: int = 100
 
+    @field_validator("solana_rpc_fallback_urls", mode="before")
+    @classmethod
+    def parse_solana_rpc_fallback_urls(cls, v: object) -> list[str]:
+        if v is None:
+            return ["https://api.mainnet-beta.solana.com"]
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        if isinstance(v, str):
+            raw = v.strip()
+            if not raw:
+                return ["https://api.mainnet-beta.solana.com"]
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return [str(x).strip() for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            if "," in raw:
+                return [p.strip() for p in raw.split(",") if p.strip()]
+            return [raw]
+        return ["https://api.mainnet-beta.solana.com"]
+
+    def solana_rpc_candidates(self) -> List[str]:
+        """Primary RPC first, then fallbacks (deduped)."""
+        seen: set[str] = set()
+        out: List[str] = []
+        for raw in [self.solana_rpc_url, *(self.solana_rpc_fallback_urls or [])]:
+            u = str(raw).strip() if raw else ""
+            if u.startswith("http") and u not in seen:
+                seen.add(u)
+                out.append(u)
+        return out
+
     @field_validator("api_keys", mode="before")
     @classmethod
     def parse_api_keys(cls, v):
@@ -82,6 +116,24 @@ class Settings(BaseSettings):
             if "," in raw:
                 return [p.strip() for p in raw.split(",") if p.strip()]
             return [raw]
+        return v
+
+    @field_validator(
+        "hypergraph_endpoint",
+        "bitcoin_ordinal_endpoint",
+        "solana_rpc_url",
+        "ethereum_rpc_url",
+        "bitcoin_rpc_url",
+        "p1_base_url",
+        "mas_api_endpoint",
+        mode="before",
+    )
+    @classmethod
+    def empty_optional_url_as_none(cls, v: object) -> object:
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
         return v
 
     # =========================================================================
@@ -129,7 +181,29 @@ class Settings(BaseSettings):
     # Integrations
     hypergraph_endpoint: Optional[AnyHttpUrl] = None
     bitcoin_ordinal_endpoint: Optional[AnyHttpUrl] = None
-    solana_rpc_url: Optional[AnyHttpUrl] = None
+    solana_rpc_url: Optional[AnyHttpUrl] = Field(
+        default=None,
+        validation_alias=AliasChoices("SOLANA_RPC_URL", "QUICKNODE_SOLANA_RPC_URL"),
+        description="Solana JSON-RPC (e.g. QuickNode mainnet). Server-side only.",
+    )
+    solana_rpc_fallback_urls: Union[List[str], str] = Field(
+        default_factory=lambda: ["https://api.mainnet-beta.solana.com"],
+        validation_alias=AliasChoices(
+            "SOLANA_RPC_FALLBACK_URLS",
+            "SOLANA_RPC_FALLBACK",
+        ),
+        description="Comma-separated or JSON list of fallback Solana RPC URLs when primary is down.",
+    )
+    ethereum_rpc_url: Optional[AnyHttpUrl] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ETHEREUM_RPC_URL",
+            "ETH_RPC_URL",
+            "INFURA_RPC_URL",
+            "INFURA_MAINNET_URL",
+        ),
+        description="Ethereum JSON-RPC (e.g. Infura). Internal/backend only — not exposed on public site.",
+    )
 
     # -------------------------------------------------------------------------
     # MINDEX App Overhaul (May 03, 2026) — chain + federation (env-only secrets)
@@ -153,6 +227,19 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("BITCOIN_RPC_URL"),
         description="Optional Bitcoin Core RPC base URL.",
+    )
+    bitcoin_rpc_user: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("BITCOIN_RPC_USER"),
+    )
+    bitcoin_rpc_password: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("BITCOIN_RPC_PASSWORD"),
+    )
+    myca_solana_mint: Optional[str] = Field(
+        default="EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3",
+        validation_alias=AliasChoices("MYCA_SOLANA_MINT", "MYCO_TOKEN_MINT", "MYCODAO_MYCA_MINT"),
+        description="MYCA SPL mint on Solana (MycoDAO token); required for Solana ledger binds.",
     )
     p1_api_key: Optional[str] = Field(
         default=None,
@@ -218,7 +305,11 @@ class Settings(BaseSettings):
     # Internal service auth — pre-shared token list (simpler alternative)
     internal_tokens: Union[List[str], str] = Field(
         default_factory=list,
-        validation_alias=AliasChoices("MINDEX_INTERNAL_TOKENS", "MINDEX_INTERNAL_TOKEN"),
+        validation_alias=AliasChoices(
+            "MINDEX_INTERNAL_TOKENS",
+            "MINDEX_INTERNAL_TOKEN",
+            "MINDEX_INTERNAL_SERVICE_TOKEN",
+        ),
         description="Pre-shared internal service tokens (comma-separated or JSON list).",
     )
 

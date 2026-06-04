@@ -16,6 +16,69 @@ router = APIRouter(
     dependencies=[Depends(require_api_key)],
 )
 
+_TAXON_LIST_COLUMNS = """
+            id,
+            canonical_name,
+            rank,
+            common_name,
+            author,
+            description,
+            source,
+            metadata,
+            kingdom,
+            lineage,
+            lineage_ids,
+            external_ids,
+            created_at,
+            updated_at,
+            obs_count,
+            image_count,
+            video_count,
+            audio_count,
+            genome_count,
+            compound_link_count,
+            interaction_count,
+            publication_count,
+            characteristic_count
+"""
+
+
+def _normalize_taxon_row(row: dict[str, Any]) -> dict[str, Any]:
+    d = dict(row)
+    if d.get("metadata") is None:
+        d["metadata"] = {}
+    if d.get("external_ids") is None:
+        d["external_ids"] = {}
+    if d.get("author") is None and d.get("authority") is not None:
+        d["author"] = d.get("authority")
+    return d
+
+
+async def _list_taxa_query(
+    db: AsyncSession,
+    *,
+    from_clause: str,
+    where_sql: str,
+    params: dict[str, Any],
+    order_expr: str,
+    order_normalized: str,
+) -> tuple[list[dict[str, Any]], int]:
+    stmt = text(
+        f"""
+        SELECT {_TAXON_LIST_COLUMNS}
+        FROM {from_clause}
+        WHERE {where_sql}
+        ORDER BY {order_expr} {order_normalized}, canonical_name ASC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    count_stmt = text(f"SELECT count(*) FROM {from_clause} WHERE {where_sql}")
+    result = await db.execute(stmt, params)
+    count_result = await db.execute(count_stmt, params)
+    total = int(count_result.scalar_one() or 0)
+    rows = [_normalize_taxon_row(dict(row)) for row in result.mappings().all()]
+    return rows, total
+
 
 @router.get("", response_model=TaxonListResponse)
 async def list_taxa(
@@ -104,50 +167,90 @@ async def list_taxa(
             "ELSE 0 END)"
         )
 
-    stmt = text(
-        f"""
-        SELECT
-            id,
-            canonical_name,
-            rank,
-            common_name,
-            author,
-            description,
-            source,
-            metadata,
-            kingdom,
-            lineage,
-            lineage_ids,
-            external_ids,
-            created_at,
-            updated_at,
-            obs_count,
-            image_count,
-            video_count,
-            audio_count,
-            genome_count,
-            compound_link_count,
-            interaction_count,
-            publication_count,
-            characteristic_count
-        FROM bio.taxon_full
-        WHERE {where_sql}
-        ORDER BY {order_expr} {order_normalized}, canonical_name ASC
-        LIMIT :limit OFFSET :offset
-        """
+    fallback_order = (
+        "canonical_name"
+        if order_by_normalized == "canonical_name"
+        else "obs_count"
     )
-    count_stmt = text(
-        f"""
-        SELECT count(*) FROM bio.taxon_full
-        WHERE {where_sql}
-        """
-    )
+    rich_fallback_from = """(
+                SELECT
+                    t.id,
+                    t.canonical_name,
+                    t.rank,
+                    t.common_name,
+                    COALESCE(t.author, t.authority) AS author,
+                    t.description,
+                    t.source,
+                    t.metadata,
+                    t.kingdom,
+                    t.lineage,
+                    t.lineage_ids,
+                    t.external_ids,
+                    t.created_at,
+                    t.updated_at,
+                    (SELECT COUNT(*)::bigint FROM obs.observation o WHERE o.taxon_id = t.id) AS obs_count,
+                    (SELECT COUNT(*)::bigint FROM media.image i WHERE i.taxon_id = t.id) AS image_count,
+                    (SELECT COUNT(*)::bigint FROM media.video v WHERE v.taxon_id = t.id) AS video_count,
+                    (SELECT COUNT(*)::bigint FROM media.audio a WHERE a.taxon_id = t.id) AS audio_count,
+                    (SELECT COUNT(*)::bigint FROM bio.genome g WHERE g.taxon_id = t.id) AS genome_count,
+                    (SELECT COUNT(*)::bigint FROM bio.taxon_compound tc WHERE tc.taxon_id = t.id) AS compound_link_count,
+                    (SELECT COUNT(*)::bigint
+                     FROM bio.taxon_interaction ti
+                     WHERE ti.source_taxon_id = t.id OR ti.target_taxon_id = t.id) AS interaction_count,
+                    (SELECT COUNT(*)::bigint FROM bio.publication_taxon pt WHERE pt.taxon_id = t.id) AS publication_count,
+                    (SELECT COUNT(*)::bigint FROM bio.taxon_characteristic c WHERE c.taxon_id = t.id) AS characteristic_count
+                FROM core.taxon t
+            ) AS taxon_list"""
+    minimal_fallback_from = """(
+                SELECT
+                    t.id,
+                    t.canonical_name,
+                    t.rank,
+                    t.common_name,
+                    COALESCE(t.author, t.authority) AS author,
+                    t.description,
+                    t.source,
+                    t.metadata,
+                    t.kingdom,
+                    t.lineage,
+                    t.lineage_ids,
+                    t.external_ids,
+                    t.created_at,
+                    t.updated_at,
+                    (SELECT COUNT(*)::bigint FROM obs.observation o WHERE o.taxon_id = t.id) AS obs_count,
+                    0::bigint AS image_count,
+                    0::bigint AS video_count,
+                    0::bigint AS audio_count,
+                    0::bigint AS genome_count,
+                    0::bigint AS compound_link_count,
+                    0::bigint AS interaction_count,
+                    0::bigint AS publication_count,
+                    0::bigint AS characteristic_count
+                FROM core.taxon t
+            ) AS taxon_list"""
 
-    result = await db.execute(stmt, params)
-    count_result = await db.execute(count_stmt, params)
-    total = count_result.scalar_one()
+    rows: list[dict[str, Any]] = []
+    total = 0
+    for from_clause in ("bio.taxon_full", rich_fallback_from, minimal_fallback_from):
+        try:
+            rows, total = await _list_taxa_query(
+                db,
+                from_clause=from_clause,
+                where_sql=where_sql,
+                params=params,
+                order_expr=order_expr if from_clause == "bio.taxon_full" else fallback_order,
+                order_normalized=order_normalized,
+            )
+            break
+        except Exception:
+            await db.rollback()
+            continue
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Taxonomy list unavailable (core.taxon query failed).",
+        )
 
-    rows = [dict(row) for row in result.mappings().all()]
     return TaxonListResponse(
         data=rows,
         pagination={

@@ -24,8 +24,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import psycopg2
-import psycopg2.extras
+import psycopg
+from psycopg.types.json import Json
 
 from ..config import settings
 
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 def _get_conn():
     """Get synchronous DB connection for ETL jobs."""
-    return psycopg2.connect(settings.database_url)
+    return psycopg.connect(settings.database_url)
 
 
 def _upsert_batch(conn, table: str, records: List[dict], conflict_col: str = "source_id"):
@@ -120,7 +120,7 @@ def sync_earthquakes(hours: int = 24, min_magnitude: float = 2.5):
             """, {
                 **record,
                 "occurred_at": occurred_at,
-                "properties": psycopg2.extras.Json(record.get("properties", {})),
+                "properties": Json(record.get("properties", {})),
             })
             count += 1
         except Exception as e:
@@ -165,7 +165,7 @@ def sync_wildfires():
                 "containment_pct": record.get("containment_pct"),
                 "brightness": record.get("brightness"),
                 "frp": record.get("frp"),
-                "properties": psycopg2.extras.Json(record.get("properties", {})),
+                "properties": Json(record.get("properties", {})),
             })
             count += 1
         except Exception as e:
@@ -203,7 +203,7 @@ def sync_solar_events():
                 "class": record.get("class"),
                 "peak_time": record.get("peak_time"),
                 "end_time": record.get("end_time"),
-                "properties": psycopg2.extras.Json(record.get("properties", {})),
+                "properties": Json(record.get("properties", {})),
             })
             count += 1
         except Exception as e:
@@ -238,7 +238,7 @@ def sync_air_quality(country: Optional[str] = None):
                     ON CONFLICT DO NOTHING
                 """, {
                     **record,
-                    "properties": psycopg2.extras.Json(record.get("properties", {})),
+                    "properties": Json(record.get("properties", {})),
                 })
                 count += 1
         except Exception as e:
@@ -284,7 +284,7 @@ def sync_satellites(groups: Optional[List[str]] = None):
                     properties = EXCLUDED.properties
             """, {
                 **record,
-                "properties": psycopg2.extras.Json(record.get("properties", {})),
+                "properties": Json(record.get("properties", {})),
             })
             count += 1
         except Exception as e:
@@ -324,7 +324,7 @@ def sync_launches():
                         properties = EXCLUDED.properties
                 """, {
                     **record,
-                    "properties": psycopg2.extras.Json(record.get("properties", {})),
+                    "properties": Json(record.get("properties", {})),
                 })
                 count += 1
             except Exception as e:
@@ -361,9 +361,9 @@ def sync_submarine_cables():
             """, {
                 **record,
                 "length_km": float(record["length_km"]) if record.get("length_km") else None,
-                "owners": psycopg2.extras.Json(record.get("owners")),
-                "landing_points": psycopg2.extras.Json(record.get("landing_points")),
-                "properties": psycopg2.extras.Json(record.get("properties", {})),
+                "owners": Json(record.get("owners")),
+                "landing_points": Json(record.get("landing_points")),
+                "properties": Json(record.get("properties", {})),
             })
             count += 1
         except Exception as e:
@@ -410,7 +410,7 @@ def sync_species_all_kingdoms(max_pages: int = 10):
                 "canonical_name": record.get("canonical_name"),
                 "common_name": record.get("common_name"),
                 "rank": record.get("rank"),
-                "properties": psycopg2.extras.Json(metadata),
+                "properties": Json(metadata),
             })
             count += 1
         except Exception as e:

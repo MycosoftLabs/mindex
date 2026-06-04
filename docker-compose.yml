@@ -78,6 +78,8 @@ services:
         GIT_SHA: ${GIT_SHA:-}
     container_name: mindex-api
     command: uvicorn mindex_api.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      - .env
     environment:
       # Database
       MINDEX_DB_HOST: db
@@ -116,6 +118,17 @@ services:
 
       # Git SHA for version endpoint
       GIT_SHA: ${GIT_SHA:-}
+
+      # Chain RPC (QuickNode Solana, Infura ETH) — from host .env; server-side only
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-}
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL:-}
+      MYCA_SOLANA_MINT: ${MYCA_SOLANA_MINT:-}
+      SOLANA_NETWORK: ${SOLANA_NETWORK:-mainnet-beta}
+
+      # iNaturalist ETL (used by exec/backfill jobs in api container)
+      INAT_DOMAIN_MODE: ${INAT_DOMAIN_MODE:-all}
+      GBIF_DOMAIN_MODE: ${GBIF_DOMAIN_MODE:-all}
+      INAT_API_TOKEN: ${INAT_API_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
@@ -135,6 +148,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    dns:
+      - 192.168.0.1
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       - mindex-network
     restart: unless-stopped
@@ -147,7 +164,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: mindex-etl
-    command: python -m mindex_etl.scheduler --interval 60
+    command: python -m mindex_etl.scheduler --interval 5 --max-pages 20
     environment:
       MINDEX_DB_HOST: db
       MINDEX_DB_PORT: 5432
@@ -156,6 +173,9 @@ services:
       MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
       DATABASE_URL: postgresql://${MINDEX_DB_USER:-mindex}:${MINDEX_DB_PASSWORD:-mindex}@db:5432/${MINDEX_DB_NAME:-mindex}
       REDIS_URL: redis://redis:6379/0
+      INAT_DOMAIN_MODE: ${INAT_DOMAIN_MODE:-all}
+      GBIF_DOMAIN_MODE: ${GBIF_DOMAIN_MODE:-all}
+      INAT_API_TOKEN: ${INAT_API_TOKEN:-}
       NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
       NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
     depends_on:
@@ -163,7 +183,12 @@ services:
         condition: service_healthy
     volumes:
       - ./mindex_etl:/app/mindex_etl:ro
+      - ./mindex_api:/app/mindex_api:ro
       - ${NAS_MOUNT_PATH:-/mnt/nas/mindex}:/mnt/nas/mindex:rw
+    dns:
+      - 192.168.0.1
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       - mindex-network
     restart: unless-stopped
@@ -203,6 +228,9 @@ services:
       MINDEX_DB_PASSWORD: ${MINDEX_DB_PASSWORD:-mindex}
       MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
       DATABASE_URL: postgresql://${MINDEX_DB_USER:-mindex}:${MINDEX_DB_PASSWORD:-mindex}@db:5432/${MINDEX_DB_NAME:-mindex}
+      INAT_DOMAIN_MODE: ${INAT_DOMAIN_MODE:-all}
+      GBIF_DOMAIN_MODE: ${GBIF_DOMAIN_MODE:-all}
+      INAT_API_TOKEN: ${INAT_API_TOKEN:-}
       NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
       NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
     depends_on:
@@ -210,6 +238,7 @@ services:
         condition: service_healthy
     volumes:
       - ./mindex_etl:/app/mindex_etl:ro
+      - ./mindex_api:/app/mindex_api:ro
     networks:
       - mindex-network
     restart: unless-stopped

@@ -24,8 +24,8 @@ async def list_storage_nodes(db: AsyncSession = Depends(get_db_session)):
         result = await db.execute(
             text(
                 """
-                SELECT id, kind, label, host, region, capacity_bytes, used_bytes, owner,
-                       last_seen_at, created_at
+                SELECT id::text, kind, label, host, region, capacity_bytes, used_bytes, owner,
+                       last_seen_at, created_at, metadata
                 FROM network.storage_node
                 ORDER BY created_at DESC
                 LIMIT 200
@@ -33,8 +33,21 @@ async def list_storage_nodes(db: AsyncSession = Depends(get_db_session)):
             )
         )
         return {"items": [dict(r) for r in result.mappings().all()]}
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"storage_node_unavailable:{str(exc)[:120]}") from exc
+    except Exception:
+        await db.rollback()
+        return {
+            "items": [
+                {
+                    "id": "nas-primary",
+                    "kind": "nas",
+                    "label": "MINDEX NAS",
+                    "host": "192.168.0.105",
+                    "region": "lab",
+                    "note": "Run migration 20260603_network_storage.sql for persisted nodes",
+                }
+            ],
+            "fallback": True,
+        }
 
 
 @router.get("/network/nodes/{node_id}")

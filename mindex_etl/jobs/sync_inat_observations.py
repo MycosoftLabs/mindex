@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Generator, Optional
 
 import httpx
@@ -27,8 +27,8 @@ from ..taxon_canonicalizer import upsert_taxon
 
 
 @retry(
-    stop=stop_after_attempt(10),
-    wait=wait_exponential(multiplier=2, min=4, max=300),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
     retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
     reraise=True,
 )
@@ -61,7 +61,7 @@ def _fetch_observations(
             f"{settings.inat_base_url}/observations",
             params=params,
             timeout=settings.http_timeout,
-            headers={"User-Agent": "mindex-etl/0.1"},
+            headers=inat.get_auth_headers(),
         )
         
         # Handle rate limiting specifically
@@ -85,20 +85,41 @@ def _fetch_observations(
         raise
 
 
+def _fetch_observations_by_ids(
+    client: httpx.Client,
+    ids: list[str],
+) -> dict:
+    """Fetch specific iNaturalist observations by ID for MINDEX metadata repair."""
+    response = client.get(
+        f"{settings.inat_base_url}/observations",
+        params={
+            "id": ",".join(ids),
+            "per_page": min(max(1, len(ids)), 50),
+            "order": "desc",
+            "order_by": "observed_on",
+        },
+        timeout=settings.http_timeout,
+        headers=inat.get_auth_headers(),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def iter_observations(
     *,
-    per_page: int = 100,
+    per_page: int = 50,
     max_pages: Optional[int] = None,
     quality_grade: str = "research",
     updated_since: Optional[str] = None,
     delay_seconds: float = 0.7,  # Increased to respect rate limits
     domain_mode: Optional[str] = None,
+    start_page: int = 1,
 ) -> Generator[Dict, None, None]:
     """Iterate through iNaturalist observations. domain_mode: 'all' or 'fungi' (default from config)."""
     mode = domain_mode or settings.inat_domain_mode
     taxon_id = inat._root_taxon_id(mode)
     with httpx.Client() as client:
-        page = 1
+        page = max(1, start_page)
         while True:
             payload = _fetch_observations(
                 client, page, per_page, quality_grade, updated_since, taxon_id=taxon_id
@@ -133,6 +154,7 @@ def _map_observation(obs: dict) -> dict:
 
     # Extract taxon info
     taxon = obs.get("taxon") or {}
+    iconic_taxon_name = taxon.get("iconic_taxon_name")
 
     return {
         "source": "inat",
@@ -146,6 +168,7 @@ def _map_observation(obs: dict) -> dict:
         "taxon_rank": taxon.get("rank", "species"),
         "taxon_common_name": taxon.get("preferred_common_name"),
         "taxon_inat_id": taxon.get("id"),
+        "iconic_taxon_name": iconic_taxon_name,
         "photos": photos,
         "notes": obs.get("description"),
         "quality_grade": obs.get("quality_grade"),
@@ -153,11 +176,144 @@ def _map_observation(obs: dict) -> dict:
             "inat_id": obs.get("id"),
             "uri": obs.get("uri"),
             "place_guess": obs.get("place_guess"),
+            "taxon_name": taxon.get("name"),
+            "taxon_common_name": taxon.get("preferred_common_name"),
+            "taxon_inat_id": taxon.get("id"),
+            "iconic_taxon_name": iconic_taxon_name,
+            "kingdom": iconic_taxon_name,
             "identifications_count": obs.get("identifications_count"),
             "comments_count": obs.get("comments_count"),
             "faves_count": obs.get("faves_count"),
         },
     }
+
+
+def backfill_missing_inat_observation_metadata(
+    conn,
+    *,
+    max_records: int = 500,
+    per_page: int = 50,
+    delay_seconds: float = 0.7,
+) -> int:
+    """Hydrate existing iNat rows that were stored without taxon metadata."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT source_id
+            FROM obs.observation
+            WHERE source = 'inat'
+              AND source_id IS NOT NULL
+              AND (
+                taxon_id IS NULL
+                OR metadata IS NULL
+                OR metadata->>'taxon_name' IS NULL
+                OR metadata->>'iconic_taxon_name' IS NULL
+              )
+            ORDER BY observed_at DESC NULLS LAST
+            LIMIT %s
+            """,
+            (max_records,),
+        )
+        ids = [str(row["source_id"]) for row in cur.fetchall() if row and row.get("source_id")]
+
+    if not ids:
+        return 0
+
+    updated = 0
+    with httpx.Client() as client:
+        for start in range(0, len(ids), per_page):
+            batch_ids = ids[start:start + per_page]
+            try:
+                payload = _fetch_observations_by_ids(client, batch_ids)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (403, 429):
+                    retry_after = int(exc.response.headers.get("Retry-After", 90))
+                    print(
+                        f"iNat backfill rate limited ({exc.response.status_code}), waiting {retry_after}s...",
+                        flush=True,
+                    )
+                    time.sleep(retry_after)
+                    try:
+                        payload = _fetch_observations_by_ids(client, batch_ids)
+                    except Exception as retry_exc:
+                        print(f"Failed to backfill iNat observation metadata batch: {retry_exc}", flush=True)
+                        time.sleep(delay_seconds)
+                        continue
+                else:
+                    print(f"Failed to backfill iNat observation metadata batch: {exc}", flush=True)
+                    time.sleep(delay_seconds)
+                    continue
+            except Exception as exc:
+                print(f"Failed to backfill iNat observation metadata batch: {exc}", flush=True)
+                time.sleep(delay_seconds)
+                continue
+
+            records = payload.get("results", [])
+            mapped_by_id = {
+                str(record.get("id")): _map_observation(record)
+                for record in records
+                if record.get("id")
+            }
+
+            for source_id in batch_ids:
+                obs = mapped_by_id.get(source_id)
+                if not obs or not obs.get("taxon_name"):
+                    continue
+
+                taxon_id = upsert_taxon(
+                    conn,
+                    canonical_name=obs["taxon_name"],
+                    rank=obs.get("taxon_rank", "species"),
+                    common_name=obs.get("taxon_common_name"),
+                    source="inat",
+                    metadata={
+                        "inat_id": obs.get("taxon_inat_id"),
+                        "iconic_taxon_name": obs.get("iconic_taxon_name"),
+                    },
+                    kingdom=obs.get("iconic_taxon_name"),
+                )
+
+                location_sql = "location"
+                location_params: list[object] = []
+                if obs.get("lat") and obs.get("lng"):
+                    location_sql = "COALESCE(location, ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography)"
+                    location_params = [obs["lng"], obs["lat"]]
+
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        UPDATE obs.observation SET
+                            taxon_id = COALESCE(taxon_id, %s),
+                            observed_at = COALESCE(observed_at, %s::timestamptz),
+                            observer = COALESCE(observer, %s),
+                            location = {location_sql},
+                            accuracy_m = COALESCE(accuracy_m, %s),
+                            media = CASE
+                                WHEN media IS NULL OR jsonb_array_length(media) = 0
+                                THEN %s::jsonb
+                                ELSE media
+                            END,
+                            notes = COALESCE(notes, %s),
+                            metadata = COALESCE(metadata, '{{}}'::jsonb) || %s::jsonb
+                        WHERE source = 'inat' AND source_id = %s
+                        """,
+                        (
+                            taxon_id,
+                            obs.get("observed_at"),
+                            obs.get("observer"),
+                            *location_params,
+                            obs.get("accuracy_m"),
+                            json.dumps(obs.get("photos", [])),
+                            obs.get("notes"),
+                            json.dumps(obs.get("metadata", {})),
+                            source_id,
+                        ),
+                    )
+                updated += 1
+
+            time.sleep(delay_seconds)
+
+    return updated
 
 
 def sync_inat_observations(
@@ -167,14 +323,30 @@ def sync_inat_observations(
     start_page: int = 1,
     checkpoint_manager: Optional[CheckpointManager] = None,
     domain_mode: Optional[str] = None,
+    per_page: int = 50,
+    updated_since: Optional[str] = None,
+    lookback_hours: Optional[float] = None,
+    backfill_records: int = 500,
 ) -> int:
     """Sync iNaturalist observations into MINDEX database with checkpoint support. domain_mode: 'all' or 'fungi'."""
     inserted = 0
     checkpoint_interval = 10  # Save checkpoint every 10 pages
     page = start_page
+    if updated_since is None and lookback_hours:
+        since_dt = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+        updated_since = since_dt.isoformat().replace("+00:00", "Z")
+
+    backfilled = 0
 
     with db_session() as conn:
-        for obs in iter_observations(max_pages=max_pages, quality_grade=quality_grade, domain_mode=domain_mode):
+        for obs in iter_observations(
+            max_pages=max_pages,
+            quality_grade=quality_grade,
+            domain_mode=domain_mode,
+            per_page=per_page,
+            updated_since=updated_since,
+            start_page=start_page,
+        ):
             taxon_name = obs.get("taxon_name")
             if not taxon_name:
                 continue
@@ -186,6 +358,11 @@ def sync_inat_observations(
                 rank=obs.get("taxon_rank", "species"),
                 common_name=obs.get("taxon_common_name"),
                 source="inat",
+                metadata={
+                    "inat_id": obs.get("taxon_inat_id"),
+                    "iconic_taxon_name": obs.get("iconic_taxon_name"),
+                },
+                kingdom=obs.get("iconic_taxon_name"),
             )
 
             # Insert observation
@@ -269,23 +446,44 @@ def sync_inat_observations(
             # Track current page (approximate)
             if inserted % 100 == 0:
                 page += 1
+
+        if backfill_records > 0:
+            backfilled = backfill_missing_inat_observation_metadata(
+                conn,
+                max_records=backfill_records,
+                per_page=min(per_page, 50),
+            )
+            if backfilled:
+                print(f"Backfilled {backfilled} existing iNaturalist observations with taxon metadata", flush=True)
     
     # Final checkpoint
     if checkpoint_manager:
         checkpoint_manager.save(page, records_processed=inserted, completed=True)
     
-    return inserted
+    return inserted + backfilled
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync iNaturalist observations")
     parser.add_argument("--max-pages", type=int, default=None)
+    parser.add_argument("--per-page", type=int, default=50)
     parser.add_argument("--quality-grade", default="research", choices=["research", "needs_id", "casual"])
+    parser.add_argument("--updated-since", default=None, help="iNaturalist updated_since ISO timestamp")
+    parser.add_argument("--lookback-hours", type=float, default=None, help="Rolling updated_since window")
+    parser.add_argument("--backfill-records", type=int, default=500, help="Existing iNat rows to hydrate per run")
     parser.add_argument("--domain-mode", type=str, default=None, choices=["all", "fungi"],
                         help="'all' for all life, 'fungi' for fungi-only (default from config)")
     args = parser.parse_args()
 
-    total = sync_inat_observations(max_pages=args.max_pages, quality_grade=args.quality_grade, domain_mode=args.domain_mode)
+    total = sync_inat_observations(
+        max_pages=args.max_pages,
+        quality_grade=args.quality_grade,
+        domain_mode=args.domain_mode,
+        per_page=args.per_page,
+        updated_since=args.updated_since,
+        lookback_hours=args.lookback_hours,
+        backfill_records=args.backfill_records,
+    )
     print(f"Synced {total} iNaturalist observations")
 
 

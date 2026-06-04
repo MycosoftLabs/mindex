@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
 from datetime import datetime
@@ -63,10 +64,13 @@ def create_job_registry() -> Dict[str, ETLJob]:
     from .sync_fusarium_taxa import sync_fusarium_taxa
     from .sync_mushroom_world_taxa import sync_mushroom_world_taxa
     from .sync_chemspider_compounds import run_full_sync as chemspider_sync
+    from .sync_pubchem_compounds import sync_pubchem_compounds
+    from .sync_genbank_genomes import sync_genbank_genomes
+    from .ancestry_sync import run_ancestry_sync
+    from .backfill_inat_taxon_photos import backfill_inat_taxon_photos
     from .publications import run_publications_etl
-    from .hq_media_ingestion import HQMediaIngestionPipeline
-    from .civic_viewport_sync import sync_civic_viewport_intel
-    
+    from .hq_media_ingestion import HQMediaIngestionWorker
+
     # Wrapper for async publications job
     def run_publications_sync(**kwargs) -> int:
         max_pages = kwargs.get("max_pages", 10)
@@ -81,9 +85,10 @@ def create_job_registry() -> Dict[str, ETLJob]:
     def run_hq_media_sync(**kwargs) -> int:
         max_pages = kwargs.get("max_pages", 100)
         try:
-            pipeline = HQMediaIngestionPipeline()
-            asyncio.run(pipeline.run(limit=max_pages, sources=None))
-            return pipeline.stats.get("total_images", 0) if hasattr(pipeline, "stats") else 0
+            worker = HQMediaIngestionWorker(limit=max_pages or 100)
+            asyncio.run(worker.run())
+            stats = worker.checkpoint.stats
+            return stats.images_downloaded if stats else 0
         except Exception as e:
             logger.error(f"HQ media sync failed: {e}")
             return 0
@@ -98,7 +103,48 @@ def create_job_registry() -> Dict[str, ETLJob]:
             logger.error(f"ChemSpider sync failed: {e}")
             return 0
 
-    return {
+    def run_pubchem_sync(**kwargs) -> int:
+        max_pages = kwargs.get("max_pages")
+        try:
+            return sync_pubchem_compounds(max_results=max_pages * 50 if max_pages else 500)
+        except Exception as e:
+            logger.error(f"PubChem sync failed: {e}")
+            return 0
+
+    def run_genetics_sync(**kwargs) -> int:
+        max_pages = kwargs.get("max_pages")
+        try:
+            return sync_genbank_genomes(max_pages=max_pages)
+        except Exception as e:
+            logger.error(f"GenBank genetics sync failed: {e}")
+            return 0
+
+    def run_ancestry_job(**kwargs) -> int:
+        max_pages = kwargs.get("max_pages")
+        enrich_limit = min(max_pages or 50, 200)
+        try:
+            report = run_ancestry_sync(
+                enrich=True,
+                enrich_limit=enrich_limit,
+                verbose=False,
+            )
+            stats = report.get("stats") or {}
+            enrich_stats = report.get("enrich_stats") or {}
+            images = enrich_stats.get("images") or {}
+            return int(images.get("enriched", 0) or stats.get("with_images", 0))
+        except Exception as e:
+            logger.error(f"Ancestry sync failed: {e}")
+            return 0
+
+    def run_taxon_photos_sync(**kwargs) -> int:
+        limit = kwargs.get("max_pages", 20)
+        try:
+            return backfill_inat_taxon_photos(limit=(limit or 20) * 50)
+        except Exception as e:
+            logger.error(f"iNat taxon photo backfill failed: {e}")
+            return 0
+
+    registry: Dict[str, ETLJob] = {
         "inat_taxa": ETLJob(
             name="inat_taxa",
             source="iNaturalist",
@@ -184,14 +230,70 @@ def create_job_registry() -> Dict[str, ETLJob]:
             priority=90,
             description="Sync fungal compound data from ChemSpider",
         ),
-        "civic_viewport": ETLJob(
+        "pubchem": ETLJob(
+            name="pubchem",
+            source="PubChem",
+            run_func=run_pubchem_sync,
+            priority=91,
+            description="Sync compounds and molecular metadata from PubChem",
+        ),
+        "genetics": ETLJob(
+            name="genetics",
+            source="GenBank",
+            run_func=run_genetics_sync,
+            priority=92,
+            description="Sync genetic sequences (GenBank) into bio.genetic_sequence",
+        ),
+        "taxon_photos": ETLJob(
+            name="taxon_photos",
+            source="iNaturalist",
+            run_func=run_taxon_photos_sync,
+            priority=93,
+            description="Backfill default_photo into core.taxon.metadata for ancestry/explorer",
+        ),
+        "ancestry": ETLJob(
+            name="ancestry",
+            source="MINDEX",
+            run_func=run_ancestry_job,
+            priority=94,
+            description="Scan species completeness and enrich missing images/descriptions",
+        ),
+    }
+
+    # ETL container image may not include mindex_api; skip civic job there.
+    try:
+        from .civic_viewport_sync import sync_civic_viewport_intel
+
+        registry["civic_viewport"] = ETLJob(
             name="civic_viewport",
             source="Civic/Government",
             run_func=sync_civic_viewport_intel,
             priority=95,
             description="Batch-sync civic viewport intelligence (officials, elections, facilities) into civic.*",
-        ),
-    }
+        )
+    except ImportError as exc:
+        logger.warning("civic_viewport ETL job unavailable in this runtime: %s", exc)
+
+    def run_nlm_audio_ingest(**kwargs) -> int:
+        from .ingest_nlm_audio_p0 import run_ingest
+
+        sources_raw = kwargs.get("sources") or os.environ.get(
+            "NLM_AUDIO_SOURCES", "esc50,ds3500,mbari_pacific_sound"
+        )
+        sources = [s.strip() for s in str(sources_raw).split(",") if s.strip()]
+        max_files = int(kwargs.get("max_files_per_source") or 5000)
+        max_gb = float(kwargs.get("max_gb") or 200.0)
+        return run_ingest(sources, max_files, max_gb)
+
+    registry["nlm_audio_p0"] = ETLJob(
+        name="nlm_audio_p0",
+        source="NLM_TRAINING_DATA_SOURCES",
+        run_func=run_nlm_audio_ingest,
+        priority=5,
+        description="Download/normalize P0 acoustic corpora to NAS Library + library.blob",
+    )
+
+    return registry
 
 
 def run_etl(
