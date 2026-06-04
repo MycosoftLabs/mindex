@@ -80,6 +80,7 @@ PY""",
         "migrations/20260527_library_acoustic_may27_2026.sql",
         "migrations/20260604_library_blob_labels_may27_2026.sql",
         "migrations/20260605_sine_acoustic_stack_may27_2026.sql",
+        "migrations/20260604_library_wave_human_annotations_jun04_2026.sql",
     )
     for mig in migs:
         print(f"=== migration {mig} ===")
@@ -106,6 +107,9 @@ curl -s -m 90 -w "\nclassify:%{http_code}\n" -X POST -H "X-Internal-Token: $TOK"
   "http://127.0.0.1:8000/api/mindex/library/blobs/""" + SMALL_BLOB + r"""/classify?detectors=frequency_fft" | tail -3
 curl -s -m 90 -w "\nanalyze:%{http_code}\n" -X POST -H "X-Internal-Token: $TOK" \
   "http://127.0.0.1:8000/api/mindex/sine/blobs/""" + SMALL_BLOB + r"""/analyze?detectors=frequency_fft" | tail -3
+curl -s -m 30 -w "\nwave:%{http_code}\n" -X POST -H "X-Internal-Token: $TOK" -H "Content-Type: application/json" \
+  -d '{"selection":{"start_sec":1.3,"end_sec":3.3,"loop_enabled":true,"reverse_enabled":false,"playback_rate":0.5},"markers":[{"id":"m1","time_sec":2.0,"label":"test marker"}],"zoom":{"start_sec":0.8,"end_sec":3.8}}' \
+  "http://127.0.0.1:8000/api/mindex/library/blobs/""" + SMALL_BLOB + r"""/wave-annotation" | tail -5
 """,
         200,
     )
