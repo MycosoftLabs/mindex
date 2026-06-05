@@ -459,7 +459,8 @@ async def create_wave_annotation(
     selection = _normalize_selection(body.get("selection"), duration)
     zoom = _normalize_zoom(body.get("zoom"), duration)
     markers = _normalize_markers(body.get("markers"), duration)
-    if not selection and not markers:
+    scope = body.get("scope") if isinstance(body.get("scope"), dict) else None
+    if not selection and not markers and not scope:
         raise HTTPException(status_code=400, detail="selection_or_markers_required")
 
     analysis_run_id = _parse_uuid(body.get("analysis_run_id"))
@@ -467,6 +468,10 @@ async def create_wave_annotation(
     reverse_enabled = bool(selection.get("reverse_enabled")) if selection else False
     playback_rate = float(selection.get("playback_rate", 1)) if selection else 1.0
     file_context = body.get("file_context") if isinstance(body.get("file_context"), dict) else None
+    if scope:
+        merged_context = dict(file_context or {})
+        merged_context["scope"] = scope
+        file_context = merged_context
     created_by = body.get("created_by") if isinstance(body.get("created_by"), str) else None
 
     try:

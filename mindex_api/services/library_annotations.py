@@ -136,6 +136,11 @@ def _row_to_wave_annotation(row: Any) -> dict[str, Any]:
                 pass
     if data.get("playback_rate") is not None:
         data["playback_rate"] = float(data["playback_rate"])
+    file_context = data.get("file_context")
+    if isinstance(file_context, dict):
+        scope = file_context.get("scope")
+        if isinstance(scope, dict):
+            data["scope"] = scope
     return data
 
 

@@ -375,6 +375,72 @@ async def sine_get_analysis(
     return data
 
 
+@router.get("/training/human-tags")
+async def sine_training_human_tags(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    training_eligible_only: bool = Query(True),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Training-eligible human identifications for active-learning export."""
+    where = "WHERE training_eligible = TRUE" if training_eligible_only else ""
+    try:
+        rows = (
+            await db.execute(
+                text(
+                    f"""
+                    SELECT
+                        h.id, h.blob_id, h.analysis_run_id, h.human_label, h.human_category,
+                        h.human_confidence, h.human_notes, h.disputes_model, h.model_top_label,
+                        h.model_confidence, h.model_summary, h.event_context, h.file_context,
+                        h.review_status, h.training_eligible, h.created_by, h.created_at, h.updated_at,
+                        b.filename, b.origin_dataset_id, b.label_primary, b.duration_sec
+                    FROM library.acoustic_human_identification h
+                    JOIN library.blob b ON b.id = h.blob_id
+                    {where}
+                    ORDER BY h.updated_at DESC
+                    LIMIT :limit OFFSET :offset
+                    """
+                ),
+                {"limit": limit, "offset": offset},
+            )
+        ).mappings().all()
+        total = (
+            await db.execute(
+                text(
+                    f"""
+                    SELECT COUNT(*)::int AS total
+                    FROM library.acoustic_human_identification h
+                    {where}
+                    """
+                )
+            )
+        ).scalar() or 0
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"human_tags_query_failed: {exc!s}"
+        ) from exc
+
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        for key in ("id", "blob_id", "analysis_run_id"):
+            if item.get(key) is not None:
+                item[key] = str(item[key])
+        for key in ("model_summary", "event_context", "file_context"):
+            val = item.get(key)
+            if isinstance(val, str):
+                try:
+                    item[key] = json.loads(val)
+                except json.JSONDecodeError:
+                    pass
+        for key in ("human_confidence", "model_confidence", "duration_sec"):
+            if item.get(key) is not None:
+                item[key] = float(item[key])
+        items.append(item)
+    return {"items": items, "total": int(total), "limit": limit, "offset": offset}
+
+
 @router.get("/blobs/{blob_id}/visualisation")
 async def sine_visualisation(
     blob_id: UUID,
