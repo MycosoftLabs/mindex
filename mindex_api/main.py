@@ -68,6 +68,7 @@ from .routers import (
     live_state_router,
     mycodao_zone_router,
     meshtastic_internal_router,
+    agents_router,
 )
 from .routers.worldview import (
     worldview_search_router,
@@ -187,6 +188,10 @@ def create_app() -> FastAPI:
     # Internal write endpoints for search answers (MAS orchestrator)
     app.include_router(search_answers_router, prefix=internal_prefix, dependencies=internal_deps)
 
+    # ETL agent orchestrator — control + livestream (MINDEX sub-agent runtime)
+    if agents_router is not None:
+        app.include_router(agents_router, prefix=internal_prefix, dependencies=internal_deps)
+
     # API key management (CRUD, rotation, usage, audit)
     app.include_router(key_management_router, prefix=internal_prefix, dependencies=internal_deps)
     app.include_router(worldview_snapshots_router, prefix=internal_prefix, dependencies=internal_deps)
@@ -261,6 +266,8 @@ def create_app() -> FastAPI:
     
     # New integration routers
     app.include_router(etl_router, prefix=prefix, dependencies=internal_deps)
+    if agents_router is not None:
+        app.include_router(agents_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(phylogeny_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(all_life_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(genomes_router, prefix=prefix, dependencies=internal_deps)

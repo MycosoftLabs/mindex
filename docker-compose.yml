@@ -9,12 +9,18 @@ version: '3.9'
 #
 # Usage:
 #   docker compose up -d                          # Start core (db + redis + api)
-#   docker compose --profile etl up -d            # Start with ETL worker
+#   docker compose --profile etl up -d            # Start the agent orchestrator (always-on ETL)
 #   docker compose --profile earth up -d          # Start with Earth data sync
 #   docker compose --profile init up etl-init     # One-time data load
 #   docker compose --profile full up -d           # Start everything
+#   docker compose logs -f etl                    # Watch the orchestrator + sub-agents
 #   docker compose logs -f api                    # Watch API logs
 #   docker compose down -v                        # Stop and remove volumes
+#
+# Agent runtime: the `etl` service runs `python -m mindex_etl.orchestrator`,
+# which supervises one sub-agent per source plus Supabase-sync and AWS-backup
+# system agents. Inspect/operate it via the API: GET /api/mindex/agents,
+# /api/mindex/agents/stream (livestream), POST /api/mindex/agents/{name}/run.
 
 networks:
   mindex-network:
@@ -157,14 +163,21 @@ services:
     restart: unless-stopped
 
   # =========================================================================
-  # ETL Worker — Legacy data sync (fungi, compounds, genetics)
+  # ETL Orchestrator — the always-on MINDEX agent runtime
+  # -------------------------------------------------------------------------
+  # Supervises one sub-agent per data source plus the storage-coordination
+  # system agents (Supabase sync, AWS pg_dump/NAS-manifest backups, S3
+  # inventory). Replaces the old `python -m mindex_etl.scheduler` loop; the
+  # scheduler/aggressive_runner remain importable for ad-hoc use.
   # =========================================================================
   etl:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: mindex-etl
-    command: python -m mindex_etl.scheduler --interval 5 --max-pages 20
+    command: python -m mindex_etl.orchestrator
+    env_file:
+      - .env
     environment:
       MINDEX_DB_HOST: db
       MINDEX_DB_PORT: 5432
@@ -178,6 +191,20 @@ services:
       INAT_API_TOKEN: ${INAT_API_TOKEN:-}
       NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
       NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
+      # Orchestrator tuning
+      MINDEX_AGENT_CONCURRENCY: ${MINDEX_AGENT_CONCURRENCY:-4}
+      MINDEX_AGENT_MAX_PAGES: ${MINDEX_AGENT_MAX_PAGES:-25}
+      # Supabase cloud mirror (warm tier for website / Earth Simulator / WorldView)
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # AWS S3 cold backups + snapshots
+      AWS_S3_MINDEX_BUCKET: ${AWS_S3_MINDEX_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      NAS_MOUNT_PATH: ${NAS_MOUNT_PATH:-/mnt/nas/mindex}
     depends_on:
       db:
         condition: service_healthy

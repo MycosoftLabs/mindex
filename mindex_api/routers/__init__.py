@@ -44,6 +44,11 @@ from .sine_acoustic import router as sine_acoustic_router
 from .live_state import router as live_state_router
 
 try:
+    from .agents import router as agents_router
+except Exception:
+    agents_router = None
+
+try:
     from .rag_retrieve import router as rag_retrieve_router
 except Exception:
     rag_retrieve_router = None
@@ -127,6 +132,7 @@ __all__ = [
     "live_state_router",
     "mycodao_zone_router",
     "meshtastic_internal_router",
+    "agents_router",
 ]
 
 
