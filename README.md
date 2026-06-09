@@ -40,6 +40,11 @@
 - **Redis Pub/Sub** for real-time event notifications
 - **Qdrant Vector Store** for semantic search
 - **ETL Jobs** for syncing external data sources
+- **Agent Orchestrator** (`python -m mindex_etl.orchestrator`) — an always-on
+  runtime that supervises one sub-agent per source plus Supabase-sync and
+  AWS-backup system agents, with durable state, backoff, and a livestream
+  (`/api/mindex/agents/stream`). See
+  [Agent Runtime & Scale](./docs/MINDEX_AGENT_RUNTIME_AND_SCALE_JUN09_2026.md).
 
 ### What's Planned
 
@@ -396,6 +401,7 @@ POST /api/v1/predict/growth
 | Document | Description |
 |----------|-------------|
 | [ETL Sync Guide](./docs/ETL_SYNC_GUIDE.md) | Data synchronization from external sources |
+| [Agent Runtime & Scale](./docs/MINDEX_AGENT_RUNTIME_AND_SCALE_JUN09_2026.md) | Orchestrator + per-source sub-agents, Supabase/NAS/AWS coordination, petabyte scale |
 | [NatureOS Integration](./docs/NATUREOS_INTEGRATION_GUIDE.md) | Dashboard integration |
 | [MycoBrain Integration](./docs/MYCOBRAIN_INTEGRATION.md) | Device data ingestion |
 | [API Reference](./docs/API_REFERENCE.md) | Complete API documentation |
