@@ -12,15 +12,21 @@ from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session
+from ..services.sine_acoustic.audio_io import load_mono
 from ..services.sine_acoustic import run_full_analysis
+from ..services.sine_acoustic.analysis_runner import run_and_persist_loaded_model_outputs
 from ..services.sine_acoustic.classifier import classify_acoustic_file
 from ..services.sine_acoustic.detector_registry import DETECTORS, DEFAULT_DETECTOR_IDS
 from ..services.sine_acoustic.event_views import build_library_classification_payload
+from ..services.sine_acoustic.model_runtime import inspect_sine_model_runtime
+from ..services.sine_acoustic.persisted_evidence import list_persisted_analysis_evidence
+from ..services.sine_acoustic.request_contract import read_sine_request_contract
+from ..services.sine_acoustic.visualisation import build_visualisation_layers
 from .library import _resolve_blob_path, list_blobs, list_sources, stream_blob
 
 logger = logging.getLogger(__name__)
@@ -80,6 +86,7 @@ async def sine_status(db: AsyncSession = Depends(get_db_session)) -> dict[str, A
         det_count = (
             await db.execute(text("SELECT COUNT(*)::int FROM library.detector"))
         ).scalar() or 0
+        model_context = await inspect_sine_model_runtime(db)
     except Exception as exc:
         await db.rollback()
         raise HTTPException(status_code=503, detail=f"sine_schema_missing: {exc!s}") from exc
@@ -91,6 +98,15 @@ async def sine_status(db: AsyncSession = Depends(get_db_session)) -> dict[str, A
         "library_sources": row["sources"] if row else 0,
         "detectors_registered": det_count,
         "default_detectors": DEFAULT_DETECTOR_IDS,
+        "model_status": model_context.get("model_status", "model_unavailable"),
+        "model_ready": bool(model_context.get("model_ready", False)),
+        "registered_models": int(model_context.get("registered_models", 0)),
+        "loaded_models": int(model_context.get("loaded_models", 0)),
+        "runtime_backends": model_context.get("runtime_backends") or {},
+        "runtime_supported": bool(model_context.get("runtime_supported", False)),
+        "inference_ready": bool(model_context.get("inference_ready", False)),
+        "prototype_catalog_ready": bool(model_context.get("prototype_catalog_ready", False)),
+        "blocking_reasons": model_context.get("blocking_reasons") or [],
     }
 
 
@@ -111,6 +127,206 @@ async def sine_detectors(db: AsyncSession = Depends(get_db_session)) -> dict[str
         )
     ).mappings().all()
     return {"items": [dict(r) for r in rows], "total": len(rows)}
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _registry_unavailable(kind: str, *, detail: str | None = None) -> dict[str, Any]:
+    if kind == "models":
+        return {
+            "ok": False,
+            "status": "model_registry_unavailable",
+            "model_status": "model_unavailable",
+            "model_ready": False,
+            "models": [],
+            "registered_models": [],
+            "loaded_models": [],
+            "total": 0,
+            "message": detail or "MINDEX SINE model registry has not been initialized yet.",
+        }
+    return {
+        "ok": False,
+        "status": "prototype_catalog_unavailable",
+        "model_status": "model_unavailable",
+        "prototype_ready": False,
+        "prototypes": [],
+        "prototype_catalog": [],
+        "total": 0,
+        "message": detail or "MINDEX SINE prototype catalog has not been initialized yet.",
+    }
+
+
+async def _regclass_exists(db: AsyncSession, relation: str) -> bool:
+    try:
+        return bool((await db.execute(text("SELECT to_regclass(:relation)"), {"relation": relation})).scalar())
+    except Exception:
+        await db.rollback()
+        return False
+
+
+@router.get("/models")
+async def sine_models(db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+    """Registered SINE model artifacts and load state.
+
+    This endpoint is intentionally honest: until the registry migration and a
+    real artifact are present it returns model_unavailable, not detector
+    readiness.
+    """
+    if not await _regclass_exists(db, "sine.model_artifact"):
+        return _registry_unavailable("models")
+    try:
+        rows = (
+            await db.execute(
+                text(
+                    """
+                    SELECT
+                        id::text, model_id, model_name, model_version, domain,
+                        target_domains, class_families, framework, runtime,
+                        artifact_uri, artifact_sha256, label_map_uri, label_map_sha256,
+                        training_dataset, metrics_uri, confusion_matrix_uri,
+                        input_sample_rate_hz, window_sec, label_count, embedding_dim,
+                        device, status, loaded, last_loaded_at, last_inference_at,
+                        last_error, backend_commit, feature_params, created_at, updated_at
+                    FROM sine.model_artifact
+                    ORDER BY COALESCE(loaded, FALSE) DESC, updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+                    """
+                )
+            )
+        ).mappings().all()
+    except Exception as exc:
+        await db.rollback()
+        return _registry_unavailable("models", detail=f"SINE model registry query failed: {exc!s}")
+
+    models: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        for key in ("target_domains", "class_families", "feature_params"):
+            item[key] = _json_value(item.get(key))
+        item["loaded"] = bool(item.get("loaded"))
+        item["ready"] = bool(item["loaded"] and item.get("status") in {"model_ready", "ready", "loaded"})
+        models.append(item)
+
+    loaded = [item for item in models if item["loaded"]]
+    model_ready = any(item["ready"] for item in models)
+    return {
+        "ok": model_ready,
+        "status": "model_ready" if model_ready else "model_registry_empty" if not models else "model_unavailable",
+        "model_status": "model_ready" if model_ready else "model_unavailable",
+        "model_ready": model_ready,
+        "models": models,
+        "registered_models": models,
+        "loaded_models": loaded,
+        "total": len(models),
+    }
+
+
+@router.get("/models/{model_id}")
+async def sine_model_detail(model_id: str, db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+    if not await _regclass_exists(db, "sine.model_artifact"):
+        raise HTTPException(status_code=404, detail="model_registry_unavailable")
+    row = (
+        await db.execute(
+            text(
+                """
+                SELECT
+                    id::text, model_id, model_name, model_version, domain,
+                    target_domains, class_families, framework, runtime,
+                    artifact_uri, artifact_sha256, label_map_uri, label_map_sha256,
+                    training_dataset, metrics_uri, confusion_matrix_uri,
+                    input_sample_rate_hz, window_sec, label_count, embedding_dim,
+                    device, status, loaded, last_loaded_at, last_inference_at,
+                    last_error, backend_commit, feature_params, created_at, updated_at
+                FROM sine.model_artifact
+                WHERE model_id = :model_id OR id::text = :model_id
+                """
+            ),
+            {"model_id": model_id},
+        )
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="model_not_found")
+    item = dict(row)
+    for key in ("target_domains", "class_families", "feature_params"):
+        item[key] = _json_value(item.get(key))
+    item["loaded"] = bool(item.get("loaded"))
+    item["ready"] = bool(item["loaded"] and item.get("status") in {"model_ready", "ready", "loaded"})
+    return item
+
+
+@router.get("/prototypes")
+async def sine_prototypes(
+    domain: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    model_id: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Registered SINE acoustic prototypes/fingerprints."""
+    if not await _regclass_exists(db, "sine.prototype"):
+        return _registry_unavailable("prototypes")
+    clauses = []
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+    if domain:
+        clauses.append("domain = :domain")
+        params["domain"] = domain
+    if category:
+        clauses.append("category = :category")
+        params["category"] = category
+    if model_id:
+        clauses.append("model_id = :model_id")
+        params["model_id"] = model_id
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    try:
+        total = (
+            await db.execute(text(f"SELECT COUNT(*)::int FROM sine.prototype {where}"), params)
+        ).scalar() or 0
+        rows = (
+            await db.execute(
+                text(
+                    f"""
+                    SELECT
+                        id::text, prototype_id, label, domain, category, source,
+                        source_uri, license, model_id, embedding_dim, vector_sha256,
+                        prototype_sha256, example_count, metadata, created_at, updated_at
+                    FROM sine.prototype
+                    {where}
+                    ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+                    LIMIT :limit OFFSET :offset
+                    """
+                ),
+                params,
+            )
+        ).mappings().all()
+    except Exception as exc:
+        await db.rollback()
+        return _registry_unavailable("prototypes", detail=f"SINE prototype catalog query failed: {exc!s}")
+
+    prototypes: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["metadata"] = _json_value(item.get("metadata"))
+        item["vector_checksum"] = item.get("vector_sha256") or item.get("prototype_sha256")
+        prototypes.append(item)
+    ready = bool(prototypes)
+    return {
+        "ok": ready,
+        "status": "prototype_catalog_ready" if ready else "prototype_catalog_empty",
+        "model_status": "model_unavailable",
+        "prototype_ready": ready,
+        "prototypes": prototypes,
+        "prototype_catalog": prototypes,
+        "total": int(total),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/library/sources")
@@ -173,6 +389,7 @@ async def sine_get_blob(blob_id: UUID, db: AsyncSession = Depends(get_db_session
 
 @router.post("/blobs/{blob_id}/analyze")
 async def sine_analyze_blob(
+    request: Request,
     blob_id: UUID,
     detectors: Optional[str] = Query(None, description="Comma-separated detector ids"),
     db: AsyncSession = Depends(get_db_session),
@@ -189,6 +406,8 @@ async def sine_analyze_blob(
         raise HTTPException(status_code=404, detail="blob_not_found")
     path = _resolve_blob_path(row["abs_path"])
     det_list = [s.strip() for s in detectors.split(",") if s.strip()] if detectors else None
+    request_contract = await read_sine_request_contract(request)
+    model_context = await inspect_sine_model_runtime(db, request_contract=request_contract)
 
     run_id = (
         await db.execute(
@@ -212,6 +431,8 @@ async def sine_analyze_blob(
             path,
             detectors=det_list,
             library_label=row.get("label_primary"),
+            request_contract=request_contract,
+            model_context=model_context,
         )
         for ev in result["events"]:
             await db.execute(
@@ -238,11 +459,22 @@ async def sine_analyze_blob(
                     "meta": json.dumps(ev.get("metadata") or {}),
                 },
             )
+        model_inference = await run_and_persist_loaded_model_outputs(
+            db,
+            blob_id=blob_id,
+            analysis_run_id=run_id,
+            wav_path=path,
+        )
         summary = {
             "detector_status": result["detector_status"],
             "event_count": len(result["events"]),
             "duration_sec": result["duration_sec"],
             "sample_rate_hz": result["sample_rate_hz"],
+            "model_status": model_inference.get("model_status") or result.get("model_status", "model_unavailable"),
+            "identification_status": result.get("identification_status", "detector_only"),
+            "request_contract": request_contract,
+            "model_context": model_context,
+            "model_inference": model_inference,
         }
         await db.execute(
             text(
@@ -305,11 +537,15 @@ async def sine_analyze_blob(
     vis = run_row.get("visualisation") if run_row else None
 
     flat_events = [dict(e) for e in events]
+    persisted_evidence = await list_persisted_analysis_evidence(db, run_id)
     classification = build_library_classification_payload(
         flat_events,
         summary=run_summary,
         visualisation=vis,
         analysis_run_id=str(run_id),
+        request_contract=request_contract,
+        model_context=model_context,
+        **persisted_evidence,
     )
     return {
         "analysis_run_id": str(run_id),
@@ -325,10 +561,20 @@ async def sine_analyze_blob(
             "bird_detections",
             "uav_detections",
             "nps_detections",
+            "deep_signal_detections",
             "deep_signal_matches",
+            "model_status",
+            "model_context",
+            "model_outputs",
+            "prototype_matches",
+            "fusion_evidence",
+            "sound_transcripts",
+            "diagnostics",
+            "detector_evidence",
             "identification_summary",
             "identification_status",
             "analysis_engine",
+            "request_contract",
         ) if k in classification},
     }
 
@@ -371,7 +617,45 @@ async def sine_get_analysis(
     ).mappings().all()
     data = dict(run)
     data["id"] = str(data["id"])
-    data["events"] = [dict(e) for e in events]
+    flat_events = [dict(e) for e in events]
+    summary = data.get("summary")
+    if not isinstance(summary, dict):
+        summary = {}
+    persisted_evidence = await list_persisted_analysis_evidence(db, run_id)
+    classification = build_library_classification_payload(
+        flat_events,
+        summary=summary,
+        visualisation=data.get("visualisation"),
+        analysis_run_id=str(run_id),
+        **persisted_evidence,
+    )
+    data["events"] = flat_events
+    data["classification"] = classification
+    data.update({
+        k: classification[k]
+        for k in (
+            "frequency_detections",
+            "activity_segments",
+            "bird_detections",
+            "uav_detections",
+            "nps_detections",
+            "deep_signal_detections",
+            "deep_signal_matches",
+            "model_status",
+            "model_context",
+            "model_outputs",
+            "prototype_matches",
+            "fusion_evidence",
+            "sound_transcripts",
+            "diagnostics",
+            "detector_evidence",
+            "identification_summary",
+            "identification_status",
+            "analysis_engine",
+            "request_contract",
+        )
+        if k in classification
+    })
     return data
 
 
@@ -444,22 +728,40 @@ async def sine_training_human_tags(
 @router.get("/blobs/{blob_id}/visualisation")
 async def sine_visualisation(
     blob_id: UUID,
+    start_sec: float = Query(0.0, ge=0.0),
+    end_sec: Optional[float] = Query(None, ge=0.0),
+    max_waveform_points: int = Query(8192, ge=128, le=65536),
+    waveform_points: Optional[int] = Query(None, ge=128, le=65536),
+    max_time_frames: int = Query(1024, ge=16, le=4096),
+    spec_time_bins: Optional[int] = Query(None, ge=16, le=4096),
+    max_frequency_bins: int = Query(256, ge=16, le=2048),
+    spec_freq_bins: Optional[int] = Query(None, ge=16, le=2048),
+    fft_size: int = Query(2048, ge=64, le=16384),
+    n_fft: Optional[int] = Query(None, ge=64, le=16384),
+    hop_length: int = Query(128, ge=16, le=8192),
+    window_function: str = Query("hann"),
+    db_floor: float = Query(-96.0),
+    db_ceiling: float = Query(0.0),
+    include_peaks: bool = Query(True),
+    quality: str = Query("oscilloscope"),
+    ignore_saved_visualisation: bool = Query(False),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    run = (
-        await db.execute(
-            text(
-                """
-                SELECT visualisation FROM library.analysis_run
-                WHERE blob_id = :blob_id AND visualisation IS NOT NULL
-                ORDER BY started_at DESC LIMIT 1
-                """
-            ),
-            {"blob_id": blob_id},
-        )
-    ).mappings().first()
-    if run and run.get("visualisation"):
-        return run["visualisation"]
+    if not ignore_saved_visualisation and quality != "oscilloscope":
+        run = (
+            await db.execute(
+                text(
+                    """
+                    SELECT visualisation FROM library.analysis_run
+                    WHERE blob_id = :blob_id AND visualisation IS NOT NULL
+                    ORDER BY started_at DESC LIMIT 1
+                    """
+                ),
+                {"blob_id": blob_id},
+            )
+        ).mappings().first()
+        if run and run.get("visualisation"):
+            return run["visualisation"]
 
     row = (
         await db.execute(
@@ -471,12 +773,23 @@ async def sine_visualisation(
         raise HTTPException(status_code=404, detail="blob_not_found")
     path = _resolve_blob_path(row["abs_path"])
     try:
-        result = await asyncio.to_thread(
-            run_full_analysis,
-            path,
-            detectors=["visualisation_sonic"],
-            library_label=row.get("label_primary"),
+        samples, sample_rate = await asyncio.to_thread(load_mono, path)
+        return await asyncio.to_thread(
+            build_visualisation_layers,
+            samples,
+            sample_rate,
+            start_sec=start_sec,
+            end_sec=end_sec,
+            waveform_points=waveform_points or max_waveform_points,
+            spec_time_bins=spec_time_bins or max_time_frames,
+            spec_freq_bins=spec_freq_bins or max_frequency_bins,
+            fft_size=n_fft or fft_size,
+            hop_length=hop_length,
+            window_function=window_function,
+            db_floor=db_floor,
+            db_ceiling=db_ceiling,
+            include_peaks=include_peaks,
+            quality=quality,
         )
-        return result.get("visualisation") or {}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"visualisation_failed: {exc!s}") from exc

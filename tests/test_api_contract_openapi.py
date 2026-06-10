@@ -27,6 +27,8 @@ def test_openapi_is_namespaced_under_api_prefix() -> None:
     assert "/api/mindex/health" in paths
     assert "/api/mindex/taxa" in paths
     assert "/api/mindex/telemetry/devices/latest" in paths
+    assert "/api/mindex/sine/models" in paths
+    assert "/api/mindex/sine/prototypes" in paths
 
 
 def test_openapi_contract_includes_stable_dto_shapes() -> None:

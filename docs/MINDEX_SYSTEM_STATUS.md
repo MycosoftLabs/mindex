@@ -1,7 +1,10 @@
 # MINDEX System Status & Documentation
 
-**Last Updated:** January 12, 2026  
-**Status:** ✅ Fully Operational
+**Last Updated:** June 10, 2026  
+**Status:** Taxonomy remediated; **chemistry / genetics / images / publications ETL empty** — see `MINDEX_ETL_FULL_AUDIT_JUN10_2026.md`
+
+> **Important:** Live VM 189 (Jun 10, 2026): MycoBank ~100K taxa landed; **0 compounds, 0 genomes, 0 publications, 0 HQ media**.  
+> Blockers: `mindex` role lacks `bio` grants; migrations `0007` / `0012` not applied; ETL container unhealthy.
 
 ## Overview
 

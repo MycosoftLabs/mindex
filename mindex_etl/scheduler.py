@@ -44,6 +44,8 @@ class ETLScheduler:
             "traits": 24,
             "inat_obs": 1 / 12,  # ~5 minutes
             "gbif": 24,
+            "gbif_complete": 72,
+            "kingdom_backfill": 72,
             "hq_media": 12,
             "publications": 48,
             "chemspider": 24,
@@ -65,10 +67,12 @@ class ETLScheduler:
 
     def run_scheduled_jobs(self, max_pages: Optional[int] = 100) -> Dict[str, int]:
         """Run all scheduled jobs that are due."""
+        from .config import settings
         from .jobs.run_all import create_job_registry
 
         results: Dict[str, int] = {}
         registry = create_job_registry()
+        domain_mode = settings.inat_domain_mode or "fungi"
 
         for job_name, job in registry.items():
             if not self.should_run(job_name):
@@ -77,6 +81,8 @@ class ETLScheduler:
             logger.info(f"Running scheduled job: {job_name}")
             try:
                 job_kwargs: Dict[str, object] = {"max_pages": max_pages}
+                if job_name in {"inat_taxa", "gbif", "gbif_complete"}:
+                    job_kwargs["domain_mode"] = domain_mode
                 if job_name == "inat_obs":
                     # Live map data must be hydrated by MINDEX, not by the
                     # website request path. Keep a rolling overlap so restarts

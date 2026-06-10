@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 PUBMED_API_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-GBIF_LITERATURE_API = "https://api.gbif.org/v1/literature"
+GBIF_LITERATURE_API = "https://api.gbif.org/v1/literature/search"
 SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper/search"
 USER_AGENT = "MINDEX-ETL/1.0 (https://mycosoft.io; research@mycosoft.io)"
 
@@ -68,38 +68,20 @@ class PublicationsETL:
         }
 
     async def ensure_schema(self) -> None:
-        """
-        Ensure required tables exist.
-
-        VM 189 currently lacks `core.publications` in some deployments, so the ETL
-        must be able to create it before inserting.
-        """
-        await self.session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
-        await self.session.execute(
+        """Verify publications table exists (created by migration, not ETL DDL)."""
+        result = await self.session.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS core.publications (
-                    id VARCHAR(64) PRIMARY KEY,
-                    source VARCHAR(50) NOT NULL,
-                    external_id VARCHAR(255) NOT NULL,
-                    title TEXT NOT NULL,
-                    authors JSONB DEFAULT '[]'::jsonb,
-                    year INTEGER,
-                    abstract TEXT,
-                    url TEXT,
-                    doi VARCHAR(255),
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    CONSTRAINT publications_source_external_id_unique UNIQUE (source, external_id)
-                )
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'core' AND table_name = 'publications'
+                LIMIT 1
                 """
             )
         )
-        await self.session.execute(text("CREATE INDEX IF NOT EXISTS idx_publications_source ON core.publications(source)"))
-        await self.session.execute(text("CREATE INDEX IF NOT EXISTS idx_publications_year ON core.publications(year)"))
-        await self.session.execute(text("CREATE INDEX IF NOT EXISTS idx_publications_doi ON core.publications(doi)"))
-        await self.session.commit()
+        if result.scalar() is None:
+            raise RuntimeError(
+                "core.publications missing — apply migrations/20260610_publications_schema_JUN10_2026.sql on Postgres"
+            )
 
     async def close(self):
         await self.http_client.aclose()
@@ -166,15 +148,25 @@ class PublicationsETL:
         try:
             params = {
                 "q": query,
-                "limit": max_results,
-                "relevance": "MEDIUM",
+                "limit": min(max_results, 100),
             }
-            
+
             response = await self.http_client.get(GBIF_LITERATURE_API, params=params)
+            if response.status_code == 429:
+                await asyncio.sleep(30)
+                response = await self.http_client.get(GBIF_LITERATURE_API, params=params)
             response.raise_for_status()
             data = response.json()
-            
+
             for result in data.get("results", []):
+                identifiers = result.get("identifiers") or {}
+                if not isinstance(identifiers, dict):
+                    identifiers = {}
+                websites = result.get("websites") or []
+                first_url = None
+                if websites:
+                    w0 = websites[0]
+                    first_url = w0 if isinstance(w0, str) else w0.get("url") if isinstance(w0, dict) else None
                 publications.append({
                     "source": "gbif",
                     "external_id": str(result.get("id", "")),
@@ -182,8 +174,8 @@ class PublicationsETL:
                     "authors": result.get("authors", []),
                     "year": result.get("year"),
                     "abstract": result.get("abstract"),
-                    "doi": result.get("identifiers", {}).get("doi"),
-                    "url": result.get("websites", [{}])[0].get("url") if result.get("websites") else None,
+                    "doi": identifiers.get("doi"),
+                    "url": first_url,
                     "topics": result.get("topics", []),
                     "countries": result.get("countriesOfCoverage", []),
                 })
@@ -206,8 +198,11 @@ class PublicationsETL:
                 "limit": min(max_results, 100),
                 "fields": "title,authors,year,abstract,url,citationCount,venue",
             }
-            
+
             response = await self.http_client.get(SEMANTIC_SCHOLAR_API, params=params)
+            if response.status_code == 429:
+                await asyncio.sleep(60)
+                response = await self.http_client.get(SEMANTIC_SCHOLAR_API, params=params)
             response.raise_for_status()
             data = response.json()
             
@@ -290,7 +285,8 @@ class PublicationsETL:
         """Run the publications ETL job."""
         await self.ensure_schema()
         terms = search_terms or FUNGI_SEARCH_TERMS
-        enabled_sources = sources or ["gbif", "semantic_scholar"]
+        # PubMed primary; GBIF literature/search + Semantic Scholar optional (rate-limited).
+        enabled_sources = sources or ["pubmed", "gbif"]
         
         logger.info(f"Starting publications ETL with {len(terms)} search terms")
         
@@ -328,6 +324,7 @@ class PublicationsETL:
 async def run_publications_etl(
     max_per_term: int = 50,
     search_terms: Optional[List[str]] = None,
+    sources: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Entry point for publications ETL job."""
     async for session in get_db():
@@ -335,6 +332,7 @@ async def run_publications_etl(
         return await etl.run(
             search_terms=search_terms,
             max_per_term=max_per_term,
+            sources=sources,
         )
 
 

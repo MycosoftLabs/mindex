@@ -407,14 +407,34 @@ class ChemSpiderClient:
         return result.get("externalReferences", [])
     
     def get_batch_compounds(self, record_ids: List[int], fields: Optional[List[str]] = None) -> List[dict]:
-        """Get multiple compounds in a single request."""
-        payload = {"recordIds": record_ids}
+        """Get multiple compounds in a single request (falls back to per-record on batch 400)."""
+        if not record_ids:
+            return []
+        payload: Dict[str, Any] = {"recordIds": [int(r) for r in record_ids]}
         if fields:
             payload["fields"] = fields
-        
-        result = _make_request(self.client, "POST", "/records/batch", json_body=payload)
-        self._rate_limit()
-        return result.get("records", [])
+        try:
+            result = _make_request(self.client, "POST", "/records/batch", json_body=payload)
+            self._rate_limit()
+            records = result.get("records", [])
+            if records:
+                return records
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (400, 404):
+                raise
+            print(
+                f"ChemSpider batch failed ({exc.response.status_code}); fetching {len(record_ids)} records individually",
+                flush=True,
+            )
+        compounds: List[dict] = []
+        for rid in record_ids:
+            try:
+                compounds.append(self.get_compound(int(rid)))
+            except ChemSpiderNotFoundError:
+                continue
+            except Exception as err:
+                print(f"ChemSpider record {rid} skipped: {err}", flush=True)
+        return compounds
     
     # =========================================================================
     # LOOKUP ENDPOINTS

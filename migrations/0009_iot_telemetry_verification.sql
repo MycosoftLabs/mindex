@@ -15,9 +15,9 @@ ALTER TABLE telemetry.sample
     ADD COLUMN IF NOT EXISTS envelope_sig text,
     ADD COLUMN IF NOT EXISTS dedupe_key text;
 
+-- Full unique index (required for INSERT ... ON CONFLICT (dedupe_key) in envelope ingest).
 CREATE UNIQUE INDEX IF NOT EXISTS ux_sample_dedupe_key
-    ON telemetry.sample (dedupe_key)
-    WHERE dedupe_key IS NOT NULL;
+    ON telemetry.sample (dedupe_key);
 
 CREATE INDEX IF NOT EXISTS idx_sample_verified_recorded_at
     ON telemetry.sample (verified, recorded_at DESC)

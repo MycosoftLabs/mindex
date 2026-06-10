@@ -236,12 +236,17 @@ def iter_inat_taxa(
             
             time.sleep(delay)
         
-        # Save all records locally
         if save_locally and all_records:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"inat_{mode}_{rank or 'all'}_{timestamp}.json"
-            filepath = save_to_local(all_records, filename)
-            print(f"Saved {len(all_records)} records to {filepath}", flush=True)
+            try:
+                filepath = save_to_local(all_records, filename)
+                print(f"Saved {len(all_records)} records to {filepath}", flush=True)
+            except OSError as exc:
+                print(
+                    f"Warning: could not save iNat scrape to NAS ({exc}); taxa ingest still succeeded",
+                    flush=True,
+                )
             
     finally:
         if close_client:

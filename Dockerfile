@@ -28,6 +28,7 @@ COPY tests /app/tests
 # Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install . && \
+    pip install 'numpy>=1.26.4,<2.0' --force-reinstall && \
     pip cache purge
 
 EXPOSE 8000

@@ -61,8 +61,24 @@ logger = logging.getLogger(__name__)
 CHECKPOINT_FILE = Path(etl_settings.local_data_dir) / "hq_ingestion_checkpoint.json"
 IMAGE_STORAGE_BASE = Path(image_settings.local_image_dir)
 
+def _async_database_url() -> str:
+    """Build asyncpg URL from VM/docker env (DATABASE_URL is sync postgresql://)."""
+    raw = (
+        os.getenv("MINDEX_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or etl_settings.database_url
+    )
+    if raw.startswith("postgresql+asyncpg://"):
+        return raw
+    if raw.startswith("postgresql+psycopg://"):
+        return raw.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
+    if raw.startswith("postgresql://"):
+        return raw.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return raw
+
+
 # Database
-DATABASE_URL = os.getenv("MINDEX_DATABASE_URL", "postgresql+asyncpg://mindex:mindex@localhost:5434/mindex")
+DATABASE_URL = _async_database_url()
 
 
 @dataclass
@@ -216,29 +232,47 @@ class HQMediaIngestionWorker:
         # Exclude already processed taxa
         processed_ids = list(self.checkpoint.processed_taxon_ids)
         
-        query = """
-            SELECT 
-                t.id,
-                t.canonical_name,
-                t.source,
-                (t.metadata->>'observations_count')::int as observations_count
-            FROM core.taxon t
-            LEFT JOIN media.image i ON t.id = i.taxon_id AND i.quality_score >= 70
-            WHERE i.id IS NULL
-              AND t.id NOT IN (SELECT UNNEST(:processed_ids::uuid[]))
-            ORDER BY 
-                CASE 
-                    WHEN (t.metadata->>'observations_count') ~ '^[0-9]+$' 
-                    THEN (t.metadata->>'observations_count')::bigint 
-                    ELSE 0 
-                END DESC
-            LIMIT :limit
-        """
-        
-        result = await db.execute(text(query), {
-            "processed_ids": processed_ids or ['00000000-0000-0000-0000-000000000000'],
-            "limit": self.limit,
-        })
+        if processed_ids:
+            query = """
+                SELECT 
+                    t.id,
+                    t.canonical_name,
+                    t.source,
+                    (t.metadata->>'observations_count')::int as observations_count
+                FROM core.taxon t
+                LEFT JOIN media.image i ON t.id = i.taxon_id AND i.quality_score >= 70
+                WHERE i.id IS NULL
+                  AND t.id <> ALL(:processed_ids)
+                ORDER BY 
+                    CASE 
+                        WHEN (t.metadata->>'observations_count') ~ '^[0-9]+$' 
+                        THEN (t.metadata->>'observations_count')::bigint 
+                        ELSE 0 
+                    END DESC
+                LIMIT :limit
+            """
+            params: Dict[str, Any] = {"processed_ids": processed_ids, "limit": self.limit}
+        else:
+            query = """
+                SELECT 
+                    t.id,
+                    t.canonical_name,
+                    t.source,
+                    (t.metadata->>'observations_count')::int as observations_count
+                FROM core.taxon t
+                LEFT JOIN media.image i ON t.id = i.taxon_id AND i.quality_score >= 70
+                WHERE i.id IS NULL
+                ORDER BY 
+                    CASE 
+                        WHEN (t.metadata->>'observations_count') ~ '^[0-9]+$' 
+                        THEN (t.metadata->>'observations_count')::bigint 
+                        ELSE 0 
+                    END DESC
+                LIMIT :limit
+            """
+            params = {"limit": self.limit}
+
+        result = await db.execute(text(query), params)
         
         taxa = [dict(row) for row in result.mappings()]
         logger.info(f"Found {len(taxa)} taxa needing HQ images")

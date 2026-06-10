@@ -6,6 +6,64 @@ from uuid import UUID
 
 from psycopg import Connection
 
+ALLOWED_KINGDOMS = frozenset(
+    {
+        "Fungi",
+        "Plantae",
+        "Animalia",
+        "Bacteria",
+        "Archaea",
+        "Protista",
+        "Viruses",
+        "Undesignated",
+    }
+)
+
+# iNaturalist iconic_taxon_name and common aliases → core.taxon.kingdom check values
+_KINGDOM_ALIASES: dict[str, str] = {
+    "fungi": "Fungi",
+    "plantae": "Plantae",
+    "plants": "Plantae",
+    "animalia": "Animalia",
+    "mammalia": "Animalia",
+    "aves": "Animalia",
+    "reptilia": "Animalia",
+    "amphibia": "Animalia",
+    "actinopterygii": "Animalia",
+    "insecta": "Animalia",
+    "arachnida": "Animalia",
+    "mollusca": "Animalia",
+    "chromista": "Protista",
+    "protozoa": "Protista",
+    "bacteria": "Bacteria",
+    "archaea": "Archaea",
+    "viruses": "Viruses",
+    "viridae": "Viruses",
+}
+
+
+def normalize_kingdom(
+    value: Optional[str],
+    *,
+    default: str = "Undesignated",
+    source: Optional[str] = None,
+) -> str:
+    """Map external kingdom / iconic taxon strings to core.taxon CHECK constraint values."""
+    if source in ("mycobank", "theyeasts", "fusarium", "mushroom_world"):
+        return "Fungi"
+    if not value or not str(value).strip():
+        return default
+    raw = str(value).strip()
+    if raw in ALLOWED_KINGDOMS:
+        return raw
+    low = raw.lower().replace("_", " ")
+    if low in _KINGDOM_ALIASES:
+        return _KINGDOM_ALIASES[low]
+    for key, kingdom in _KINGDOM_ALIASES.items():
+        if key in low:
+            return kingdom
+    return default
+
 
 def normalize_name(name: str) -> str:
     if not name or not name.strip():
@@ -33,7 +91,11 @@ def upsert_taxon(
     """
     metadata = metadata or {}
     canonical = normalize_name(canonical_name)
-    
+    if kingdom is not None:
+        kingdom = normalize_kingdom(kingdom, source=source)
+    elif source in ("mycobank", "theyeasts", "fusarium", "mushroom_world"):
+        kingdom = "Fungi"
+
     with conn.cursor() as cur:
         cur.execute(
             """

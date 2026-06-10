@@ -53,17 +53,15 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                 source_url = genome.get("source_url") or (genome.get("metadata", {}) or {}).get("url")
                 
                 if existing:
-                    # Update existing
                     cur.execute(
                         """
                         UPDATE bio.genetic_sequence SET
                             species_name = %s,
-                            gene_name = %s,
                             gene = %s,
                             region = %s,
                             sequence_length = %s,
                             sequence_type = %s,
-                            description = %s,
+                            definition = %s,
                             source = %s,
                             source_url = %s,
                             sequence = %s,
@@ -72,13 +70,12 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                         """,
                         (
                             species_name,
-                            "genome",
                             "GENOME",
                             None,
                             genome.get("sequence_length"),
-                            seq_type.upper(),
+                            seq_type,
                             description,
-                            "GenBank",
+                            "genbank",
                             source_url,
                             seq_value,
                             accession,
@@ -86,26 +83,24 @@ def sync_genbank_genomes(*, max_pages: Optional[int] = None) -> int:
                     )
                     updated += 1
                 else:
-                    # Insert new - using bio.genetic_sequence schema
                     cur.execute(
                         """
                         INSERT INTO bio.genetic_sequence (
-                            accession, source, species_name, gene_name, gene, region,
-                            sequence, sequence_length, sequence_type, description, source_url
+                            accession, source, species_name, gene, region,
+                            sequence, sequence_length, sequence_type, definition, source_url
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (accession) DO NOTHING
                         """,
                         (
                             accession,
-                            "GenBank",
+                            "genbank",
                             species_name,
-                            "genome",
                             "GENOME",
                             None,
                             seq_value,
                             genome.get("sequence_length"),
-                            seq_type.upper(),
+                            seq_type,
                             description,
                             source_url,
                         ),
@@ -146,22 +141,21 @@ def sync_genbank_its_sequences(*, max_pages: Optional[int] = None) -> int:
                 cur.execute(
                     """
                     INSERT INTO bio.genetic_sequence (
-                        accession, source, gene, gene_name, region, species_name,
-                        sequence, sequence_length, sequence_type, description, source_url
+                        accession, source, gene, region, species_name,
+                        sequence, sequence_length, sequence_type, definition, source_url
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (accession) DO NOTHING
                     """,
                     (
                         accession,
-                        "GenBank",
-                        "ITS",
+                        "genbank",
                         "ITS",
                         seq.get("region"),
-                        seq.get("organism"),  # species_name
+                        seq.get("organism"),
                         seq_value,
                         seq.get("sequence_length"),
-                        _map_sequence_type(seq.get("molecule_type")).upper(),
+                        _map_sequence_type(seq.get("molecule_type")),
                         seq.get("definition"),
                         seq.get("source_url") or (seq.get("metadata", {}) or {}).get("url"),
                     ),

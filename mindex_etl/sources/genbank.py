@@ -48,6 +48,14 @@ def _esearch(
         timeout=60,
         headers={"User-Agent": "MINDEX-ETL/1.0 (Mycosoft; contact@mycosoft.org)"},
     )
+    if resp.status_code == 400 and api_key:
+        params.pop("api_key", None)
+        resp = client.get(
+            f"{NCBI_BASE}/esearch.fcgi",
+            params=params,
+            timeout=60,
+            headers={"User-Agent": "MINDEX-ETL/1.0 (Mycosoft; contact@mycosoft.org)"},
+        )
     resp.raise_for_status()
     return resp.json()
 
@@ -76,6 +84,14 @@ def _efetch(
         timeout=120,
         headers={"User-Agent": "MINDEX-ETL/1.0 (Mycosoft; contact@mycosoft.org)"},
     )
+    if resp.status_code == 400 and api_key:
+        params.pop("api_key", None)
+        resp = client.get(
+            f"{NCBI_BASE}/efetch.fcgi",
+            params=params,
+            timeout=120,
+            headers={"User-Agent": "MINDEX-ETL/1.0 (Mycosoft; contact@mycosoft.org)"},
+        )
     resp.raise_for_status()
     return resp.text
 

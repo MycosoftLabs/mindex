@@ -55,6 +55,7 @@ def map_record(record: dict) -> Tuple[dict, List[str], str]:
         "authority": record.get("Authors") or record.get("authority"),
         "description": record.get("Remarks") or record.get("description"),
         "source": "mycobank",
+        "kingdom": "Fungi",
         "metadata": {
             "mycobank_number": mb_number,
             "basionym": record.get("Basionym"),

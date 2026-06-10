@@ -55,7 +55,8 @@ def create_job_registry() -> Dict[str, ETLJob]:
     """Create registry of all available ETL jobs."""
     import asyncio
     from .sync_inat_taxa import sync_inat_taxa
-    from .sync_mycobank_taxa import sync_mycobank_taxa
+    from .sync_mycobank_taxa import sync_mycobank_taxa_compat
+    from .sync_gbif_complete import sync_gbif_fungi
     from .sync_fungidb_genomes import sync_fungidb_genomes
     from .backfill_traits import backfill_traits
     from .sync_inat_observations import sync_inat_observations
@@ -144,6 +145,35 @@ def create_job_registry() -> Dict[str, ETLJob]:
             logger.error(f"iNat taxon photo backfill failed: {e}")
             return 0
 
+    def run_gbif_complete_sync(**kwargs) -> int:
+        """Incremental pages of full GBIF fungal species dump (not occurrences)."""
+        max_pages = kwargs.get("max_pages")
+        max_offset = (max_pages * 300) if max_pages else None
+        try:
+            return sync_gbif_fungi(max_offset=max_offset)
+        except Exception as e:
+            logger.error(f"GBIF complete fungi sync failed: {e}")
+            return 0
+
+    def run_kingdom_backfill(**kwargs) -> int:
+        import asyncio
+        import os
+
+        from .backfill_kingdom_lineage import run_backfill
+
+        _ = kwargs
+        dsn = os.environ.get("MINDEX_DATABASE_URL") or os.environ.get("DATABASE_URL")
+        if not dsn:
+            from ..config import settings
+
+            dsn = settings.database_url
+        try:
+            asyncio.run(run_backfill(dsn, batch=5000))
+            return 0
+        except Exception as e:
+            logger.error(f"Kingdom/lineage backfill failed: {e}")
+            return -1
+
     registry: Dict[str, ETLJob] = {
         "inat_taxa": ETLJob(
             name="inat_taxa",
@@ -155,7 +185,7 @@ def create_job_registry() -> Dict[str, ETLJob]:
         "mycobank": ETLJob(
             name="mycobank",
             source="MycoBank",
-            run_func=sync_mycobank_taxa,
+            run_func=sync_mycobank_taxa_compat,
             priority=15,
             description="Sync taxa and synonyms from MycoBank (~545,007 species)",
         ),
@@ -207,6 +237,20 @@ def create_job_registry() -> Dict[str, ETLJob]:
             run_func=sync_gbif_occurrences,
             priority=60,
             description="Sync occurrence records from GBIF (domain-mode: all or fungi)",
+        ),
+        "gbif_complete": ETLJob(
+            name="gbif_complete",
+            source="GBIF",
+            run_func=run_gbif_complete_sync,
+            priority=61,
+            description="Sync full GBIF fungal species taxonomy (sync_gbif_complete)",
+        ),
+        "kingdom_backfill": ETLJob(
+            name="kingdom_backfill",
+            source="MINDEX",
+            run_func=run_kingdom_backfill,
+            priority=62,
+            description="Backfill core.taxon kingdom, lineage, lineage_ids from parent chains",
         ),
         # Additional jobs from remediation plan
         "hq_media": ETLJob(
@@ -271,7 +315,7 @@ def create_job_registry() -> Dict[str, ETLJob]:
             priority=95,
             description="Batch-sync civic viewport intelligence (officials, elections, facilities) into civic.*",
         )
-    except ImportError as exc:
+    except Exception as exc:
         logger.warning("civic_viewport ETL job unavailable in this runtime: %s", exc)
 
     def run_nlm_audio_ingest(**kwargs) -> int:

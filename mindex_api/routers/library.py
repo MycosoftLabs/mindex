@@ -31,6 +31,9 @@ from ..services.library_annotations import (
 from ..services.sine_acoustic.classifier import classify_acoustic_file
 from ..services.sine_acoustic.detector_registry import DEFAULT_DETECTOR_IDS
 from ..services.sine_acoustic.event_views import build_library_classification_payload
+from ..services.sine_acoustic.model_runtime import inspect_sine_model_runtime
+from ..services.sine_acoustic.persisted_evidence import list_persisted_analysis_evidence
+from ..services.sine_acoustic.request_contract import read_sine_request_contract
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -302,12 +305,62 @@ async def _latest_classification(
     elif summary is None:
         summary = {}
     flat = [dict(e) for e in events]
+    persisted_evidence = await list_persisted_analysis_evidence(db, run["id"])
     return build_library_classification_payload(
         flat,
         summary=summary if isinstance(summary, dict) else {},
         visualisation=run.get("visualisation"),
         analysis_run_id=str(run["id"]),
+        **persisted_evidence,
     )
+
+
+def _attach_latest_persisted_classification(
+    payload: dict[str, Any],
+    latest_classification: dict[str, Any] | None,
+    *,
+    blob_id: UUID,
+) -> dict[str, Any]:
+    """Attach prior persisted model evidence to the lightweight classify view.
+
+    ``/library/blobs/{id}/classify`` does not run model inference. The real
+    model path is ``/sine/blobs/{id}/analyze``. This helper lets the Library
+    route show any latest persisted evidence without pretending a new model run
+    happened during the classify request.
+    """
+    if latest_classification:
+        persisted_keys = (
+            "analysis_run_id",
+            "model_outputs",
+            "prototype_matches",
+            "deep_signal_matches",
+            "fusion_evidence",
+            "sound_transcripts",
+            "identification_summary",
+            "identification_status",
+        )
+        for key in persisted_keys:
+            value = latest_classification.get(key)
+            if value:
+                payload[key] = value
+        payload["latest_analysis_run_id"] = latest_classification.get("analysis_run_id")
+        payload["latest_persisted_evidence"] = {
+            "analysis_run_id": latest_classification.get("analysis_run_id"),
+            "model_outputs": latest_classification.get("model_outputs") or [],
+            "prototype_matches": latest_classification.get("prototype_matches") or [],
+            "fusion_evidence": latest_classification.get("fusion_evidence") or [],
+            "sound_transcripts": latest_classification.get("sound_transcripts") or [],
+        }
+    diagnostics = payload.setdefault("diagnostics", {})
+    if isinstance(diagnostics, dict):
+        diagnostics["new_model_inference_run"] = False
+        diagnostics["classify_route_mode"] = "detector_view_with_latest_persisted_evidence"
+        diagnostics["model_inference_route"] = f"/api/mindex/sine/blobs/{blob_id}/analyze"
+        if latest_classification:
+            diagnostics["latest_analysis_run_id"] = latest_classification.get("analysis_run_id")
+        else:
+            diagnostics.setdefault("blocking_reasons", []).append("no_persisted_analysis_evidence")
+    return payload
 
 
 async def _list_wave_annotations(blob_id: UUID, db: AsyncSession) -> list[dict[str, Any]]:
@@ -387,6 +440,7 @@ async def get_blob(blob_id: UUID, db: AsyncSession = Depends(get_db_session)) ->
 
 @router.post("/blobs/{blob_id}/classify")
 async def classify_blob(
+    request: Request,
     blob_id: UUID,
     detectors: Optional[str] = Query(None, description="Comma-separated SINE detector ids"),
     db: AsyncSession = Depends(get_db_session),
@@ -406,18 +460,31 @@ async def classify_blob(
         raise HTTPException(status_code=400, detail="classify_acoustic_only")
     path = _resolve_blob_path(row["abs_path"])
     det_list = [s.strip() for s in detectors.split(",") if s.strip()] if detectors else None
+    request_contract = await read_sine_request_contract(request)
+    model_context = await inspect_sine_model_runtime(db, request_contract=request_contract)
+    latest_classification = await _latest_classification(blob_id, db)
     try:
         payload = await asyncio.to_thread(
             classify_acoustic_file,
             path,
             detectors=det_list,
             library_label=row.get("label_primary"),
+            request_contract=request_contract,
+            model_context=model_context,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"classify_failed: {exc!s}") from exc
+    payload = _attach_latest_persisted_classification(
+        payload,
+        latest_classification,
+        blob_id=blob_id,
+    )
     return {
         "blob_id": str(blob_id),
         "status": "complete",
+        "model_inference_run": False,
+        "model_inference_route": f"/api/mindex/sine/blobs/{blob_id}/analyze",
+        "latest_analysis_run_id": payload.get("latest_analysis_run_id"),
         "detector_status": payload.get("detector_status"),
         "classification": payload,
         **{
@@ -428,11 +495,23 @@ async def classify_blob(
                 "bird_detections",
                 "uav_detections",
                 "nps_detections",
+                "deep_signal_detections",
                 "deep_signal_matches",
+                "model_status",
+                "model_context",
+                "model_outputs",
+                "prototype_matches",
+                "fusion_evidence",
+                "sound_transcripts",
+                "diagnostics",
+                "detector_evidence",
                 "identification_summary",
                 "identification_status",
                 "analysis_engine",
                 "visualisation",
+                "request_contract",
+                "latest_persisted_evidence",
+                "latest_analysis_run_id",
             )
             if k in payload
         },

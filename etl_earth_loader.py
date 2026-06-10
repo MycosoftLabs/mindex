@@ -42,8 +42,13 @@ import asyncpg
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("earth-loader")
 
-# MINDEX database connection — NAS at 192.168.0.189, port 5432
-DB_DSN = "postgresql://mycosoft:mycosoft_mindex_2026@192.168.0.189:5432/mindex"
+DB_DSN = (
+    os.environ.get("MINDEX_DB_DSN")
+    or os.environ.get("MINDEX_DATABASE_URL")
+    or os.environ.get("DATABASE_URL")
+)
+if not DB_DSN:
+    raise RuntimeError("Set MINDEX_DB_DSN, MINDEX_DATABASE_URL, or DATABASE_URL before running this ETL.")
 
 # Rate limiting
 RATE_LIMIT_DELAY = 0.5  # seconds between API calls

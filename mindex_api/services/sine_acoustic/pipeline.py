@@ -23,6 +23,7 @@ def run_full_analysis(
     *,
     detectors: Optional[list[str]] = None,
     library_label: Optional[str] = None,
+    visualisation_options: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Run all requested detectors; return events + visualisation + per-detector status."""
     requested = detectors or DEFAULT_DETECTOR_IDS
@@ -61,7 +62,7 @@ def run_full_analysis(
                     ev["detector_id"] = det_id
                     events.append(ev)
             elif det_id == "visualisation_sonic":
-                visualisation = build_visualisation_layers(samples, sr)
+                visualisation = build_visualisation_layers(samples, sr, **(visualisation_options or {}))
             status[det_id] = "ok"
         except Exception as exc:
             logger.warning("Detector %s failed: %s", det_id, exc)

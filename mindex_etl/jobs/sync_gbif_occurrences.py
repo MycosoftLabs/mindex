@@ -105,28 +105,31 @@ def sync_gbif_occurrences(
                 # Parse and normalize date
                 observed_at = _parse_date(obs.get("observed_at"))
 
-                # Insert observation using lat/lng columns (no PostGIS required)
                 with conn.cursor() as cur:
                     lat = obs.get("lat")
                     lng = obs.get("lng")
 
-                    # Check if exists
                     cur.execute(
                         "SELECT 1 FROM obs.observation WHERE source = %s AND source_id = %s",
                         (obs["source"], obs["source_id"]),
                     )
                     if cur.fetchone():
-                        continue  # Already exists
+                        continue
 
-                    # Insert with lat/lng columns (no PostGIS)
-                    insert_sql = """
+                    location_sql = "NULL"
+                    location_params: list[object] = []
+                    if lat is not None and lng is not None:
+                        location_sql = "ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography"
+                        location_params = [lng, lat]
+
+                    insert_sql = f"""
                         INSERT INTO obs.observation (
                             taxon_id, source, source_id, observer, observed_at,
-                            latitude, longitude, accuracy_m, media, notes, metadata
+                            location, accuracy_m, media, notes, metadata
                         )
                         VALUES (
                             %s, %s, %s, %s, %s::timestamptz,
-                            %s, %s, %s, %s::jsonb, %s, %s::jsonb
+                            {location_sql}, %s, %s::jsonb, %s, %s::jsonb
                         )
                     """
                     cur.execute(
@@ -137,8 +140,7 @@ def sync_gbif_occurrences(
                             obs["source_id"],
                             obs.get("observer"),
                             observed_at,
-                            lat,
-                            lng,
+                            *location_params,
                             obs.get("accuracy_m"),
                             json.dumps(obs.get("photos", [])),
                             obs.get("notes"),

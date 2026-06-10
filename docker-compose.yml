@@ -126,9 +126,10 @@ services:
       SOLANA_NETWORK: ${SOLANA_NETWORK:-mainnet-beta}
 
       # iNaturalist ETL (used by exec/backfill jobs in api container)
-      INAT_DOMAIN_MODE: ${INAT_DOMAIN_MODE:-all}
-      GBIF_DOMAIN_MODE: ${GBIF_DOMAIN_MODE:-all}
+      INAT_DOMAIN_MODE: ${INAT_DOMAIN_MODE:-fungi}
+      GBIF_DOMAIN_MODE: ${GBIF_DOMAIN_MODE:-fungi}
       INAT_API_TOKEN: ${INAT_API_TOKEN:-}
+      LOCAL_DATA_DIR: ${LOCAL_DATA_DIR:-/mnt/nas/mindex/scrapes/work}
     depends_on:
       db:
         condition: service_healthy
@@ -164,7 +165,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: mindex-etl
-    command: python -m mindex_etl.scheduler --interval 5 --max-pages 20
+    command: python -m mindex_etl.scheduler --interval 5 --max-pages 100
+    env_file:
+      - .env
     environment:
       MINDEX_DB_HOST: db
       MINDEX_DB_PORT: 5432
@@ -173,11 +176,20 @@ services:
       MINDEX_DB_NAME: ${MINDEX_DB_NAME:-mindex}
       DATABASE_URL: postgresql://${MINDEX_DB_USER:-mindex}:${MINDEX_DB_PASSWORD:-mindex}@db:5432/${MINDEX_DB_NAME:-mindex}
       REDIS_URL: redis://redis:6379/0
-      INAT_DOMAIN_MODE: ${INAT_DOMAIN_MODE:-all}
-      GBIF_DOMAIN_MODE: ${GBIF_DOMAIN_MODE:-all}
+      INAT_DOMAIN_MODE: ${INAT_DOMAIN_MODE:-fungi}
+      GBIF_DOMAIN_MODE: ${GBIF_DOMAIN_MODE:-fungi}
       INAT_API_TOKEN: ${INAT_API_TOKEN:-}
+      LOCAL_DATA_DIR: ${LOCAL_DATA_DIR:-/mnt/nas/mindex/scrapes/work}
       NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
       NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
+      CHEMSPIDER_API_KEY: ${CHEMSPIDER_API_KEY:-}
+      NCBI_API_KEY: ${NCBI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import mindex_etl.scheduler"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 45s
     depends_on:
       db:
         condition: service_healthy
@@ -239,6 +251,12 @@ services:
     volumes:
       - ./mindex_etl:/app/mindex_etl:ro
       - ./mindex_api:/app/mindex_api:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import mindex_etl.jobs.sync_earth_data"]
+      interval: 120s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
     networks:
       - mindex-network
     restart: unless-stopped

@@ -38,12 +38,16 @@ import asyncpg
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("inat-etl")
 
-DB_DSN = "postgresql://mycosoft:mycosoft_mindex_2026@192.168.0.189:5432/mindex"
+DB_DSN = (
+    os.environ.get("MINDEX_DB_DSN")
+    or os.environ.get("MINDEX_DATABASE_URL")
+    or os.environ.get("DATABASE_URL")
+)
+if not DB_DSN:
+    raise RuntimeError("Set MINDEX_DB_DSN, MINDEX_DATABASE_URL, or DATABASE_URL before running this ETL.")
 
 INAT_API = "https://api.inaturalist.org/v1"
-INAT_TOKEN = os.environ.get("INAT_API_TOKEN",
-    "eyJhbGciOiJIUzUxMiJ9.eyJ1c2VyX2lkIjoxMDAxOTc2OSwiZXhwIjoxNzY1OTE1MDY2fQ.JXV3lLOyuuXeItfNUagixJCtKN3SI20_em1sl2gKFFDppHBNJXy79x6I6jJbiPG1a6n_-cj1JgysSmuKlbDKVg"
-)
+INAT_TOKEN = os.environ.get("INAT_API_TOKEN", "").strip()
 
 # iNaturalist iconic taxa
 ICONIC_TAXA = [

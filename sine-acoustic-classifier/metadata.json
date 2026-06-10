@@ -1,0 +1,6 @@
+{
+  "name": "SINE Acoustic Classifier",
+  "description": "Unified acoustic intelligence model and audio classifier for SINE, NLM, and MINDEX databank library.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
