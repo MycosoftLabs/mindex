@@ -38,7 +38,9 @@ def _jsonish(value: Any) -> Any:
 def _json_dump(value: Any, default: Any) -> str:
     if value is None:
         value = default
-    return json.dumps(value)
+    # default=str so UUID/datetime and similar non-native JSON types serialize
+    # instead of raising (analyze persists blob_id/run_id UUIDs into jsonb fields).
+    return json.dumps(value, default=str)
 
 
 def build_model_output_insert_params(

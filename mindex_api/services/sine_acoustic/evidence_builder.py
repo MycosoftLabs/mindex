@@ -33,7 +33,7 @@ def _model_output_is_proven(output: dict[str, Any]) -> bool:
 def _json_dump(value: Any, default: Any) -> str:
     if value is None:
         value = default
-    return json.dumps(value)
+    return json.dumps(value, default=str)
 
 
 def _uuid_array_literal(values: list[Any]) -> str:

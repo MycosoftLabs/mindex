@@ -171,7 +171,8 @@ def build_prototype_match_insert_params(
                 "llm_fallback_used": False,
                 "filename_fallback_used": False,
                 "metadata_fallback_used": False,
-            }
+            },
+            default=str,
         ),
     }
 
