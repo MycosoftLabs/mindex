@@ -168,6 +168,9 @@ class Esc50Dataset:
         self.label_to_index = label_to_index
         self.sample_rate = sample_rate
         self.feature_params = feature_params
+        # Cache deterministic log-mel features so the expensive NAS read + FFT
+        # runs once per file, not once per epoch (CPU training speedup).
+        self._cache: dict[int, np.ndarray] = {}
 
     def __len__(self) -> int:
         return len(self.records)
@@ -176,19 +179,22 @@ class Esc50Dataset:
         import torch
 
         record = self.records[index]
-        samples, source_rate = _load_wav_mono(record.path)
-        samples = _resample_linear(samples, source_rate, self.sample_rate)
-        feature = extract_sine_feature_tensor(
-            samples,
-            self.sample_rate,
-            n_fft=int(self.feature_params["n_fft"]),
-            hop_length=int(self.feature_params["hop_length"]),
-            n_mels=int(self.feature_params["n_mels"]),
-            max_frames=int(self.feature_params["max_frames"]),
-            window_sec=float(self.feature_params["window_sec"]),
-        )
-        tensor = feature["tensor"]
-        return torch.from_numpy(tensor[0]), torch.tensor(self.label_to_index[record.label], dtype=torch.long)
+        cached = self._cache.get(index)
+        if cached is None:
+            samples, source_rate = _load_wav_mono(record.path)
+            samples = _resample_linear(samples, source_rate, self.sample_rate)
+            feature = extract_sine_feature_tensor(
+                samples,
+                self.sample_rate,
+                n_fft=int(self.feature_params["n_fft"]),
+                hop_length=int(self.feature_params["hop_length"]),
+                n_mels=int(self.feature_params["n_mels"]),
+                max_frames=int(self.feature_params["max_frames"]),
+                window_sec=float(self.feature_params["window_sec"]),
+            )
+            cached = np.asarray(feature["tensor"][0], dtype=np.float32)
+            self._cache[index] = cached
+        return torch.from_numpy(cached), torch.tensor(self.label_to_index[record.label], dtype=torch.long)
 
 
 def _split_records(records: list[AudioRecord], test_fold: int, seed: int) -> tuple[list[AudioRecord], list[AudioRecord]]:
@@ -396,6 +402,13 @@ def train_and_export(args: argparse.Namespace) -> dict[str, Any]:
                 "train_loss": float(total_loss / max(total_seen, 1)),
                 "validation_accuracy": evaluation["accuracy"],
             }
+        )
+        print(
+            f"[epoch {epoch}/{int(args.epochs)}] "
+            f"train_loss={total_loss / max(total_seen, 1):.4f} "
+            f"val_acc={evaluation['accuracy']:.4f} "
+            f"elapsed={time.time() - started:.0f}s",
+            flush=True,
         )
 
     output_root = Path(args.output_root)
