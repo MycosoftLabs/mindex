@@ -217,8 +217,14 @@ def build_library_classification_payload(
     prototype_matches: list[dict[str, Any]] | None = None,
     fusion_evidence: list[dict[str, Any]] | None = None,
     sound_transcripts: list[dict[str, Any]] | None = None,
+    **_ignored: Any,
 ) -> dict[str, Any]:
-    """Full acoustic classification view for Library blob detail + BFF."""
+    """Full acoustic classification view for Library blob detail + BFF.
+
+    Tolerates extra persisted-evidence keys (e.g. ``deep_signal_matches``,
+    a prototype-match alias) via ``**_ignored`` so the analyze route can splat
+    ``list_persisted_analysis_evidence`` output without a signature mismatch.
+    """
     detector_status = (summary or {}).get("detector_status") if summary else None
     grouped = group_events_for_library(events)
     outputs = model_outputs or []
