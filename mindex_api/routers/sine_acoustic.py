@@ -456,7 +456,7 @@ async def sine_analyze_blob(
                     "t0": ev.get("start_sec"),
                     "t1": ev.get("end_sec"),
                     "freq": ev.get("frequency_hz"),
-                    "meta": json.dumps(ev.get("metadata") or {}),
+                    "meta": json.dumps(ev.get("metadata") or {}, default=str),
                 },
             )
         model_inference = await run_and_persist_loaded_model_outputs(
@@ -489,8 +489,8 @@ async def sine_analyze_blob(
             ),
             {
                 "id": run_id,
-                "summary": json.dumps(summary),
-                "vis": json.dumps(result.get("visualisation") or {}),
+                "summary": json.dumps(summary, default=str),
+                "vis": json.dumps(result.get("visualisation") or {}, default=str),
             },
         )
         await db.commit()
