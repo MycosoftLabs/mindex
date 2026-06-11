@@ -31,6 +31,13 @@ RUN pip install --upgrade pip && \
     pip install 'numpy>=1.26.4,<2.0' --force-reinstall && \
     pip cache purge
 
+# SINE acoustic model runtime (CPU). TorchScript inference + ESC-50 P0 training.
+# CPU-only wheel keeps the image lean (no CUDA). Legions are offline (Jun 2026),
+# so SINE inference and the P0 training run execute on this CPU image.
+RUN pip install --no-cache-dir 'torch==2.2.2' --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir 'soundfile>=0.12' 'auditok>=0.2' && \
+    pip cache purge
+
 EXPOSE 8000
 
 # Health check
