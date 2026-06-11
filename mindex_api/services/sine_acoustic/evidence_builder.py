@@ -36,9 +36,10 @@ def _json_dump(value: Any, default: Any) -> str:
     return json.dumps(value, default=str)
 
 
-def _uuid_array_literal(values: list[Any]) -> str:
-    clean = [str(value) for value in values if _has_value(value)]
-    return "{" + ",".join(clean) + "}"
+def _uuid_array_literal(values: list[Any]) -> list[str]:
+    # Return a Python list (not a '{...}' string): asyncpg binds a list to a
+    # uuid[] column, but rejects the Postgres array-literal string form.
+    return [str(value) for value in values if _has_value(value)]
 
 
 def build_fusion_evidence_insert_params(
@@ -199,10 +200,10 @@ async def persist_sound_transcript(
     ).mappings().first()
     output = dict(params)
     output["id"] = row["id"] if row else None
-    output["model_output_ids"] = [value for value in params["model_output_ids"].strip("{}").split(",") if value]
-    output["fusion_evidence_ids"] = [value for value in params["fusion_evidence_ids"].strip("{}").split(",") if value]
-    output["prototype_ids"] = [value for value in params["prototype_match_ids"].strip("{}").split(",") if value]
-    output["detector_event_ids"] = [value for value in params["detector_event_ids"].strip("{}").split(",") if value]
+    output["model_output_ids"] = list(params["model_output_ids"])
+    output["fusion_evidence_ids"] = list(params["fusion_evidence_ids"])
+    output["prototype_ids"] = list(params["prototype_match_ids"])
+    output["detector_event_ids"] = list(params["detector_event_ids"])
     output["metadata"] = json.loads(str(params["metadata"]))
     return output
 
