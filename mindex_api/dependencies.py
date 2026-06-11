@@ -9,6 +9,14 @@ from .config import settings
 from .db import get_db
 
 api_key_header = APIKeyHeader(name='X-API-Key', auto_error=False)
+internal_token_header = APIKeyHeader(name='X-Internal-Token', auto_error=False)
+
+
+def _internal_tokens() -> list[str]:
+    import os
+
+    raw = os.environ.get('MINDEX_INTERNAL_TOKENS', '') or os.environ.get('MINDEX_INTERNAL_TOKEN', '')
+    return [t.strip() for t in raw.split(',') if t.strip()]
 
 
 @dataclass
@@ -28,8 +36,15 @@ def _is_production() -> bool:
     return env in ("production", "prod")
 
 
-async def require_api_key(api_key: Optional[str] = Depends(api_key_header)) -> Optional[str]:
+async def require_api_key(
+    api_key: Optional[str] = Depends(api_key_header),
+    internal_token: Optional[str] = Depends(internal_token_header),
+) -> Optional[str]:
     """Simple API key guard for non-health routes.
+
+    Accepts either X-API-Key (API_KEYS env) or X-Internal-Token
+    (MINDEX_INTERNAL_TOKENS env) so internal callers keep working when
+    API_KEYS enforcement is enabled.
 
     Fail-closed in production: if API_KEYS is unset/empty while
     MINDEX_ENV/ENVIRONMENT is production, requests are rejected instead of
@@ -41,6 +56,9 @@ async def require_api_key(api_key: Optional[str] = Depends(api_key_header)) -> O
     Both validate against the api_keys DB table with full identity context.
     """
     import logging
+
+    if internal_token and internal_token in _internal_tokens():
+        return internal_token
 
     if not settings.api_keys:
         if _is_production():
