@@ -178,7 +178,7 @@ class Esc50Dataset:
         record = self.records[index]
         samples, source_rate = _load_wav_mono(record.path)
         samples = _resample_linear(samples, source_rate, self.sample_rate)
-        tensor, _metadata = extract_sine_feature_tensor(
+        feature = extract_sine_feature_tensor(
             samples,
             self.sample_rate,
             n_fft=int(self.feature_params["n_fft"]),
@@ -187,6 +187,7 @@ class Esc50Dataset:
             max_frames=int(self.feature_params["max_frames"]),
             window_sec=float(self.feature_params["window_sec"]),
         )
+        tensor = feature["tensor"]
         return torch.from_numpy(tensor[0]), torch.tensor(self.label_to_index[record.label], dtype=torch.long)
 
 
