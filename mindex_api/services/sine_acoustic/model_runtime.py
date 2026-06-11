@@ -162,10 +162,32 @@ async def inspect_sine_model_runtime(
         context["blocking_reasons"].append("prototype_catalog_missing")
 
     # A registry row and installed runtime are still not a completed classifier.
-    # A future inference module must set inference_ready after it runs an actual
-    # model and returns model_outputs with artifact/checksum provenance.
+    # inference_ready requires PROOF a real model ran: at least one persisted
+    # sine.model_output row with artifact/checksum provenance.
     if loaded_rows and runtime_supported:
         context["model_status"] = "model_runtime_available"
-    if not context["blocking_reasons"]:
+
+    model_output_count = 0
+    if await registry_relation_exists(db, "sine.model_output"):
+        model_output_count = int(
+            (await db.execute(text("SELECT COUNT(*)::int FROM sine.model_output"))).scalar() or 0
+        )
+    context["model_output_count"] = model_output_count
+
+    fully_ready = bool(
+        loaded_rows
+        and runtime_supported
+        and context.get("prototype_catalog_ready")
+        and model_output_count > 0
+        and (not verify_artifacts or context.get("artifact_verified"))
+    )
+    if fully_ready:
+        context["inference_ready"] = True
+        context["model_ready"] = True
+        context["model_status"] = "model_ready"
+    elif loaded_rows and runtime_supported and model_output_count == 0:
+        context["blocking_reasons"].append("no_persisted_model_output")
+
+    if not context["blocking_reasons"] and not fully_ready:
         context["blocking_reasons"].append("model_inference_not_implemented")
     return context
