@@ -21,8 +21,19 @@ async def get_db_session(db: AsyncSession = Depends(get_db)) -> AsyncSession:
     return db
 
 
+def _is_production() -> bool:
+    import os
+
+    env = (os.environ.get("MINDEX_ENV") or os.environ.get("ENVIRONMENT") or "").strip().lower()
+    return env in ("production", "prod")
+
+
 async def require_api_key(api_key: Optional[str] = Depends(api_key_header)) -> Optional[str]:
     """Simple API key guard for non-health routes.
+
+    Fail-closed in production: if API_KEYS is unset/empty while
+    MINDEX_ENV/ENVIRONMENT is production, requests are rejected instead of
+    silently allowing everything (security audit JUN09_2026, finding X-1).
 
     DEPRECATED: This checks against the flat API_KEYS env var.
     For Worldview endpoints, use auth.require_worldview_key instead.
@@ -30,13 +41,24 @@ async def require_api_key(api_key: Optional[str] = Depends(api_key_header)) -> O
     Both validate against the api_keys DB table with full identity context.
     """
     import logging
-    if settings.api_keys:
-        if api_key is None or api_key not in settings.api_keys:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Unauthorized')
-        logging.getLogger(__name__).debug(
-            "Legacy env-var API key auth used — migrate to DB-backed auth "
-            "(auth.require_worldview_key or auth.require_internal_token)"
+
+    if not settings.api_keys:
+        if _is_production():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail='API_KEYS not configured; authenticated routes disabled',
+            )
+        logging.getLogger(__name__).warning(
+            "API_KEYS unset — require_api_key is OPEN (non-production only)"
         )
+        return api_key
+
+    if api_key is None or api_key not in settings.api_keys:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Unauthorized')
+    logging.getLogger(__name__).debug(
+        "Legacy env-var API key auth used — migrate to DB-backed auth "
+        "(auth.require_worldview_key or auth.require_internal_token)"
+    )
     return api_key
 
 
@@ -58,6 +80,11 @@ async def require_device_api_key(
     if api_key is None:
         if settings.api_keys:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Unauthorized')
+        if _is_production():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail='API_KEYS not configured; device routes disabled',
+            )
         return None
 
     if settings.api_keys and api_key in settings.api_keys:

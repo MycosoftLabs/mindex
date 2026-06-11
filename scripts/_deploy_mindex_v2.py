@@ -47,7 +47,7 @@ run_cmd(ssh, """docker run -d \
     --restart unless-stopped \
     -p 8000:8000 \
     --network mindex_default \
-    -e DATABASE_URL=postgresql://mycosoft:mycosoft_mindex_2026@mindex-postgres:5432/mindex \
+    -e DATABASE_URL=postgresql://mycosoft:{MINDEX_DB_PASSWORD}@mindex-postgres:5432/mindex \
     -e REDIS_URL=redis://mindex-redis:6379/0 \
     -e QDRANT_URL=http://mindex-qdrant:6333 \
     mindex-api:latest 2>&1""")

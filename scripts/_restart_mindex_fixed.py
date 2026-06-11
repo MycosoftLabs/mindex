@@ -39,7 +39,7 @@ run_cmd(ssh, """docker run -d \
     -e MINDEX_DB_HOST=mindex-postgres \
     -e MINDEX_DB_PORT=5432 \
     -e MINDEX_DB_USER=mycosoft \
-    -e MINDEX_DB_PASSWORD=mycosoft_mindex_2026 \
+    -e MINDEX_DB_PASSWORD={MINDEX_DB_PASSWORD} \
     -e MINDEX_DB_NAME=mindex \
     -e 'API_CORS_ORIGINS=["http://localhost:3000","http://localhost:3010","http://192.168.0.187:3000","http://192.168.0.188:8001"]' \
     mindex-api:latest 2>&1""")

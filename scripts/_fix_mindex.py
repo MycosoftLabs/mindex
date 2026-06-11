@@ -63,7 +63,7 @@ run_cmd(ssh, """docker run -d \
     -e MINDEX_DB_HOST=mindex-postgres \
     -e MINDEX_DB_PORT=5432 \
     -e MINDEX_DB_USER=mycosoft \
-    -e MINDEX_DB_PASSWORD=mycosoft_mindex_2026 \
+    -e MINDEX_DB_PASSWORD={MINDEX_DB_PASSWORD} \
     -e MINDEX_DB_NAME=mindex \
     -e API_CORS_ORIGINS='["*"]' \
     mindex-api:latest 2>&1""")
