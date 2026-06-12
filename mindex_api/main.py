@@ -68,6 +68,7 @@ from .routers import (
     live_state_router,
     mycodao_zone_router,
     meshtastic_internal_router,
+    biobank_events_router,
 )
 from .routers.worldview import (
     worldview_search_router,
@@ -151,6 +152,8 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router, prefix=prefix)
     app.include_router(beta_router, prefix=prefix)
+    # BLOCKS biobank webhooks (optional BIOBANK_WEBHOOK_TOKEN bearer)
+    app.include_router(biobank_events_router)
 
     # =========================================================================
     # ZONE 2: INTERNAL (service-to-service, requires X-Internal-Token)

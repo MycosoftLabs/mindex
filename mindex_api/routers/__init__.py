@@ -42,6 +42,7 @@ from .handoff_jun03 import router as handoff_jun03_router
 from .library import router as library_router
 from .sine_acoustic import router as sine_acoustic_router
 from .live_state import router as live_state_router
+from .biobank_events_router import router as biobank_events_router
 
 try:
     from .rag_retrieve import router as rag_retrieve_router
@@ -125,6 +126,7 @@ __all__ = [
     "fusarium_analytics_router",
     "fusarium_catalog_router",
     "live_state_router",
+    "biobank_events_router",
     "mycodao_zone_router",
     "meshtastic_internal_router",
 ]
