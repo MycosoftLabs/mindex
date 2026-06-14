@@ -87,6 +87,33 @@ async def _count_table(session: AsyncSession, table: str) -> int:
         return 0
 
 
+async def _count_sql(session: AsyncSession, sql: str) -> int:
+    try:
+        result = await session.execute(text(sql))
+        return int(result.scalar_one())
+    except Exception:
+        return 0
+
+
+_SPECIES_OBSERVATION_MAP_SQL = """
+    SELECT o.id::text, COALESCE(t.kingdom, 'Undesignated') as entity_type, 'species' as domain,
+           t.canonical_name || COALESCE(' (' || t.common_name || ')', '') as name,
+           ST_Y(o.location::geometry) as lat, ST_X(o.location::geometry) as lng,
+           o.observed_at::text as occurred_at, o.source,
+           jsonb_build_object(
+               'kingdom', t.kingdom,
+               'taxon_id', t.id::text,
+               'quality_grade', o.metadata->>'quality_grade',
+               'inat_id', o.metadata->>'inat_id'
+           ) as properties
+    FROM obs.observation o
+    LEFT JOIN core.taxon t ON t.id = o.taxon_id
+    WHERE o.location IS NOT NULL
+      AND o.location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+    ORDER BY o.observed_at DESC LIMIT :limit
+"""
+
+
 # =============================================================================
 # STATS
 # =============================================================================
@@ -134,7 +161,20 @@ async def earth_stats(session: AsyncSession = Depends(get_db_session)):
     counts = {}
     total = 0
     for key, table in tables.items():
-        c = await _count_table(session, table)
+        if key == "sightings":
+            c = await _count_sql(
+                session,
+                "SELECT count(*) FROM obs.observation WHERE location IS NOT NULL",
+            )
+        elif key == "species":
+            c_org = await _count_table(session, table)
+            c_taxa = await _count_sql(
+                session,
+                "SELECT count(DISTINCT taxon_id) FROM obs.observation WHERE taxon_id IS NOT NULL",
+            )
+            c = max(c_org, c_taxa)
+        else:
+            c = await _count_table(session, table)
         counts[key] = c
         total += c
 
@@ -391,17 +431,8 @@ async def map_bbox_query(
             WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
             LIMIT :limit
         """,
-        "species": """
-            SELECT s.id::text, o.kingdom as entity_type, 'species' as domain,
-                   o.scientific_name || COALESCE(' (' || o.common_name || ')', '') as name,
-                   ST_Y(s.location::geometry) as lat, ST_X(s.location::geometry) as lng,
-                   s.observed_at::text, s.source,
-                   jsonb_build_object('kingdom', o.kingdom, 'conservation', o.conservation_status) as properties
-            FROM species.sightings s
-            JOIN species.organisms o ON o.id = s.organism_id
-            WHERE s.location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
-            ORDER BY s.observed_at DESC LIMIT :limit
-        """,
+        "species": _SPECIES_OBSERVATION_MAP_SQL,
+        "sightings": _SPECIES_OBSERVATION_MAP_SQL,
         "power_grid": """
             SELECT id::text, asset_type as entity_type, 'infrastructure' as domain,
                    COALESCE(name, asset_type || ' ' || voltage_kv || 'kV') as name,

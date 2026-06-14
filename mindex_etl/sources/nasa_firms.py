@@ -78,6 +78,8 @@ def iter_fire_hotspots(
     days: int = 1,
 ) -> Generator[Dict, None, None]:
     """Iterate through FIRMS fire hotspot data."""
+    if not (FIRMS_MAP_KEY or "").strip():
+        return
     with httpx.Client() as client:
         records = _fetch_firms_data(client, source, area, days)
         for record in records:

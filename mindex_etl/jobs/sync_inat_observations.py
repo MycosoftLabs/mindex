@@ -24,6 +24,7 @@ from ..config import settings
 from ..db import db_session
 from ..sources import inat
 from ..taxon_canonicalizer import upsert_taxon
+from .species_map_sync import upsert_species_map_rows
 
 
 @retry(
@@ -309,6 +310,7 @@ def backfill_missing_inat_observation_metadata(
                             source_id,
                         ),
                     )
+                upsert_species_map_rows(conn, obs, core_taxon_id=taxon_id)
                 updated += 1
 
             time.sleep(delay_seconds)
@@ -408,6 +410,7 @@ def sync_inat_observations(
                             obs["source_id"],
                         ),
                     )
+                    upsert_species_map_rows(conn, obs, core_taxon_id=taxon_id)
                 else:
                     # Insert new
                     insert_sql = f"""
@@ -433,8 +436,9 @@ def sync_inat_observations(
                             json.dumps(obs.get("photos", [])),
                             obs.get("notes"),
                             json.dumps(obs.get("metadata", {})),
-                    ),
-                )
+                        ),
+                    )
+                    upsert_species_map_rows(conn, obs, core_taxon_id=taxon_id)
 
             inserted += 1
             
