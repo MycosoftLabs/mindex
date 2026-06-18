@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -28,9 +29,36 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/earth", tags=["Earth Data"])
 
 
-# =============================================================================
-# RESPONSE MODELS
-# =============================================================================
+def _bbox_spatial_filter(column: str = "location") -> str:
+    """PostGIS geography rejects antipodal envelopes (e.g. world bbox ±180/±90).
+
+    Use geometry && for regional queries; for world-sized bboxes only require a point.
+    """
+    return f"""(
+        ((CAST(:lng_max AS double precision) - CAST(:lng_min AS double precision)) >= 359.0
+          AND (CAST(:lat_max AS double precision) - CAST(:lat_min AS double precision)) >= 179.0
+          AND {column} IS NOT NULL)
+        OR ({column}::geometry && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326))
+    )"""
+
+
+_SPECIES_OBSERVATION_MAP_SQL = f"""
+    SELECT o.id::text, COALESCE(t.kingdom, 'Undesignated') as entity_type, 'species' as domain,
+           t.canonical_name || COALESCE(' (' || t.common_name || ')', '') as name,
+           ST_Y(o.location::geometry) as lat, ST_X(o.location::geometry) as lng,
+           o.observed_at::text as occurred_at, o.source,
+           jsonb_build_object(
+               'kingdom', t.kingdom,
+               'taxon_id', t.id::text,
+               'quality_grade', o.metadata->>'quality_grade',
+               'inat_id', o.metadata->>'inat_id'
+           ) as properties
+    FROM obs.observation o
+    LEFT JOIN core.taxon t ON t.id = o.taxon_id
+    WHERE o.location IS NOT NULL
+      AND {_bbox_spatial_filter("o.location")}
+    ORDER BY o.observed_at DESC LIMIT :limit
+"""
 
 class MapEntity(BaseModel):
     """CREP map-renderable entity — every entity on the planet."""
@@ -93,25 +121,6 @@ async def _count_sql(session: AsyncSession, sql: str) -> int:
         return int(result.scalar_one())
     except Exception:
         return 0
-
-
-_SPECIES_OBSERVATION_MAP_SQL = """
-    SELECT o.id::text, COALESCE(t.kingdom, 'Undesignated') as entity_type, 'species' as domain,
-           t.canonical_name || COALESCE(' (' || t.common_name || ')', '') as name,
-           ST_Y(o.location::geometry) as lat, ST_X(o.location::geometry) as lng,
-           o.observed_at::text as occurred_at, o.source,
-           jsonb_build_object(
-               'kingdom', t.kingdom,
-               'taxon_id', t.id::text,
-               'quality_grade', o.metadata->>'quality_grade',
-               'inat_id', o.metadata->>'inat_id'
-           ) as properties
-    FROM obs.observation o
-    LEFT JOIN core.taxon t ON t.id = o.taxon_id
-    WHERE o.location IS NOT NULL
-      AND o.location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
-    ORDER BY o.observed_at DESC LIMIT :limit
-"""
 
 
 # =============================================================================
@@ -333,24 +342,24 @@ async def map_bbox_query(
             WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
             LIMIT :limit
         """,
-        "aircraft": """
+        "aircraft": f"""
             SELECT id::text, 'aircraft' as entity_type, 'transport' as domain,
                    COALESCE(callsign, registration, icao24) as name,
                    ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
                    observed_at::text as occurred_at, source,
                    jsonb_build_object('altitude_ft', altitude_ft, 'speed_kts', ground_speed_kts, 'heading', heading) as properties
             FROM transport.aircraft
-            WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            WHERE {_bbox_spatial_filter("location")}
             ORDER BY observed_at DESC LIMIT :limit
         """,
-        "vessels": """
+        "vessels": f"""
             SELECT id::text, 'vessel' as entity_type, 'transport' as domain,
                    COALESCE(name, 'MMSI:' || mmsi) as name,
                    ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
                    observed_at::text as occurred_at, source,
                    jsonb_build_object('type', vessel_type, 'speed_kts', speed_knots, 'destination', destination) as properties
             FROM transport.vessels
-            WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            WHERE {_bbox_spatial_filter("location")}
             ORDER BY observed_at DESC LIMIT :limit
         """,
         "airports": """
@@ -495,13 +504,13 @@ async def map_bbox_query(
             WHERE route IS NOT NULL
             LIMIT :limit
         """,
-        "satellites": """
+        "satellites": f"""
             SELECT id::text, 'satellite' as entity_type, 'space' as domain,
                    name, ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng,
                    observed_at::text as occurred_at, source,
                    jsonb_build_object('norad_id', norad_id, 'orbit_type', orbit_type, 'altitude_km', altitude_km) as properties
             FROM space.satellites
-            WHERE location && ST_MakeEnvelope(:lng_min, :lat_min, :lng_max, :lat_max, 4326)::geography
+            WHERE {_bbox_spatial_filter("location")}
             ORDER BY observed_at DESC LIMIT :limit
         """,
         "rail_live": """
@@ -894,6 +903,17 @@ class IngestResponse(BaseModel):
 CREP_JSONB_LAYERS = frozenset({"rail_live", "aircraft_live", "cctv_cameras", "organizations"})
 
 
+def _parse_occurred_at(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def _crep_row_id(entity: IngestEntity) -> str:
     props = entity.properties or {}
     sid = (
@@ -931,7 +951,7 @@ async def _execute_earth_ingest(
                 location, place_name, occurred_at, properties)
             VALUES (:source, :source_id, :magnitude, :depth_km,
                 ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :name, COALESCE(:occurred_at::timestamptz, NOW()), :props::jsonb)
+                :name, COALESCE(CAST(:occurred_at AS timestamptz), NOW()), CAST(:props AS jsonb))
             ON CONFLICT (source_id) DO UPDATE SET
                 magnitude = EXCLUDED.magnitude, properties = EXCLUDED.properties
         """,
@@ -940,7 +960,7 @@ async def _execute_earth_ingest(
                 location, operator, capacity, status, properties)
             VALUES (:source, :source_id, :name, :entity_type, :sub_type,
                 ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :operator, :capacity, :status, :props::jsonb)
+                :operator, :capacity, :status, CAST(:props AS jsonb))
             ON CONFLICT (source, source_id) DO UPDATE SET
                 name = EXCLUDED.name, properties = EXCLUDED.properties
         """,
@@ -949,7 +969,7 @@ async def _execute_earth_ingest(
                 location, operator, properties)
             VALUES (:source, :source_id, :entity_type, :name, :voltage_kv,
                 ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :operator, :props::jsonb)
+                :operator, CAST(:props AS jsonb))
             ON CONFLICT DO NOTHING
         """,
         "airports": """
@@ -957,7 +977,7 @@ async def _execute_earth_ingest(
                 icao_code, location, country, properties)
             VALUES (:source, :source_id, :name, :entity_type,
                 :icao, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :country, :props::jsonb)
+                :country, CAST(:props AS jsonb))
             ON CONFLICT DO NOTHING
         """,
         "aircraft": """
@@ -965,31 +985,53 @@ async def _execute_earth_ingest(
                 location, heading, altitude_ft, ground_speed_kts, observed_at, properties)
             VALUES (:source, :source_id, :name, :icao24,
                 ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :heading, :altitude, :speed, COALESCE(:occurred_at::timestamptz, NOW()), :props::jsonb)
-            ON CONFLICT DO NOTHING
+                :heading, :altitude, :speed, COALESCE(CAST(:occurred_at AS timestamptz), NOW()), CAST(:props AS jsonb))
+            ON CONFLICT (source, source_id) WHERE source_id IS NOT NULL DO UPDATE SET
+                callsign = EXCLUDED.callsign,
+                icao24 = EXCLUDED.icao24,
+                location = EXCLUDED.location,
+                heading = EXCLUDED.heading,
+                altitude_ft = EXCLUDED.altitude_ft,
+                ground_speed_kts = EXCLUDED.ground_speed_kts,
+                observed_at = EXCLUDED.observed_at,
+                properties = EXCLUDED.properties
         """,
         "vessels": """
             INSERT INTO transport.vessels (source, source_id, name, mmsi,
                 location, speed_knots, heading, observed_at, properties)
             VALUES (:source, :source_id, :name, :mmsi,
                 ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :speed, :heading, COALESCE(:occurred_at::timestamptz, NOW()), :props::jsonb)
-            ON CONFLICT DO NOTHING
+                :speed, :heading, COALESCE(CAST(:occurred_at AS timestamptz), NOW()), CAST(:props AS jsonb))
+            ON CONFLICT (source, source_id) WHERE source_id IS NOT NULL DO UPDATE SET
+                name = EXCLUDED.name,
+                mmsi = EXCLUDED.mmsi,
+                location = EXCLUDED.location,
+                speed_knots = EXCLUDED.speed_knots,
+                heading = EXCLUDED.heading,
+                observed_at = EXCLUDED.observed_at,
+                properties = EXCLUDED.properties
         """,
         "satellites": """
             INSERT INTO space.satellites (source, source_id, name, norad_id,
                 orbit_type, location, altitude_km, observed_at, properties)
             VALUES (:source, :source_id, :name, :norad_id,
                 :orbit_type, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :altitude_km, COALESCE(:occurred_at::timestamptz, NOW()), :props::jsonb)
-            ON CONFLICT DO NOTHING
+                :altitude_km, COALESCE(CAST(:occurred_at AS timestamptz), NOW()), CAST(:props AS jsonb))
+            ON CONFLICT (source, source_id) WHERE source_id IS NOT NULL DO UPDATE SET
+                name = EXCLUDED.name,
+                norad_id = EXCLUDED.norad_id,
+                orbit_type = EXCLUDED.orbit_type,
+                location = EXCLUDED.location,
+                altitude_km = EXCLUDED.altitude_km,
+                observed_at = EXCLUDED.observed_at,
+                properties = EXCLUDED.properties
         """,
         "antennas": """
             INSERT INTO signals.antennas (source, source_id, antenna_type,
                 location, operator, technology, properties)
             VALUES (:source, :source_id, :entity_type,
                 ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :operator, :technology, :props::jsonb)
+                :operator, :technology, CAST(:props AS jsonb))
             ON CONFLICT DO NOTHING
         """,
         "military": """
@@ -997,7 +1039,7 @@ async def _execute_earth_ingest(
                 location, branch, country, properties)
             VALUES (:source, :source_id, :name, :entity_type,
                 ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :branch, :country, :props::jsonb)
+                :branch, :country, CAST(:props AS jsonb))
             ON CONFLICT DO NOTHING
         """,
         # Seaports / WPI (transport.ports) — CREP registry + website ingest proxy
@@ -1006,13 +1048,13 @@ async def _execute_earth_ingest(
                 location, country, max_vessel_size, properties)
             VALUES (:source, :source_id, :name, COALESCE(:port_type, 'seaport'), :unlocode,
                 ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                :country, :max_vessel_size, :props::jsonb)
+                :country, :max_vessel_size, CAST(:props AS jsonb))
         """,
         "rail_live": """
             INSERT INTO crep.rail_live (id, source, observed_at, location, payload)
-            VALUES (:id, :source, COALESCE(:occurred_at::timestamptz, NOW()),
+            VALUES (:id, :source, COALESCE(CAST(:occurred_at AS timestamptz), NOW()),
                     ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                    :props::jsonb)
+                    CAST(:props AS jsonb))
             ON CONFLICT (id) DO UPDATE SET
                 observed_at = EXCLUDED.observed_at,
                 location = EXCLUDED.location,
@@ -1020,9 +1062,9 @@ async def _execute_earth_ingest(
         """,
         "aircraft_live": """
             INSERT INTO crep.aircraft_live (id, source, observed_at, location, payload)
-            VALUES (:id, :source, COALESCE(:occurred_at::timestamptz, NOW()),
+            VALUES (:id, :source, COALESCE(CAST(:occurred_at AS timestamptz), NOW()),
                     ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                    :props::jsonb)
+                    CAST(:props AS jsonb))
             ON CONFLICT (id) DO UPDATE SET
                 observed_at = EXCLUDED.observed_at,
                 location = EXCLUDED.location,
@@ -1030,9 +1072,9 @@ async def _execute_earth_ingest(
         """,
         "cctv_cameras": """
             INSERT INTO crep.cctv_cameras (id, source, observed_at, location, payload)
-            VALUES (:id, :source, COALESCE(:occurred_at::timestamptz, NOW()),
+            VALUES (:id, :source, COALESCE(CAST(:occurred_at AS timestamptz), NOW()),
                     ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                    :props::jsonb)
+                    CAST(:props AS jsonb))
             ON CONFLICT (id) DO UPDATE SET
                 observed_at = EXCLUDED.observed_at,
                 location = EXCLUDED.location,
@@ -1040,9 +1082,9 @@ async def _execute_earth_ingest(
         """,
         "organizations": """
             INSERT INTO crep.organizations (id, source, observed_at, location, payload)
-            VALUES (:id, :source, COALESCE(:occurred_at::timestamptz, NOW()),
+            VALUES (:id, :source, COALESCE(CAST(:occurred_at AS timestamptz), NOW()),
                     ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-                    :props::jsonb)
+                    CAST(:props AS jsonb))
             ON CONFLICT (id) DO UPDATE SET
                 observed_at = EXCLUDED.observed_at,
                 location = EXCLUDED.location,
@@ -1056,6 +1098,9 @@ async def _execute_earth_ingest(
 
     for entity in entities:
         props = entity.properties or {}
+        occurred_at = _parse_occurred_at(entity.occurred_at)
+        if layer == "aircraft" and props.get("icao24"):
+            props["icao24"] = str(props["icao24"])[:6]
         try:
             if layer in CREP_JSONB_LAYERS:
                 params = {
@@ -1063,7 +1108,7 @@ async def _execute_earth_ingest(
                     "source": entity.source,
                     "lat": entity.lat,
                     "lng": entity.lng,
-                    "occurred_at": entity.occurred_at,
+                    "occurred_at": occurred_at,
                     "props": json.dumps(_crep_payload(entity)),
                 }
             else:
@@ -1074,7 +1119,7 @@ async def _execute_earth_ingest(
                     "entity_type": entity.entity_type,
                     "lat": entity.lat,
                     "lng": entity.lng,
-                    "occurred_at": entity.occurred_at,
+                    "occurred_at": occurred_at,
                     "props": json.dumps(props),
                     "magnitude": props.get("magnitude", 0),
                     "depth_km": props.get("depth_km"),
