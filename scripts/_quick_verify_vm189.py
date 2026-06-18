@@ -21,5 +21,5 @@ run("sudo docker exec mindex-etl python -c \"from mindex_etl.jobs.sync_mycobank_
 run('sudo docker exec mindex-postgres psql -U mindex -d mindex -tAc "SELECT source, count(*) FROM core.taxon GROUP BY source ORDER BY count DESC;"')
 run("sudo docker inspect mindex-etl --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'INAT_DOMAIN|GBIF_DOMAIN|LOCAL_DATA|max-pages' || true")
 run("sudo docker logs mindex-etl --tail 40 2>&1 | grep -iE 'Job (mycobank|gbif|inat_taxa)|unexpected keyword|latitude|scrapes' || true")
-run('curl -s -H "X-API-Key: local-dev-key" "http://127.0.0.1:8000/api/mindex/taxa?q=Pleurotus&limit=3" | head -c 600')
+run('set -a; . /home/mycosoft/mindex/.env; set +a; curl -s -H "X-API-Key: $MINDEX_API_KEY" "http://127.0.0.1:8000/api/mindex/taxa?q=Pleurotus&limit=3" | head -c 600')
 c.close()
