@@ -1,7 +1,7 @@
-"""Maritime Sensor Data Ingestion — TAC-O Maritime Integration.
+"""Maritime Sensor Data Ingestion — TAC-O / Psathyrella buoy integration.
 
-Ingests acoustic and magnetic sensor data from contractor-agnostic
-maritime sensor packages relayed through surface relay -> MycoBrain -> MDP.
+Ingests acoustic and magnetic sensor data from Mycosoft maritime sensor packages
+relayed through surface relay -> MycoBrain -> MDP.
 """
 
 import hashlib
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class MaritimeSensorIngestor:
-    """Ingest sensor data from maritime sensor relay networks."""
+    """Ingest sensor data from Mycosoft maritime sensor relay networks."""
 
     def __init__(self, db_pool=None):
         self.db_pool = db_pool
@@ -83,7 +83,3 @@ class MaritimeSensorIngestor:
     def _compute_merkle_hash(payload: Dict[str, Any]) -> str:
         canonical = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.sha256(canonical.encode()).hexdigest()
-
-
-# Backward-compatible alias for older imports.
-ZeetachecIngestor = MaritimeSensorIngestor

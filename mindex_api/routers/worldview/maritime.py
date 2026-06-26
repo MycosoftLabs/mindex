@@ -18,7 +18,7 @@ from ...dependencies import get_db_session
 from .response_envelope import wrap_governed_response
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/worldview/maritime", tags=["worldview", "maritime"])
+router = APIRouter(prefix="/maritime", tags=["worldview", "maritime"])
 
 
 @router.get("/acoustic-environment")

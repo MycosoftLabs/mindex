@@ -1,5 +1,5 @@
 -- TAC-O Maritime Acoustic Schemas
--- Zeetachec + Mycosoft NUWC Tactical Oceanography Integration
+-- Mycosoft NUWC Tactical Oceanography Integration (Psathyrella buoy / TAC-O)
 -- Date: April 2026
 
 CREATE TABLE IF NOT EXISTS acoustic_signatures (
