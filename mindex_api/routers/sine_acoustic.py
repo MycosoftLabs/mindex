@@ -6,13 +6,15 @@ Powers https://mycosoft.com/sensing/sine and NatureOS MINDEX acoustic player.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from pathlib import Path
 from typing import Any, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +34,100 @@ from .library import _resolve_blob_path, list_blobs, list_sources, stream_blob
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sine", tags=["sine"])
+
+
+class SineLibraryRegisterRequest(BaseModel):
+    abs_path: str = Field(..., min_length=1)
+    source_id: str
+    sensor_type: str = "hydrophone"
+    acoustic_domain: Optional[str] = None
+    device_id: Optional[str] = None
+    recording_group: Optional[str] = None
+    duration_sec: Optional[float] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/library/register")
+async def sine_library_register(
+    body: SineLibraryRegisterRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """
+    Register a buoy-scoped acoustic blob already on NAS (Psathyrella SINE ingest).
+
+    File must exist at ``abs_path`` on the MINDEX VM filesystem.
+    """
+    path = Path(body.abs_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="blob_file_not_found")
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    content_hash = digest.hexdigest()
+    size_bytes = path.stat().st_size
+    manifest_id = uuid4()
+    await db.execute(
+        text(
+            """
+            INSERT INTO library.manifest (id, source_id, category, status, run_started_at, run_finished_at, files_registered, bytes_total)
+            VALUES (:id, :source_id, 'acoustic', 'complete', NOW(), NOW(), 1, :bytes)
+            """
+        ),
+        {"id": manifest_id, "source_id": body.source_id, "bytes": size_bytes},
+    )
+    meta = dict(body.metadata or {})
+    meta.setdefault("device_id", body.device_id)
+    meta.setdefault("recording_group", body.recording_group)
+    meta.setdefault("tags", meta.get("tags") or [])
+
+    row = (
+        await db.execute(
+            text(
+                """
+                INSERT INTO library.blob (
+                    source_id, category, sensor_type, rel_path, abs_path, filename,
+                    content_hash, size_bytes, duration_sec, manifest_id, metadata,
+                    label_primary, acoustic_environment, origin_dataset_id
+                ) VALUES (
+                    :source_id, 'acoustic', :sensor_type, :rel_path, :abs_path, :filename,
+                    :content_hash, :size_bytes, :duration_sec, :manifest_id, CAST(:metadata AS jsonb),
+                    :label_primary, :acoustic_environment, :origin_dataset_id
+                )
+                ON CONFLICT (content_hash) DO UPDATE SET
+                    metadata = library.blob.metadata || EXCLUDED.metadata::jsonb,
+                    abs_path = EXCLUDED.abs_path
+                RETURNING id
+                """
+            ),
+            {
+                "source_id": body.source_id,
+                "sensor_type": body.sensor_type,
+                "rel_path": path.name,
+                "abs_path": str(path),
+                "filename": path.name,
+                "content_hash": content_hash,
+                "size_bytes": size_bytes,
+                "duration_sec": body.duration_sec,
+                "manifest_id": manifest_id,
+                "metadata": json.dumps(meta, default=str),
+                "label_primary": body.recording_group or body.source_id,
+                "acoustic_environment": body.acoustic_domain,
+                "origin_dataset_id": body.device_id or body.source_id,
+            },
+        )
+    ).scalar()
+    await db.commit()
+    blob_id = str(row) if row else None
+    return {
+        "status": "ok",
+        "blob_id": blob_id,
+        "id": blob_id,
+        "source_id": body.source_id,
+        "content_hash": content_hash,
+        "analyze_url": f"/api/mindex/sine/blobs/{blob_id}/analyze" if blob_id else None,
+    }
 
 
 async def _seed_detectors(db: AsyncSession) -> None:
