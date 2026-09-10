@@ -1,7 +1,13 @@
 name: platform-one-build
+# Sourcery AI GitHub App (sourcery-ai[bot]) already reviews MycosoftLabs PRs.
+# Do not add sourcery-ai/action@v1 here: repo secret SOURCERY_TOKEN is not set.
+# pull_request added Sep 10 2026 so lint/test run before merge, not only on push to main.
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
   workflow_dispatch:
