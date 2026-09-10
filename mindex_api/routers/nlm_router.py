@@ -58,15 +58,17 @@ async def persist_nmf(
             "embedding_id": row[0],
             "ts": row[1].isoformat() if hasattr(row[1], "isoformat") else str(row[1]),
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         await db.rollback()
         logger.exception("NMF persist failed")
-        raise HTTPException(status_code=500, detail=f"persist_failed: {exc!s}") from exc
+        raise HTTPException(status_code=500, detail="persist_failed") from exc
 
 
 @nlm_router.get("/nmf/{embedding_id}")
 async def get_nmf(
-    embedding_id: str,
+    embedding_id: int,
     db: AsyncSession = Depends(get_db_session),
 ) -> Dict[str, Any]:
     try:
@@ -74,7 +76,7 @@ async def get_nmf(
             """
             SELECT embedding_id, source_id, packet, anomaly_score, ts
             FROM nlm.nature_embeddings
-            WHERE embedding_id = CAST(:embedding_id AS bigint)
+            WHERE embedding_id = :embedding_id
             """
         )
         result = await db.execute(stmt, {"embedding_id": embedding_id})
@@ -98,7 +100,7 @@ async def get_nmf(
         raise
     except Exception as exc:
         logger.exception("NMF get failed")
-        raise HTTPException(status_code=500, detail=f"get_failed: {exc!s}") from exc
+        raise HTTPException(status_code=500, detail="get_failed") from exc
 
 
 def _pick_classification(payload: Dict[str, Any]) -> Dict[str, Any]:
