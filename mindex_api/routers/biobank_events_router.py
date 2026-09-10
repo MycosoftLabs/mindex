@@ -1,8 +1,9 @@
 """
 Biobank event receiver — BLOCKS/MYCODAO tissue catalog → MINDEX.
 
-POST /api/biobank/events ingests species/accession lifecycle events so MINDEX
-can link taxonomy, trigger ETL, and expose biobank status to search/MYCA.
+POST /api/mindex/biobank/events (canonical) and POST /api/biobank/events
+(compat, hidden from OpenAPI) ingest species/accession lifecycle events so
+MINDEX can link taxonomy, trigger ETL, and expose biobank status to search/MYCA.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/biobank", tags=["biobank"])
+router = APIRouter(prefix="/biobank", tags=["biobank"])
 
 _MAX_EVENTS = 500
 _recent: Deque[Dict[str, Any]] = deque(maxlen=_MAX_EVENTS)

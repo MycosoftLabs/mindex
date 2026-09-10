@@ -16,7 +16,12 @@ def test_openapi_is_namespaced_under_api_prefix() -> None:
     paths = spec["paths"]
 
     assert paths, "OpenAPI spec should contain paths"
-    assert all(path.startswith("/api/mindex/") or path.startswith("/api/worldview/") for path in paths.keys())
+    unprefixed = [
+        path
+        for path in paths
+        if not (path.startswith("/api/mindex/") or path.startswith("/api/worldview/"))
+    ]
+    assert not unprefixed, f"OpenAPI paths must stay under /api/mindex or /api/worldview: {unprefixed}"
 
     # Guardrails: no accidental un-namespaced routes.
     assert "/taxa" not in paths
@@ -29,6 +34,7 @@ def test_openapi_is_namespaced_under_api_prefix() -> None:
     assert "/api/mindex/telemetry/devices/latest" in paths
     assert "/api/mindex/sine/models" in paths
     assert "/api/mindex/sine/prototypes" in paths
+    assert "/api/mindex/biobank/events" in paths
 
 
 def test_openapi_contract_includes_stable_dto_shapes() -> None:

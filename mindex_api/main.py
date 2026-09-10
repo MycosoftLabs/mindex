@@ -154,7 +154,10 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix=prefix)
     app.include_router(beta_router, prefix=prefix)
     # BLOCKS biobank webhooks (optional BIOBANK_WEBHOOK_TOKEN bearer)
-    app.include_router(biobank_events_router)
+    app.include_router(biobank_events_router, prefix=prefix)
+    # MYCODAO still posts {MINDEX_API_URL}/api/biobank/events — keep that path
+    # but hide it from OpenAPI so the /api/mindex namespace contract stays clean.
+    app.include_router(biobank_events_router, prefix="/api", include_in_schema=False)
 
     # =========================================================================
     # ZONE 2: INTERNAL (service-to-service, requires X-Internal-Token)

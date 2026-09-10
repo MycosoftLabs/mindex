@@ -108,8 +108,9 @@ def test_build_sound_transcript_insert_params_links_model_and_fusion_ids() -> No
     assert params["label"] == "lightning_thunder"
     assert params["start_sec"] == 2.0
     assert params["end_sec"] == 7.0
-    assert params["model_output_ids"] == "{33333333-3333-3333-3333-333333333333}"
-    assert params["fusion_evidence_ids"] == "{44444444-4444-4444-4444-444444444444}"
+    # asyncpg binds Python lists to uuid[]; do not emit '{uuid}' literals.
+    assert params["model_output_ids"] == ["33333333-3333-3333-3333-333333333333"]
+    assert params["fusion_evidence_ids"] == ["44444444-4444-4444-4444-444444444444"]
     metadata = json.loads(str(params["metadata"]))
     assert metadata["semantic_fallback_used"] is False
     assert metadata["feature_sha256"] == "c" * 64
