@@ -34,9 +34,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install .[dev]
 
-      # Exit 5 when no tests are collected — keep flag so optional Iron Bank push still runs if tests expand later
+      # pytest exits 5 when no tests are collected. Treat that as success so the
+      # optional Iron Bank push can still run when the suite is empty or grows later.
+      # Do not use --suppress-no-test-exit-code: that flag needs pytest-custom-exit-code,
+      # which is not in the MINDEX dev extra.
       - name: Run unit tests
-        run: pytest --suppress-no-test-exit-code
+        run: |
+          set +e
+          pytest
+          rc=$?
+          if [ "$rc" -eq 5 ]; then
+            echo "No tests collected (pytest exit 5) — treating as success"
+            exit 0
+          fi
+          exit "$rc"
 
       - name: Authenticate to Iron Bank Registry
         if: ${{ env.IRON_BANK_REGISTRY != '' }}
