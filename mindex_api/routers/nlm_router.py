@@ -64,6 +64,43 @@ async def persist_nmf(
         raise HTTPException(status_code=500, detail=f"persist_failed: {exc!s}") from exc
 
 
+@nlm_router.get("/nmf/{embedding_id}")
+async def get_nmf(
+    embedding_id: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    try:
+        stmt = text(
+            """
+            SELECT embedding_id, source_id, packet, anomaly_score, ts
+            FROM nlm.nature_embeddings
+            WHERE embedding_id = CAST(:embedding_id AS bigint)
+            """
+        )
+        result = await db.execute(stmt, {"embedding_id": embedding_id})
+        row = result.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="embedding_not_found")
+        packet = row[2]
+        if hasattr(packet, "keys"):
+            packet_out = dict(packet)
+        else:
+            packet_out = json.loads(packet) if isinstance(packet, str) else packet
+        return {
+            "success": True,
+            "embedding_id": str(row[0]),
+            "source_id": row[1],
+            "packet": packet_out,
+            "anomaly_score": float(row[3] or 0.0),
+            "ts": row[4].isoformat() if hasattr(row[4], "isoformat") else str(row[4]),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("NMF get failed")
+        raise HTTPException(status_code=500, detail=f"get_failed: {exc!s}") from exc
+
+
 def _pick_classification(payload: Dict[str, Any]) -> Dict[str, Any]:
     cavitation = float(payload.get("cavitation_index", 0.0) or 0.0)
     broadband = float(payload.get("broadband_level_db", 0.0) or 0.0)
