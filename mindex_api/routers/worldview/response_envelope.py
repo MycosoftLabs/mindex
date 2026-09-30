@@ -71,24 +71,51 @@ async def wrap_governed_response(
 ) -> dict:
     """Wrap response data after AVANI governance review.
 
-    The existing data payload remains unchanged; AVANI metadata is attached
-    only under meta.avani for backward-compatible Worldview clients.
+    Domain data stays unchanged. Snapshot availability and unverified evidence
+    are separate from the AVANI governance review under meta.snapshot.
     """
     request_id = str(uuid4())
     from .avani_gateway import review_worldview_response
     from .snapshots import get_latest_snapshot_meta
+    from ...worldview_snapshot_meta import public_snapshot_meta
 
     snapshot_meta = await get_latest_snapshot_meta(region=region)
 
-    avani = await review_worldview_response(
-        worldview_request_id=request_id,
-        data=data,
-        source_domains=source_domains,
-        caller=caller,
-        region=region,
-        time_window=time_window,
-        snapshot_meta=snapshot_meta,
-    )
+    try:
+        avani = await review_worldview_response(
+            worldview_request_id=request_id,
+            data=data,
+            source_domains=source_domains,
+            caller=caller,
+            region=region,
+            time_window=time_window,
+            snapshot_meta=snapshot_meta,
+        )
+    except Exception:
+        avani = {
+            "worldview_request_id": request_id, "degraded": True, "confidence": None,
+            "avani_verdict": "unavailable", "governance_notes": ["AVANI review unavailable."],
+        }
+    # Older gateway fallback notes append raw transport exceptions. Do not publish them.
+    notes = avani.get("governance_notes")
+    if isinstance(notes, list):
+        avani["governance_notes"] = [
+            "AVANI review unavailable; local degraded Worldview guard applied."
+            if isinstance(note, str) and note.startswith("AVANI review unavailable;") else note
+            for note in notes
+        ]
+    provenance = avani.get("provenance")
+    avani.update({
+        "worldstate_snapshot_id": snapshot_meta.get("worldstate_snapshot_id"),
+        "freshness": snapshot_meta.get("freshness"),
+        "snapshot_status": snapshot_meta.get("status"),
+        "degraded": bool(avani.get("degraded") or snapshot_meta.get("degraded")),
+        "confidence_scope": "governance_review",
+        "provenance": {
+            **(provenance if isinstance(provenance, dict) else {}),
+            "worldstate_snapshot": snapshot_meta.get("provenance"),
+        },
+    })
     response = wrap_response(
         data=data,
         count=count,
@@ -97,4 +124,5 @@ async def wrap_governed_response(
         avani=avani,
     )
     response["meta"]["request_id"] = request_id
+    response["meta"]["snapshot"] = public_snapshot_meta(snapshot_meta)
     return response

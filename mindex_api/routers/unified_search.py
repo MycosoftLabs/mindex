@@ -60,10 +60,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from functools import partial
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -221,18 +223,17 @@ class EarthSearchResponse(BaseModel):
 # =============================================================================
 
 async def _safe_query(session: AsyncSession, sql: str, params: dict, domain: str) -> list:
-    """Execute a query safely, returning empty list on table-not-found errors."""
+    """Keep query failures distinct from a healthy query with no matches."""
     try:
-        result = await session.execute(text(sql), params)
-        return result.fetchall()
+        async with session.begin_nested():
+            result = await session.execute(text(sql), params)
+            return result.fetchall()
     except Exception as e:
-        err = str(e)
-        # Don't log noise for tables that haven't been created yet
-        if "does not exist" in err or "UndefinedTable" in err:
-            logger.debug(f"{domain}: table not yet created, skipping")
-        else:
-            logger.error(f"{domain} search error: {e}")
-        return []
+        logger.warning("%s query unavailable (%s)", domain, type(e).__name__)
+        raise HTTPException(status_code=503, detail={
+            "status": "unavailable",
+            "domain_errors": {domain: {"code": "domain_unavailable"}},
+        }) from e
 
 
 # =============================================================================
@@ -1351,63 +1352,86 @@ async def search_fusarium_correlations(session: AsyncSession, query: str, limit:
 # =============================================================================
 
 def _build_dispatch(session, query, limit, lat, lng, radius, toxicity, kingdom, facility_type):
-    """Map domain names to their search coroutines."""
+    """Map domains to lazy callables; unselected searches create no coroutines."""
     return {
         # Biological
-        "taxa": search_taxa(session, query, limit, toxicity, lat, lng, radius),
-        "species": search_species(session, query, limit, kingdom),
-        "compounds": search_compounds(session, query, limit),
-        "genetics": search_genetics(session, query, limit),
-        "observations": search_observations(session, query, limit, lat, lng, radius),
+        "taxa": partial(search_taxa, session, query, limit, toxicity, lat, lng, radius),
+        "species": partial(search_species, session, query, limit, kingdom),
+        "compounds": partial(search_compounds, session, query, limit),
+        "genetics": partial(search_genetics, session, query, limit),
+        "observations": partial(search_observations, session, query, limit, lat, lng, radius),
         # Earth events
-        "earthquakes": search_earthquakes(session, query, limit, lat, lng, radius),
-        "volcanoes": search_volcanoes(session, query, limit),
-        "wildfires": search_wildfires(session, query, limit),
-        "storms": search_storms(session, query, limit),
-        "lightning": search_lightning(session, query, limit, lat, lng, radius),
-        "tornadoes": search_tornadoes(session, query, limit),
-        "floods": search_floods(session, query, limit),
+        "earthquakes": partial(search_earthquakes, session, query, limit, lat, lng, radius),
+        "volcanoes": partial(search_volcanoes, session, query, limit),
+        "wildfires": partial(search_wildfires, session, query, limit),
+        "storms": partial(search_storms, session, query, limit),
+        "lightning": partial(search_lightning, session, query, limit, lat, lng, radius),
+        "tornadoes": partial(search_tornadoes, session, query, limit),
+        "floods": partial(search_floods, session, query, limit),
         # Atmosphere
-        "air_quality": search_air_quality(session, query, limit, lat, lng, radius),
-        "greenhouse_gas": search_greenhouse_gas(session, query, limit),
-        "weather": search_weather(session, query, limit, lat, lng, radius),
-        "remote_sensing": search_remote_sensing(session, query, limit),
+        "air_quality": partial(search_air_quality, session, query, limit, lat, lng, radius),
+        "greenhouse_gas": partial(search_greenhouse_gas, session, query, limit),
+        "weather": partial(search_weather, session, query, limit, lat, lng, radius),
+        "remote_sensing": partial(search_remote_sensing, session, query, limit),
         # Water
-        "buoys": search_buoys(session, query, limit, lat, lng, radius),
-        "stream_gauges": search_stream_gauges(session, query, limit),
+        "buoys": partial(search_buoys, session, query, limit, lat, lng, radius),
+        "stream_gauges": partial(search_stream_gauges, session, query, limit),
         # Infrastructure
-        "facilities": search_facilities(session, query, limit, facility_type),
-        "power_grid": search_power_grid(session, query, limit),
-        "water_systems": search_water_systems(session, query, limit),
-        "internet_cables": search_internet_cables(session, query, limit),
+        "facilities": partial(search_facilities, session, query, limit, facility_type),
+        "power_grid": partial(search_power_grid, session, query, limit),
+        "water_systems": partial(search_water_systems, session, query, limit),
+        "internet_cables": partial(search_internet_cables, session, query, limit),
         # Signals
-        "antennas": search_antennas(session, query, limit, lat, lng, radius),
-        "wifi_hotspots": search_wifi_hotspots(session, query, limit, lat, lng, radius),
-        "signal_measurements": search_signal_measurements(session, query, limit, lat, lng, radius),
+        "antennas": partial(search_antennas, session, query, limit, lat, lng, radius),
+        "wifi_hotspots": partial(search_wifi_hotspots, session, query, limit, lat, lng, radius),
+        "signal_measurements": partial(search_signal_measurements, session, query, limit, lat, lng, radius),
         # Transport
-        "aircraft": search_aircraft(session, query, limit, lat, lng, radius),
-        "vessels": search_vessels(session, query, limit, lat, lng, radius),
-        "airports": search_airports(session, query, limit),
-        "ports": search_ports(session, query, limit),
-        "spaceports": search_spaceports(session, query, limit),
-        "launches": search_launches(session, query, limit),
+        "aircraft": partial(search_aircraft, session, query, limit, lat, lng, radius),
+        "vessels": partial(search_vessels, session, query, limit, lat, lng, radius),
+        "airports": partial(search_airports, session, query, limit),
+        "ports": partial(search_ports, session, query, limit),
+        "spaceports": partial(search_spaceports, session, query, limit),
+        "launches": partial(search_launches, session, query, limit),
         # Space
-        "satellites": search_satellites(session, query, limit),
-        "solar_events": search_solar_events(session, query, limit),
+        "satellites": partial(search_satellites, session, query, limit),
+        "solar_events": partial(search_solar_events, session, query, limit),
         # Monitoring
-        "cameras": search_cameras(session, query, limit, lat, lng, radius),
-        "eagle_video": search_eagle_video(session, query, limit, lat, lng, radius),
+        "cameras": partial(search_cameras, session, query, limit, lat, lng, radius),
+        "eagle_video": partial(search_eagle_video, session, query, limit, lat, lng, radius),
         # Military
-        "military_installations": search_military_installations(session, query, limit),
+        "military_installations": partial(search_military_installations, session, query, limit),
         # Telemetry
-        "devices": search_devices(session, query, limit),
-        "telemetry": search_telemetry(session, query, limit),
+        "devices": partial(search_devices, session, query, limit),
+        "telemetry": partial(search_telemetry, session, query, limit),
         # Knowledge
-        "research": search_research(session, query, limit),
-        "crep_entities": search_crep_entities(session, query, limit, lat, lng, radius),
-        "fusarium_tracks": search_fusarium_tracks(session, query, limit, lat, lng, radius),
-        "fusarium_correlations": search_fusarium_correlations(session, query, limit),
+        "research": partial(search_research, session, query, limit),
+        "crep_entities": partial(search_crep_entities, session, query, limit, lat, lng, radius),
+        "fusarium_tracks": partial(search_fusarium_tracks, session, query, limit, lat, lng, radius),
+        "fusarium_correlations": partial(search_fusarium_correlations, session, query, limit),
     }
+
+
+async def _run_domain_searches(dispatch, domains) -> Dict[str, List[Any]]:
+    """Use the request session sequentially and refuse a complete-success claim on errors."""
+    selected = [domain for domain in domains if domain in dispatch]
+    results: Dict[str, List[Any]] = {}
+    errors: Dict[str, dict] = {}
+    for domain in selected:
+        try:
+            results[domain] = await dispatch[domain]()
+        except Exception as exc:
+            logger.warning("%s search unavailable (%s)", domain, type(exc).__name__)
+            errors[domain] = {"code": "domain_unavailable"}
+    if errors:
+        raise HTTPException(status_code=503, detail={
+            "status": "partial" if results else "unavailable",
+            "message": "Search incomplete: one or more selected domains are unavailable.",
+            "domains_searched": selected,
+            "domain_errors": errors,
+            "results": jsonable_encoder(results),
+            "total_count": sum(len(items) for items in results.values()),
+        })
+    return results
 
 
 def _resolve_domains(types_str: str) -> List[str]:
@@ -1467,9 +1491,9 @@ async def unified_search(
     session: AsyncSession = Depends(get_db_session),
 ):
     """
-    **Unified Earth Search** — Search everything on the planet in parallel.
+    **Unified Earth Search** — Search the selected MINDEX data domains.
 
-    Queries all MINDEX data domains simultaneously and returns combined results.
+    Queries selected domains sequentially on the request session and combines results.
     Every result carries lat/lng when available for direct CREP map rendering.
 
     Use `types=all` to search everything, or narrow with domain groups:
@@ -1486,12 +1510,20 @@ async def unified_search(
     """
     start_time = time.time()
 
+    domains = _resolve_domains(types) or ALL_DOMAINS
+    cache_types = ",".join(domains)
+    cache_options = {
+        "limit": limit, "lat": lat, "lng": lng, "radius": radius,
+        "toxicity": toxicity, "kingdom": kingdom, "facility_type": facility_type,
+        "since": since, "until": until,
+    }
+
     # ── TIER 0+1: Check cache first (LRU + Redis) ──────────────────────
     from ..cache import get_cache
     cache = get_cache()
     await cache.connect()
 
-    cached = await cache.get_cached_search(q, types)
+    cached = await cache.get_cached_search(q, cache_types, options=cache_options)
     if cached is not None:
         timing_ms = int((time.time() - start_time) * 1000)
         return UnifiedSearchResponse(
@@ -1503,36 +1535,12 @@ async def unified_search(
             filters_applied=cached.get("filters_applied", {}),
         )
 
-    # ── TIER 2: Local PostgreSQL (parallel across all domains) ─────────
-    domains = _resolve_domains(types)
-    if not domains:
-        domains = ALL_DOMAINS
-
+    # ── TIER 2: Local PostgreSQL (one shared session, sequential queries) ──
     dispatch = _build_dispatch(session, q, limit, lat, lng, radius, toxicity, kingdom, facility_type)
-
-    tasks = []
-    task_names = []
-    for domain in domains:
-        if domain in dispatch:
-            tasks.append(dispatch[domain])
-            task_names.append(domain)
-
-    results_list = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
-
-    results: Dict[str, List[Any]] = {}
-    total_count = 0
-    empty_domains = []
-
-    for name, result in zip(task_names, results_list):
-        if isinstance(result, Exception):
-            logger.error(f"Domain {name} search failed: {result}")
-            results[name] = []
-            empty_domains.append(name)
-        else:
-            results[name] = result
-            total_count += len(result)
-            if not result:
-                empty_domains.append(name)
+    results = await _run_domain_searches(dispatch, domains)
+    task_names = list(results)
+    total_count = sum(len(items) for items in results.values())
+    empty_domains = [name for name, items in results.items() if not items]
 
     # ── TIER 4: Live-scrape for domains that returned 0 results ────────
     # Only scrape domains that have live scrapers configured
@@ -1583,7 +1591,7 @@ async def unified_search(
     }
 
     # ── Cache the results for future requests ──────────────────────────
-    await cache.cache_search(q, types, response_data, ttl=120)
+    await cache.cache_search(q, cache_types, response_data, ttl=120, options=cache_options)
 
     # ── Async: Sync to Supabase for global access ──────────────────────
     from ..supabase_client import get_supabase
@@ -1671,44 +1679,31 @@ async def earth_search(
 
     dispatch = _build_dispatch(session, q, limit, lat, lng, radius, toxicity, kingdom, facility_type)
 
-    tasks = []
-    task_names = []
-    for domain in domains:
-        if domain in dispatch:
-            tasks.append(dispatch[domain])
-            task_names.append(domain)
-
-    results_list = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
-
-    results: Dict[str, List[Any]] = {}
+    results = await _run_domain_searches(dispatch, domains)
+    task_names = list(results)
     universal: List[SearchResult] = []
     total_count = 0
 
-    for name, result in zip(task_names, results_list):
-        if isinstance(result, Exception):
-            logger.error(f"Domain {name} failed: {result}")
-            results[name] = []
-        else:
-            results[name] = result
-            total_count += len(result)
-            # Normalize into universal SearchResult for CREP
-            for item in result:
-                if isinstance(item, dict):
-                    universal.append(SearchResult(
-                        id=str(item.get("id", "")),
-                        domain=item.get("domain", name),
-                        entity_type=item.get("entity_type", name),
-                        name=item.get("name") or item.get("scientific_name") or item.get("title") or str(item.get("id", "")),
-                        description=item.get("description") or item.get("abstract"),
-                        lat=item.get("lat"),
-                        lng=item.get("lng"),
-                        occurred_at=item.get("occurred_at") or item.get("observed_at"),
-                        source=item.get("source"),
-                        image_url=item.get("image_url") or item.get("thumbnail_url"),
-                        properties={k: v for k, v in item.items()
-                                    if k not in ("id", "domain", "entity_type", "name", "description",
-                                                 "lat", "lng", "occurred_at", "source", "image_url")},
-                    ))
+    for name, result in results.items():
+        total_count += len(result)
+        # Normalize into universal SearchResult for CREP
+        for item in result:
+            if isinstance(item, dict):
+                universal.append(SearchResult(
+                    id=str(item.get("id", "")),
+                    domain=item.get("domain", name),
+                    entity_type=item.get("entity_type", name),
+                    name=item.get("name") or item.get("scientific_name") or item.get("title") or str(item.get("id", "")),
+                    description=item.get("description") or item.get("abstract"),
+                    lat=item.get("lat"),
+                    lng=item.get("lng"),
+                    occurred_at=item.get("occurred_at") or item.get("observed_at"),
+                    source=item.get("source"),
+                    image_url=item.get("image_url") or item.get("thumbnail_url"),
+                    properties={k: v for k, v in item.items()
+                                if k not in ("id", "domain", "entity_type", "name", "description",
+                                             "lat", "lng", "occurred_at", "source", "image_url")},
+                ))
 
     timing_ms = int((time.time() - start_time) * 1000)
 
@@ -1806,23 +1801,9 @@ async def search_nearby(
 
     dispatch = _build_dispatch(session, q, limit, lat, lng, radius, None, None, None)
 
-    tasks = []
-    task_names = []
-    for domain in domains:
-        if domain in dispatch and domain in location_aware:
-            tasks.append(dispatch[domain])
-            task_names.append(domain)
-
-    results_list = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
-
-    results: Dict[str, List[Any]] = {}
-    total_count = 0
-    for name, result in zip(task_names, results_list):
-        if isinstance(result, Exception):
-            results[name] = []
-        else:
-            results[name] = result
-            total_count += len(result)
+    results = await _run_domain_searches(dispatch, [d for d in domains if d in location_aware])
+    task_names = list(results)
+    total_count = sum(len(items) for items in results.values())
 
     timing_ms = int((time.time() - start_time) * 1000)
 

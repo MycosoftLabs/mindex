@@ -8,7 +8,9 @@ def test_snapshot_to_avani_meta_returns_degraded_missing_snapshot():
 
     assert meta["worldstate_snapshot_id"] is None
     assert meta["degraded"] is True
-    assert meta["freshness"] == "degraded"
+    assert meta["freshness"] == "unknown"
+    assert meta["status"] == "missing"
+    assert meta["confidence"] is None
 
 
 def test_snapshot_to_avani_meta_preserves_audit_fields():
@@ -24,7 +26,10 @@ def test_snapshot_to_avani_meta_preserves_audit_fields():
     )
 
     assert meta["worldstate_snapshot_id"] == "worldstate-abc"
-    assert meta["freshness"] == "2026-05-14T12:00:00+00:00"
-    assert meta["degraded"] is False
-    assert meta["confidence"] == 0.91
+    assert meta["captured_at"] == "2026-05-14T12:00:00+00:00"
+    assert meta["freshness"] == "unknown"
+    assert meta["degraded"] is True
+    assert meta["confidence"] is None
+    assert meta["reported_degraded"] is False
+    assert meta["reported_confidence"] == 0.91
     assert meta["audit_trail_id"] == "audit-1"

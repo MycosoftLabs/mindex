@@ -11,7 +11,7 @@ from datetime import datetime
 # Add parent to path
 sys.path.insert(0, '/app')
 
-from mindex_etl.checkpoint import CheckpointManager
+from mindex_etl.checkpoint import resume_from_checkpoint
 from mindex_etl.jobs.sync_inat_taxa import sync_inat_taxa
 from mindex_etl.jobs.sync_inat_observations import sync_inat_observations
 from mindex_etl.jobs.sync_gbif_occurrences import sync_gbif_occurrences
@@ -25,23 +25,14 @@ def log(msg: str):
 
 def sync_with_checkpoint(job_name: str, sync_func, *args, **kwargs):
     """Run a sync job with checkpoint support."""
-    checkpoint = CheckpointManager(job_name)
-    
-    # Check if we should resume
-    last_page = checkpoint.get_last_page()
-    if last_page:
-        log(f"Found checkpoint for {job_name} at page {last_page}")
-        kwargs['start_page'] = last_page
-        kwargs['checkpoint_manager'] = checkpoint
-    
     try:
-        return sync_func(*args, **kwargs)
+        return resume_from_checkpoint(job_name, lambda **resume_kwargs: sync_func(*args, **resume_kwargs), **kwargs)
     except KeyboardInterrupt:
-        log(f"Interrupted - checkpoint saved. Resume with: --resume")
+        log("Interrupted; only pages with confirmed database commits may have checkpoints")
         raise
     except Exception as e:
         log(f"Error in {job_name}: {e}")
-        log(f"Checkpoint saved - can resume from page {checkpoint.get_last_page()}")
+        log("Inspect the checkpoint; committed pages may be resumed with matching arguments")
         raise
 
 def main():
@@ -68,7 +59,7 @@ def main():
         log(f"   ✓ Synced {count:,} iNaturalist taxa")
     except Exception as e:
         log(f"   ✗ Error: {e}")
-        log("   Checkpoint saved - can resume later")
+        log("   Inspect the last committed checkpoint before resuming with matching arguments")
     
     # 2. iNaturalist Observations
     log("\n2. Syncing iNaturalist Observations...")
@@ -84,7 +75,7 @@ def main():
         log(f"   ✓ Synced {count:,} iNaturalist observations")
     except Exception as e:
         log(f"   ✗ Error: {e}")
-        log("   Checkpoint saved - can resume later")
+        log("   Inspect the last committed checkpoint before resuming with matching arguments")
     
     # 3. GBIF Occurrences
     log("\n3. Syncing GBIF Occurrences...")
