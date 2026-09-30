@@ -170,14 +170,19 @@ class RedisCache:
     # SEARCH CACHE
     # =========================================================================
 
-    async def cache_search(self, query: str, types: str, results: dict, ttl: int = 120) -> bool:
+    async def cache_search(
+        self, query: str, types: str, results: dict, ttl: int = 120,
+        *, options: Optional[dict] = None,
+    ) -> bool:
         """Cache unified search results."""
-        key = f"search:{_hash(query + '|' + types)}"
+        key = _search_key(query, types, options)
         return await self.set_json(key, results, ttl)
 
-    async def get_cached_search(self, query: str, types: str) -> Optional[dict]:
+    async def get_cached_search(
+        self, query: str, types: str, *, options: Optional[dict] = None,
+    ) -> Optional[dict]:
         """Get cached search results."""
-        key = f"search:{_hash(query + '|' + types)}"
+        key = _search_key(query, types, options)
         return await self.get_json(key)
 
     # =========================================================================
@@ -260,6 +265,15 @@ class RedisCache:
 # =========================================================================
 # HELPERS
 # =========================================================================
+
+def _search_key(query: str, types: str, options: Optional[dict]) -> str:
+    """Versioned identity of every option supplied by the search route."""
+    request = json.dumps(
+        {"query": query, "types": types, "options": options or {}},
+        sort_keys=True, separators=(",", ":"),
+    )
+    return "search:v2:" + hashlib.sha256(request.encode()).hexdigest()
+
 
 def _hash(value: str) -> str:
     """Short hash for cache keys."""

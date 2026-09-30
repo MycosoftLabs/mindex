@@ -85,7 +85,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             SET usage_count = usage_count + 1,
                                 last_used_at = :now,
                                 updated_at = :now
-                            WHERE id = :key_id::uuid
+                            WHERE id = CAST(:key_id AS uuid)
                         """),
                         {"key_id": key_id, "now": now},
                     )
@@ -95,7 +95,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     await db.execute(
                         text("""
                             INSERT INTO api_key_usage (key_id, window_start, window_type, request_count)
-                            VALUES (:key_id::uuid, :window_start, 'minute', 1)
+                            VALUES (CAST(:key_id AS uuid), :window_start, 'minute', 1)
                             ON CONFLICT (key_id, window_start, window_type)
                             DO UPDATE SET request_count = api_key_usage.request_count + 1
                         """),
@@ -107,7 +107,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     await db.execute(
                         text("""
                             INSERT INTO api_key_audit (key_id, action, ip_address, user_agent, endpoint, metadata)
-                            VALUES (:key_id::uuid, 'request', :ip::inet, :ua, :endpoint, :meta::jsonb)
+                            VALUES (CAST(:key_id AS uuid), 'request', CAST(:ip AS inet), :ua, :endpoint, CAST(:meta AS jsonb))
                         """),
                         {
                             "key_id": key_id,

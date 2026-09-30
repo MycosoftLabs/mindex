@@ -9,7 +9,7 @@ import argparse
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Generator, Optional
+from typing import Callable, Dict, Generator, Optional
 
 import httpx
 from tenacity import (
@@ -115,13 +115,15 @@ def iter_observations(
     delay_seconds: float = 0.7,  # Increased to respect rate limits
     domain_mode: Optional[str] = None,
     start_page: int = 1,
+    on_page: Optional[Callable[[int], None]] = None,
 ) -> Generator[Dict, None, None]:
     """Iterate through iNaturalist observations. domain_mode: 'all' or 'fungi' (default from config)."""
+    inat._validate_page_arguments(per_page, start_page, max_pages)
     mode = domain_mode or settings.inat_domain_mode
     taxon_id = inat._root_taxon_id(mode)
     with httpx.Client() as client:
-        page = max(1, start_page)
-        while True:
+        page = start_page
+        while max_pages is None or page <= max_pages:
             payload = _fetch_observations(
                 client, page, per_page, quality_grade, updated_since, taxon_id=taxon_id
             )
@@ -131,6 +133,9 @@ def iter_observations(
 
             for obs in results:
                 yield _map_observation(obs)
+
+            if on_page is not None:
+                on_page(page)
 
             page += 1
             if max_pages and page > max_pages:
@@ -276,7 +281,7 @@ def backfill_missing_inat_observation_metadata(
 
                 location_sql = "location"
                 location_params: list[object] = []
-                if obs.get("lat") and obs.get("lng"):
+                if obs.get("lat") is not None and obs.get("lng") is not None:
                     location_sql = "COALESCE(location, ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography)"
                     location_params = [obs["lng"], obs["lat"]]
 
@@ -332,15 +337,29 @@ def sync_inat_observations(
 ) -> int:
     """Sync iNaturalist observations into MINDEX database with checkpoint support. domain_mode: 'all' or 'fungi'."""
     inserted = 0
-    checkpoint_interval = 10  # Save checkpoint every 10 pages
-    page = start_page
+    inat._validate_page_arguments(per_page, start_page, max_pages)
     if updated_since is None and lookback_hours:
         since_dt = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         updated_since = since_dt.isoformat().replace("+00:00", "Z")
 
+    mode = domain_mode or settings.inat_domain_mode
+    query = {"source": "inat_observations", "base_url": settings.inat_base_url,
+             "taxon_id": inat._root_taxon_id(mode), "per_page": per_page,
+             "quality_grade": quality_grade, "updated_since": updated_since,
+             "order_by": "observed_on", "order": "desc", "photos": "true", "geo": "true"}
+    if checkpoint_manager is not None:
+        # Only a fingerprint is persisted; never publish raw connection settings.
+        query["database_target"] = settings.database_url
+        start_page = checkpoint_manager.resume_page(query=query, start_page=start_page)
+
     backfilled = 0
 
     with db_session() as conn:
+        def committed_page(page: int) -> None:
+            conn.commit()
+            if checkpoint_manager is not None:
+                checkpoint_manager.save_committed(page, query=query, records_processed=inserted)
+
         for obs in iter_observations(
             max_pages=max_pages,
             quality_grade=quality_grade,
@@ -348,6 +367,7 @@ def sync_inat_observations(
             per_page=per_page,
             updated_since=updated_since,
             start_page=start_page,
+            on_page=committed_page,
         ):
             taxon_name = obs.get("taxon_name")
             if not taxon_name:
@@ -372,7 +392,7 @@ def sync_inat_observations(
                 # Create point geometry if coordinates available
                 location_sql = "NULL"
                 location_params = []
-                if obs.get("lat") and obs.get("lng"):
+                if obs.get("lat") is not None and obs.get("lng") is not None:
                     location_sql = "ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography"
                     location_params = [obs["lng"], obs["lat"]]
 
@@ -388,6 +408,7 @@ def sync_inat_observations(
                     update_sql = f"""
                         UPDATE obs.observation SET
                             taxon_id = %s,
+                            observed_at = COALESCE(%s::timestamptz, observed_at),
                             observer = %s,
                             location = {location_sql},
                             accuracy_m = %s,
@@ -400,6 +421,7 @@ def sync_inat_observations(
                         update_sql,
                         (
                             taxon_id,
+                            obs.get("observed_at"),
                             obs.get("observer"),
                             *location_params,
                             obs.get("accuracy_m"),
@@ -442,14 +464,6 @@ def sync_inat_observations(
 
             inserted += 1
             
-            # Save checkpoint periodically
-            if checkpoint_manager and inserted % (100 * checkpoint_interval) == 0:
-                checkpoint_manager.save(page, records_processed=inserted)
-                print(f"Checkpoint saved: page {page}, {inserted} observations", flush=True)
-            
-            # Track current page (approximate)
-            if inserted % 100 == 0:
-                page += 1
 
         if backfill_records > 0:
             backfilled = backfill_missing_inat_observation_metadata(
@@ -459,10 +473,6 @@ def sync_inat_observations(
             )
             if backfilled:
                 print(f"Backfilled {backfilled} existing iNaturalist observations with taxon metadata", flush=True)
-    
-    # Final checkpoint
-    if checkpoint_manager:
-        checkpoint_manager.save(page, records_processed=inserted, completed=True)
     
     return inserted + backfilled
 

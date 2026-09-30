@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...auth import CallerIdentity, require_worldview_key
@@ -66,10 +66,11 @@ async def worldview_search(
     # Filter requested domains to exclude internal-only ones
     if domains:
         requested = [d.strip() for d in domains.split(",")]
-        safe_domains = [d for d in requested if d not in INTERNAL_DOMAINS and d in WORLDVIEW_DOMAINS]
-        domain_str = ",".join(safe_domains) if safe_domains else None
+        safe_domains = list(dict.fromkeys(d for d in requested if d in WORLDVIEW_DOMAINS))
+        if not safe_domains:
+            raise HTTPException(status_code=400, detail="No supported Worldview domains requested")
     else:
-        domain_str = None  # Will use all domains, internal ones filtered from results
+        safe_domains = WORLDVIEW_DOMAINS
 
     # Store caller identity in request state for middleware
     request.state.caller_identity = caller
@@ -77,29 +78,35 @@ async def worldview_search(
     # Call internal search
     result = await unified_search(
         q=q,
-        domains=domain_str,
+        types=",".join(safe_domains),
         lat=lat,
         lng=lng,
-        radius_km=radius_km,
+        radius=radius_km if radius_km is not None else 100,
         limit=limit,
-        db=db,
+        toxicity=None,
+        kingdom=None,
+        facility_type=None,
+        since=None,
+        until=None,
+        session=db,
     )
 
-    # Filter out internal domains from results
-    if hasattr(result, "results"):
-        filtered = [r for r in result.results if r.domain not in INTERNAL_DOMAINS]
-        response_data = [r.model_dump() if hasattr(r, "model_dump") else r for r in filtered]
-    elif isinstance(result, dict) and "results" in result:
-        filtered = [r for r in result["results"] if r.get("domain") not in INTERNAL_DOMAINS]
-        response_data = filtered
-    else:
-        response_data = result.model_dump() if hasattr(result, "model_dump") else result
+    # Internal search returns domain-keyed lists; public search exposes a flat list.
+    buckets = result.results if hasattr(result, "results") else result["results"]
+    response_data = []
+    for domain in safe_domains:
+        for item in buckets.get(domain, []):
+            row = item.model_dump() if hasattr(item, "model_dump") else dict(item)
+            if row.get("domain") in INTERNAL_DOMAINS:
+                continue
+            row.setdefault("domain", domain)
+            response_data.append(row)
+    response_data = response_data[:limit]
 
-    review_domains = safe_domains if domains else WORLDVIEW_DOMAINS
     return await wrap_governed_response(
         data=response_data,
         caller=caller,
-        source_domains=review_domains,
+        source_domains=safe_domains,
         region={"lat": lat, "lng": lng, "radius_km": radius_km} if lat is not None and lng is not None else None,
     )
 

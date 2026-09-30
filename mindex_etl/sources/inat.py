@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Generator, Optional
+from typing import Callable, Dict, Generator, Optional
 
 import httpx
 from tenacity import (
@@ -172,6 +172,14 @@ def _fetch_page(
     return response.json()
 
 
+def _validate_page_arguments(per_page: int, start_page: int, max_pages: Optional[int]) -> None:
+    for name, value in (("per_page", per_page), ("start_page", start_page), ("max_pages", max_pages)):
+        if name == "max_pages" and value is None:
+            continue
+        if type(value) is not int or value < 1:
+            raise ValueError(f"{name} must be a positive integer")
+
+
 def iter_inat_taxa(
     *,
     per_page: int = 200,  # Max allowed
@@ -181,11 +189,14 @@ def iter_inat_taxa(
     save_locally: bool = True,
     rank: str = None,
     domain_mode: Optional[str] = None,
+    start_page: int = 1,
+    on_page: Optional[Callable[[int], None]] = None,
 ) -> Generator[Dict, None, None]:
     """
     Iterate over iNaturalist taxa.
     domain_mode: 'all' for all life (taxon_id=1), 'fungi' for fungi-only (default from config).
     """
+    _validate_page_arguments(per_page, start_page, max_pages)
     mode = domain_mode or getattr(settings, "inat_domain_mode", "fungi")
     per_page = min(per_page, 200)
     delay = delay_seconds if delay_seconds is not None else settings.inat_rate_limit
@@ -198,17 +209,17 @@ def iter_inat_taxa(
     all_records = []
     
     try:
-        page = 1
+        page = start_page
         total_results = None
         
-        while True:
+        while max_pages is None or page <= max_pages:
             print(f"Fetching iNaturalist page {page}...", flush=True)
             
             payload = _fetch_page(client, page, per_page, rank, domain_mode=mode)
             results = payload.get("results", [])
             
             if total_results is None:
-                total_results = payload.get("total_results", 0)
+                total_results = payload.get("total_results")
                 print(f"Total results: {total_results}", flush=True)
             
             if not results:
@@ -222,6 +233,10 @@ def iter_inat_taxa(
                 mapped = map_inat_taxon(record)
                 external_id = record.get("id")
                 yield mapped, "inat", str(external_id)
+
+            # Only a consumer that finishes this fetched page can publish its cursor.
+            if on_page is not None:
+                on_page(page)
             
             page += 1
             
@@ -230,7 +245,8 @@ def iter_inat_taxa(
                 break
             
             # Check if we've fetched all
-            if page * per_page >= total_results:
+            # `page` now identifies the next request, not the page just yielded.
+            if total_results is not None and (page - 1) * per_page >= total_results:
                 print(f"Fetched all {total_results} results", flush=True)
                 break
             
