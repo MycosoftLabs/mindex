@@ -18,6 +18,7 @@ from ..dependencies import (
     require_api_key,
 )
 from ..contracts.v1.observations import ObservationListResponse
+from ..utils.bbox import parse_wgs84_bbox
 from ..utils.deep_agent_events import schedule_domain_event
 
 logger = logging.getLogger(__name__)
@@ -40,23 +41,7 @@ router = APIRouter(
 
 
 def _parse_bbox(bbox: Optional[str]) -> Optional[dict]:
-    if not bbox:
-        return None
-    try:
-        parts = [float(x.strip()) for x in bbox.split(",")]
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid bbox format") from exc
-    if len(parts) != 4:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected bbox=minLon,minLat,maxLon,maxLat")
-    min_lon, min_lat, max_lon, max_lat = parts
-    if min_lon >= max_lon or min_lat >= max_lat:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid bbox coordinates")
-    return {
-        "min_lon": min_lon,
-        "min_lat": min_lat,
-        "max_lon": max_lon,
-        "max_lat": max_lat,
-    }
+    return parse_wgs84_bbox(bbox)
 
 
 @router.get("", response_model=ObservationListResponse)
@@ -72,7 +57,7 @@ async def list_observations(
     end: Optional[datetime] = Query(None, description="ISO timestamp upper bound."),
     bbox: Optional[str] = Query(
         None,
-        description="Bounding box filter minLon,minLat,maxLon,maxLat in WGS84.",
+        description="Finite WGS84 bbox minLon,minLat,maxLon,maxLat; min<max, no antimeridian wrapping.",
     ),
     include_total: bool = Query(
         False,
