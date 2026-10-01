@@ -31,6 +31,7 @@ dependencies = [
     "pandas>=2.0,<3.0",
     "imagehash>=4.3,<5.0",
     "Pillow>=10.0,<11.0",
+    "rfc8785==0.1.4",
 ]
 
 [project.optional-dependencies]
