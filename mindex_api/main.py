@@ -16,6 +16,7 @@ from .middleware import (
 )
 from .routers.v1_ingest import router as v1_ingest_router
 from .routers.fungip import router as fungip_router
+from .routers.retention import router as retention_router
 from .routers import (
     a2a_agent_router,
     beta_router,
@@ -151,6 +152,9 @@ def create_app() -> FastAPI:
     # ZONE 1: UTILITY (open or lightly protected)
     # =========================================================================
     prefix = settings.api_prefix
+
+    # Independent verified customer identity; service keys cannot grant private scope.
+    app.include_router(retention_router, prefix=prefix)
 
     app.include_router(health_router, prefix=prefix)
     app.include_router(beta_router, prefix=prefix)
