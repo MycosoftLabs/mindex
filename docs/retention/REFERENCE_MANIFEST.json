@@ -1,0 +1,47 @@
+{
+  "reference_only": true,
+  "imported_dirty_code": false,
+  "mindex_source_head": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
+  "sources": [
+    {
+      "path": "C:\\Users\\Owner1\\Documents\\Codex\\2026-09-29\\realtime-voice-chat\\outputs\\company-application-catalog\\prompts\\09-shared-identity-retention-memory.md",
+      "sha256": "bbd74ed92b4f3c86d801c75d679dbe18186e7cdea7a9ede0aa277f1ab126ec7e"
+    },
+    {
+      "path": "C:\\Users\\Owner1\\Documents\\Codex\\2026-09-29\\realtime-voice-chat\\outputs\\company-application-catalog\\prompts\\00-shared-engineering-contract.md",
+      "sha256": "172ea214135278e31e2772ae70336582a272c8096689977ac04d9bdb53b62eeb"
+    },
+    {
+      "path": "C:\\Users\\Owner1\\Documents\\Codex\\2026-09-29\\realtime-voice-chat\\outputs\\company-application-catalog\\dispatch\\EXECUTION-CONTRACT.md",
+      "sha256": "942e7604a10ad6fd0e944919f4b610c259ea6d9a97332ccd4d34597930240e88"
+    },
+    {
+      "path": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\mindex-release\\mindex_api\\source_capture.py",
+      "sha256": "34b21cc92c5fb987cea27c78861b07af9d7e9a67e817031de12199c7938972ca"
+    },
+    {
+      "path": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\mindex-release\\mindex_api\\source_capture_s3.py",
+      "sha256": "73b7ca47413eb9c85fd5f06f7cc6be84c0b50b6731fc35916c78405bfdba11e0"
+    },
+    {
+      "path": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\mindex-release\\docs\\DURABLE_SOURCE_CAPTURE.md",
+      "sha256": "0ad8184d0be3c43b6d20f297df9cd4e73c4a7a637bc74b5f67fd695ad2ee46a8"
+    },
+    {
+      "path": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\mindex-release\\docs\\CANONICAL_HISTORY_CONTRACT_OCT01_2026.md",
+      "sha256": "0aec3fd8790c61c26b23ece5686b8e62ff3384efb03100818a001daacc51757c"
+    },
+    {
+      "path": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\website-scientific-pages\\docs\\FORMSPACE_APPLICATION_DELIVERY_PLAN_OCT01_2026.md",
+      "sha256": "213fa656c56d320e90699cc4db347ce25fd0a7b7c8b287382b95001aae7a22ee"
+    },
+    {
+      "path": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\website-scientific-pages\\supabase\\migrations\\20260126000000_user_app_state.sql",
+      "sha256": "a9135eac522c41731996957f7da918a16869cf60fa582c881351f14d2dc666c6"
+    },
+    {
+      "path": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\website-scientific-pages\\lib\\auth\\verified-identity.ts",
+      "sha256": "a26244e293310ea9e6c1d683deb9aebf75b6406da76101819b0aa659680112ed"
+    }
+  ]
+}
