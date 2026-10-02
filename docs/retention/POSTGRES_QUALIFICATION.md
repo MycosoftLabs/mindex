@@ -151,6 +151,16 @@ $taskPg = '../runtime/postgres/pgsql/bin'
 This proves a local fixture database restore, not AWS backup coverage or disaster
 recovery of the production MINDEX service. The dump contains fixture content only.
 
+After the orphan-reconciliation migration, a second marked PostgreSQL 17.11
+restore check seeded one 30-byte fixture artifact, dumped the `retention` schema,
+and restored it into the previously unused `retention_fixture_brief09_restore_oct02`
+database. Validation returned **1 artifact, 30 payload bytes, matching SHA-256, 1
+job, 1 outbox row**, and confirmed `archive_reconciled_at` exists. The custom dump
+SHA256 was
+`e8918980ab08473eaff60dea24723915582d3ac3a165fc2c9beaf67f59768e00`. Both
+databases and the dump are task-owned fixture artifacts under the local runtime;
+this does not prove deployed backup or disaster recovery.
+
 ## Schema, privileges, and integration seams
 
 `migrations/20261001_shared_retention_v1.sql` and

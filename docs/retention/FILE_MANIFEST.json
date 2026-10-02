@@ -43,9 +43,9 @@
     },
     {
       "path": "docs/retention/POSTGRES_QUALIFICATION.md",
-      "bytes": 14334,
-      "sha256": "18b0918447492c646561d88b9abfa852e984e775fbd9797a758020843bfe2432",
-      "normalized_lf_sha256": "18b0918447492c646561d88b9abfa852e984e775fbd9797a758020843bfe2432"
+      "bytes": 14966,
+      "sha256": "4e262419c633357edb86a5c79637051a86d97d390d65166a1e68632696b32ff9",
+      "normalized_lf_sha256": "4e262419c633357edb86a5c79637051a86d97d390d65166a1e68632696b32ff9"
     },
     {
       "path": "docs/retention/SHARED_ENGINEERING_CONTRACT.md",
