@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 import uvicorn
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from mindex_api.formspace.repository import FormSpaceRepository
 from mindex_api.formspace.service import FormSpaceService
@@ -54,7 +55,7 @@ async def test_signed_auth_real_database_actual_worker_and_verified_readback(sta
     token = 'synthetic-worker-token-for-disposable-fixture-only'
     monkeypatch.setenv('FORMSPACE_WORKER_TOKEN', token)
     http = stack['http']
-    headers = {**stack['headers'](), 'Idempotency-Key':'actual-worker-path'}
+    headers = {**stack['headers'](), 'Idempotency-Key':'actual-worker-path', 'X-User-Id':USER_B, 'X-Mycosoft-User-Id':USER_B, 'X-Owner-Id':USER_B}
     chart_definition = request['chart_revision']
     saved_chart = await http.post(BASE+'/charts', headers=headers, json=chart_definition)
     assert saved_chart.status_code == 200, saved_chart.text
@@ -64,6 +65,31 @@ async def test_signed_auth_real_database_actual_worker_and_verified_readback(sta
     exact_chart = await http.get(BASE+'/charts/'+chart_definition['chart_id'], headers=headers,
                                  params={'revision': chart_definition['revision']})
     assert exact_chart.status_code == 200 and exact_chart.json() == saved_chart.json()
+    chart_replay = await http.post(BASE+'/charts', headers=headers, json=chart_definition)
+    assert chart_replay.status_code == 200 and chart_replay.json() == saved_chart.json()
+    conflicting_chart = json.loads(json.dumps(chart_definition))
+    conflicting_chart['title'] = 'Changed same-revision title'
+    assert (await http.post(BASE+'/charts', headers=headers, json=conflicting_chart)).status_code == 409
+    nonmember = stack['headers'](subject=USER_B, project=PROJECT_B)
+    assert (await http.post(BASE+'/charts', headers=nonmember, json=chart_definition)).status_code == 403
+    chart_rows = await sql(sessions, """SELECT issuer,subject,tenant_id::text AS tenant_id,
+        project_id::text AS project_id,chart_id,revision,chart_hash,definition
+        FROM formspace.chart_revision WHERE chart_id=:chart_id AND revision=:revision""",
+        chart_id=chart_definition['chart_id'], revision=chart_definition['revision'])
+    assert len(chart_rows) == 1
+    chart_row = chart_rows[0]
+    assert (chart_row['issuer'], chart_row['subject'], chart_row['tenant_id'], chart_row['project_id']) == (ISSUER, USER_A, TENANT, PROJECT)
+    assert chart_row['definition'] == chart_definition
+    assert chart_row['chart_hash'] == saved_chart.json()['chart_hash']
+    with pytest.raises(DBAPIError, match='FormSpace chart revisions are immutable'):
+        await sql(sessions, """UPDATE formspace.chart_revision SET definition=CAST(:definition AS jsonb)
+            WHERE issuer=:issuer AND subject=:subject AND tenant_id=:tenant AND project_id=:project
+            AND chart_id=:chart_id AND revision=:revision""", definition=json.dumps(conflicting_chart),
+            issuer=ISSUER, subject=USER_A, tenant=TENANT, project=PROJECT,
+            chart_id=chart_definition['chart_id'], revision=chart_definition['revision'])
+    persisted_after_conflict = await http.get(BASE+'/charts/'+chart_definition['chart_id'], headers=headers,
+                                              params={'revision': chart_definition['revision']})
+    assert persisted_after_conflict.status_code == 200 and persisted_after_conflict.json() == saved_chart.json()
     for denied in (stack['headers'](subject=USER_B), stack['headers'](project=PROJECT_B)):
         assert (await http.get(BASE+'/charts', headers=denied)).json()['charts'] == []
         assert (await http.get(BASE+'/charts/'+chart_definition['chart_id'], headers=denied,
@@ -72,6 +98,7 @@ async def test_signed_auth_real_database_actual_worker_and_verified_readback(sta
                 {**headers,'Authorization':'Bearer '+stack['token'](aud='wrong')},
                 {**headers,'Authorization':'Bearer '+stack['token'](role='service_role')}):
         assert (await http.get(BASE+'/jobs',headers=bad)).status_code == 401
+        assert (await http.get(BASE+'/charts',headers=bad)).status_code==401
     admitted = await http.post(BASE+'/jobs',headers=headers,json={'request':request})
     assert admitted.status_code == 202, admitted.text
     job_id = admitted.json()['job']['job_id']
@@ -118,6 +145,10 @@ async def test_signed_auth_real_database_actual_worker_and_verified_readback(sta
         await sql(sessions,"UPDATE formspace.outbox SET available_at=clock_timestamp() WHERE job_id=:id",id=job_id)
         second=await run_worker()
         assert second['outcome']=='completed',second
+        chart_after_worker_restart = await http.get(BASE+'/charts/'+chart_definition['chart_id'], headers=headers,
+                                                       params={'revision': chart_definition['revision']})
+        assert chart_after_worker_restart.status_code == 200
+        assert chart_after_worker_restart.json() == saved_chart.json()
         done=(await http.get(BASE+f'/jobs/{job_id}',headers=headers)).json()['job']
         assert done['artifact']['state']=='verified'
         assert done['memory']['reference_state']=='verified'
@@ -160,6 +191,9 @@ asyncio.run(main())'''
         await sql(sessions,'UPDATE retention.membership SET active=false WHERE subject=:s',s=USER_A)
         for suffix in ('','/input','/result'):
             assert (await http.get(BASE+f'/jobs/{job_id}'+suffix,headers=headers)).status_code==403
+        assert (await http.get(BASE+'/charts',headers=headers)).status_code==403
+        assert (await http.get(BASE+'/charts/'+chart_definition['chart_id'],headers=headers,
+                               params={'revision':chart_definition['revision']})).status_code==403
     finally:
         server.should_exit=True
         await asyncio.wait_for(serve,5)
