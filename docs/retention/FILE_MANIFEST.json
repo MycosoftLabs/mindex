@@ -7,9 +7,9 @@
   "files": [
     {
       "path": "docs/retention/ARCHIVE.md",
-      "bytes": 9189,
-      "sha256": "de6b186feba2ce3342df78cf2e163ef0961562b4c565d82d0990c40c814b0f2d",
-      "normalized_lf_sha256": "de6b186feba2ce3342df78cf2e163ef0961562b4c565d82d0990c40c814b0f2d"
+      "bytes": 10632,
+      "sha256": "980300346166fac1bbda7cf181b9dcfe75fd39dc0ec17855198ccd76190d2a71",
+      "normalized_lf_sha256": "980300346166fac1bbda7cf181b9dcfe75fd39dc0ec17855198ccd76190d2a71"
     },
     {
       "path": "docs/retention/BRIEF.md",
@@ -43,9 +43,9 @@
     },
     {
       "path": "docs/retention/POSTGRES_QUALIFICATION.md",
-      "bytes": 16341,
-      "sha256": "9446a62d0d76bba29572707cbe2dffb55c66288c95a9fbf898e964dd985254ab",
-      "normalized_lf_sha256": "9446a62d0d76bba29572707cbe2dffb55c66288c95a9fbf898e964dd985254ab"
+      "bytes": 17036,
+      "sha256": "72df8214f3bd45875614f4b97b0456047d9d65b9910a98b0c0606b0c18593ff0",
+      "normalized_lf_sha256": "72df8214f3bd45875614f4b97b0456047d9d65b9910a98b0c0606b0c18593ff0"
     },
     {
       "path": "docs/retention/SHARED_ENGINEERING_CONTRACT.md",
@@ -103,9 +103,9 @@
     },
     {
       "path": "mindex_api/retention/object_store.py",
-      "bytes": 19339,
-      "sha256": "eae0824493e183c8ec00b2a9faf21413361735445c6e9de9dc0069282d2fbb51",
-      "normalized_lf_sha256": "eae0824493e183c8ec00b2a9faf21413361735445c6e9de9dc0069282d2fbb51"
+      "bytes": 19532,
+      "sha256": "c6651d96888135938d6a2a282222c493542184641493fe1c62115499befab825",
+      "normalized_lf_sha256": "c6651d96888135938d6a2a282222c493542184641493fe1c62115499befab825"
     },
     {
       "path": "mindex_api/retention/repository.py",

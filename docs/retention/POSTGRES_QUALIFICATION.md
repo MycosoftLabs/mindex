@@ -50,9 +50,10 @@ The suite establishes:
   second tenant's object remains intact. Missing objects are recorded as
   reconciled without claiming a physical deletion.
 - An upgrade fixture starts from the original schema and pre-upgrade terminal rows,
-  applies the reconciliation and backfill migrations twice, and recovers both an
-  uploaded fake object and an already absent key exactly once. It does not invent
-  deletion timestamps or enqueue still-live artifacts.
+  applies the reconciliation migration once and reruns the backfill migration to
+  establish its idempotence, then recovers both an uploaded fake object and an
+  already absent key exactly once. It does not invent deletion timestamps or
+  enqueue still-live artifacts.
 - Successive expired purge leases, malformed/forged versionless proofs, deletion
   before DB completion, and a separate-target dump/restore of expired purge and
   orphan leases are exercised. Restored leases are reclaimed under new tokens and
@@ -61,6 +62,16 @@ The suite establishes:
   only after service readback; references explicitly do not mean model learning.
 - Migration rerun, transactional rollback of schema removal, and destructive
   fixture-only reversal preserve an unrelated legacy table.
+
+These are stateful local fixtures, not full process or S3 emulation. The worker
+interruption cases leave completion steps uncalled; they do not kill and restart
+an OS worker. The restore test restores database lease rows into a separate
+database target while retaining the same in-memory fake object store. The fake
+does not model paginated version listings or delete markers; multi-version cleanup
+removes both matching versions but does not directly assert that deleting a
+newest version promotes an older version to latest. Real bucket IAM, KMS,
+Object Lock, listing permissions, version ordering, and deployed recovery remain
+unqualified.
 
 ## Runtime and reproducible commands
 

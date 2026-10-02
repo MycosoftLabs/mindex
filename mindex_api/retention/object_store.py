@@ -327,8 +327,10 @@ class PrivateObjectStore:
         """Reconcile a tombstoned row whose archive version never reached Postgres.
 
         The key is derived exclusively from canonical tenant/project/artifact UUIDs
-        in the persisted row. This performs no bucket/version listing and never
-        accepts an object coordinate supplied by a caller.
+        in the persisted row. Versionless reconciliation lists a bounded set of
+        versions under that exact key prefix, then filters to exact-key matches;
+        it never accepts object coordinates supplied by a caller. Persisted-version
+        deletion uses the separate exact-version path and does not enumerate versions.
         """
         if row.get("object_version") is not None:
             raise RetentionError("archive_integrity_failed")
