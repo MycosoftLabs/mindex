@@ -175,8 +175,27 @@ performance target is claimed achieved.
 
 ## PostgreSQL fixtures, restore evidence, and remaining qualification gates
 
-`FORMSPACE_TEST_DATABASE_URL` is the only opt-in database input. It must name an
+`FORMSPACE_TEST_DATABASE_URL` is the opt-in database input for `test_formspace_durable_postgres.py`; it must name an
 empty, disposable local `formspace_fixture_<suffix>` database with asyncpg DSN.
+
+The queued signed-JWT HTTP/worker test uses `RETENTION_TEST_DSN`, guarded by
+`RETENTION_TEST_ALLOW_DISPOSABLE=1` and the shared retention fixture's strict
+loopback/database-name checks. Run the lightweight pinned preflight with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/formspace-chart-qualification.ps1
+```
+
+Preflight validates the Brief 09 Python/PyJWT packages, PostgreSQL 17.11, Node/tsx,
+worktree branches/commits, scoped clean code paths, and a proposed unused loopback
+port. It creates no files or services. `-Run` refuses to start unless the
+coordinator-granted `MYCOSOFT_RESOURCE_SLOT_CONFIRMED=true` and
+`MYCOSOFT_RESOURCE_SLOT_ID` are present. With a grant, it creates only the new
+`.formspace-chart-revision-qualification-20261001/data` cluster and
+`retention_fixture_formspacechart_20261001` database, runs the signed-JWT API and
+worker test, stops that task-owned server, and preserves its data/log. It does not
+reuse the earlier restore-audit directory or shared/sibling database.
+
 The test refuses remote addresses, query overrides and existing app schemas,
 never uses inherited app `DATABASE_URL`, and never drops data. It applies the
 actual FormSpace migration and uses shared retention's real membership checker
