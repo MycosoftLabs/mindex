@@ -1,19 +1,23 @@
 # Private retention PostgreSQL qualification
 
 Tested October 1, 2026 in the isolated MINDEX checkout on branch
-`codex/brief09-shared-retention`, source commit
-`42b876fcfca2e86b0365e8fe8afab628d6a94705`. The existing four dirty
+`codex/brief09-shared-retention`, from baseline
+`42b876fcfca2e86b0365e8fe8afab628d6a94705` plus the versionless-reconciliation
+repair. The existing four dirty
 `mindex_test*_utf8.txt` files were not edited. This document covers the additive
 PostgreSQL repository, migration, and disposable runtime; root delivery documents
 cover identity, API, object adapter, SDK, and the combined fixture vertical slice.
 
 ## Evidence and boundaries
 
-`tests/test_retention_postgres.py`: **30 passed** against a real, local PostgreSQL
-17.11 process. No SQLite substitution, production database, network database,
+`tests/test_retention_postgres.py`: **31 passed** against a real, local PostgreSQL
+17.11 process on the isolated, marked port-55919 fixture. No SQLite substitution, production database, network database,
 production migration, or installed PostgreSQL Windows service was used. Test
 archive proofs are fixture proofs; these tests do not establish deployed S3,
 Supabase issuer, customer membership provisioning, or learned model state.
+The complete `tests/test_retention_*.py` suite passed **228 tests** with the same
+disposable PostgreSQL target configured, including identity, HTTP, object-store,
+and database boundary coverage.
 
 The suite establishes:
 
@@ -39,6 +43,12 @@ The suite establishes:
 - Rejected uploads can enter `orphan_archive` cleanup evidence without becoming
   canonical or available. Exact-version purge proof and a live purge lease are
   required for physical-deletion markers. Canonical versions are not orphaned.
+- The hard-crash window after object-store commit but before database reference
+  commit is exercised with a real PostgreSQL fixture and stateful S3 fake:
+  cancellation queues reconciliation without a version, and a fenced worker
+  removes only the row-derived tenant/project/artifact key after retention. A
+  second tenant's object remains intact. Missing objects are recorded as
+  reconciled without claiming a physical deletion.
 - Memory linking needs verified artifact state and the exact digest proof supplied
   only after service readback; references explicitly do not mean model learning.
 - Migration rerun, transactional rollback of schema removal, and destructive
@@ -143,8 +153,11 @@ recovery of the production MINDEX service. The dump contains fixture content onl
 
 ## Schema, privileges, and integration seams
 
-`migrations/20261001_shared_retention_v1.sql` is additive in the new `retention`
-schema. It touches no legacy application table. `membership` and `access_grant`
+`migrations/20261001_shared_retention_v1.sql` and
+`migrations/20261002_private_orphan_reconciliation.sql` are additive in the new
+`retention` schema. The second migration adds `archive_reconciled_at` to distinguish
+confirmed absence/reconciliation from verified physical deletion. They touch no
+legacy application table. `membership` and `access_grant`
 are operator-provisioned authority; no HTTP route may create them. The runtime
 login must neither own these tables nor inherit an operator/superuser role.
 No RLS policy is claimed: authorization is enforced in repository queries behind
@@ -210,12 +223,17 @@ backups. Their encryption, access, vacuum/backup expiry, deletion SLA, and retai
 tombstone/identity policy need operator review and deployment qualification.
 
 `register_orphan` records known successful uploads whose finalize fence was
-rejected. A hard process crash after object upload but before any database
-reference commit can still leave an unregistered private version. The deterministic
-key makes that recoverable by version inventory/reconciliation; a deployed periodic
-inventory and its evidence remain a release gate. Quarantined digest mismatches
-must never become available. Object-store corruption, inventory cleanup, and
-production retention policy are not proven by the PostgreSQL fixture proofs.
+rejected. Terminal cleanup now queues a versionless purge as well, covering a hard
+process crash after object upload but before any database reference commit. The
+worker derives one exact key from the tombstoned database row, verifies its
+expected owner, version, KMS encryption, COMPLIANCE retention, artifact metadata,
+full readback size, and SHA-256, then deletes only that version after its lock
+expires. It does not enumerate or list other tenants' objects. If the exact key is
+already absent, the database records reconciliation while leaving
+`physical_deleted_at` unset. A stale lease cannot commit either result. PostgreSQL
+and S3 fakes qualify this local flow only; deployed S3 permissions and production
+retention remain unverified. Quarantined digest mismatches must never become
+available.
 
 No production migration, cloud launch, deployment, merge, payment, ledger
 transaction, or hardware operation was performed by this work.

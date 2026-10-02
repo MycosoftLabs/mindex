@@ -11,6 +11,7 @@ import json
 import os
 import sys
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -23,12 +24,18 @@ from sqlalchemy.orm import Session
 
 from mindex_api.retention.contracts import Principal, RetentionConfig, RetentionError, admission_metadata
 from mindex_api.retention.repository import RetentionRepository, authorize_asyncpg
+from mindex_api.retention.service import purge_one
+from test_retention_object_store import FakeS3
+from mindex_api.retention.object_store import PrivateObjectStore
 
 
-MIGRATION = Path(__file__).parents[1] / 'migrations/20261001_shared_retention_v1.sql'
-A = Principal('https://issuer.test/auth/v1', 'user-a', 'tenant-a', 'project-a')
+MIGRATIONS = [Path(__file__).parents[1] / 'migrations/20261001_shared_retention_v1.sql',
+              Path(__file__).parents[1] / 'migrations/20261002_private_orphan_reconciliation.sql']
+A = Principal('https://issuer.test/auth/v1', 'user-a', '2c05e220-8d2f-4c86-bf47-8b0cd12a8b23',
+              '5b84ee26-f338-4385-bd2a-c4a588be9cd8')
 B = Principal(A.issuer, 'user-b', A.tenant_id, A.project_id)
-OTHER = Principal(A.issuer, A.subject, 'tenant-b', 'project-b')
+OTHER = Principal(A.issuer, A.subject, '7d76e1a4-e722-4dd4-9089-ae3edb46590e',
+                  '39c50ee8-8454-4735-9d78-cd7a411642a1')
 CONFIG = RetentionConfig(enabled=True, bucket='fixture-private')
 
 
@@ -76,7 +83,8 @@ async def db():
     dsn = guarded_dsn()
     conn = await asyncpg.connect(dsn)
     await conn.execute('DROP SCHEMA IF EXISTS retention CASCADE')
-    await conn.execute(MIGRATION.read_text(encoding='utf-8'))
+    for migration in MIGRATIONS:
+        await conn.execute(migration.read_text(encoding='utf-8'))
     await conn.close()
     engine = create_async_engine(dsn.replace('postgresql://', 'postgresql+asyncpg://', 1),
                                  pool_size=12, max_overflow=0)
@@ -305,6 +313,67 @@ async def test_delete_revokes_memory_and_defers_physical_cleanup_until_retention
 
 
 @pytest.mark.asyncio
+async def test_crash_after_archive_commit_reconciles_only_tombstoned_tenant_key(db):
+    sessions, repo = db
+    object_config = replace(CONFIG, prefix='private-retention-v1', expected_owner='123456789012',
+                            region='us-west-2',
+                            kms_key='arn:aws:kms:us-west-2:123456789012:key/test-key')
+    client = FakeS3()
+    store = PrivateObjectStore(client, object_config)
+
+    rec_a, _ = await repo.admit(A, meta('crashed-a'), b'{}')
+    uploaded_a = await repo.claim()
+    reference_a = store.archive(uploaded_a)
+    assert reference_a['verified'] is True
+    # Simulate hard process death here: deliberately skip complete/register_orphan.
+    assert (await repo.cancel(A, rec_a['job_id']))['physical_deletion_pending']
+
+    rec_missing, _ = await repo.admit(B, meta('missing-object'), b'{}')
+    await repo.cancel(B, rec_missing['job_id'])
+
+    rec_other, _ = await repo.admit(OTHER, meta('other-tenant'), b'{}')
+    uploaded_other = await repo.claim()
+    reference_other = store.archive(uploaded_other)
+    await repo.cancel(OTHER, rec_other['job_id'])
+
+    await sql(sessions, "UPDATE retention.artifact SET retention_until=now()-interval '2 seconds'")
+    expired_at = datetime.now(timezone.utc) - timedelta(seconds=2)
+    client.objects[(reference_a['key'], reference_a['version'])]['ObjectLockRetainUntilDate'] = expired_at
+    client.objects[(reference_other['key'], reference_other['version'])]['ObjectLockRetainUntilDate'] = expired_at
+    client.calls.clear()
+
+    assert await purge_one(repo, store)
+    assert (reference_a['key'], reference_a['version']) not in client.objects
+    assert (reference_other['key'], reference_other['version']) in client.objects
+    object_calls = [(op, args) for op, args in client.calls
+                    if op in {'head_object', 'get_object', 'delete_object'}]
+    assert object_calls and all(args['Key'] == reference_a['key'] for _, args in object_calls)
+    assert all(args.get('VersionId') != reference_other['version'] for _, args in object_calls)
+
+    # The next tombstone never reached S3. Reconciliation records confirmed
+    # absence and does not mislabel that as a physical delete.
+    client.calls.clear()
+    assert await purge_one(repo, store)
+    absent_calls = [(op, args) for op, args in client.calls
+                    if op in {'head_object', 'get_object', 'delete_object'}]
+    missing_key = f"{object_config.prefix}/{B.tenant_id}/{B.project_id}/"
+    assert absent_calls and all(args['Key'].startswith(missing_key) for _, args in absent_calls)
+    assert not any(op in {'get_object', 'delete_object'} for op, _ in absent_calls)
+    assert (reference_other['key'], reference_other['version']) in client.objects
+    rows = await sql(sessions, """SELECT a.tenant_id,a.object_version,a.physical_deleted_at,
+        a.archive_reconciled_at,o.state AS purge_state FROM retention.artifact a
+        JOIN retention.outbox o USING (artifact_id) WHERE o.event='purge_object'
+        ORDER BY a.received_at""")
+    assert rows[0]['tenant_id'] == A.tenant_id and rows[0]['object_version'] is None
+    assert rows[0]['physical_deleted_at'] and rows[0]['archive_reconciled_at']
+    assert rows[0]['purge_state'] == 'done'
+    assert rows[1]['tenant_id'] == B.tenant_id and rows[1]['physical_deleted_at'] is None
+    assert rows[1]['archive_reconciled_at'] and rows[1]['purge_state'] == 'done'
+    assert rows[2]['tenant_id'] == OTHER.tenant_id and rows[2]['physical_deleted_at'] is None
+    assert rows[2]['archive_reconciled_at'] is None and rows[2]['purge_state'] == 'pending'
+
+
+@pytest.mark.asyncio
 async def test_expiry_denies_reads_then_sweeps_payload_and_memory(db):
     sessions, repo = db
     rec, _ = await repo.admit(A, meta(), b'{}')
@@ -351,12 +420,14 @@ async def test_migration_rerun_and_transactional_reversal_preserve_legacy(db):
     rec, _ = await repo.admit(A, meta(), b'{}')
     connection = await asyncpg.connect(guarded_dsn())
     try:
-        await connection.execute(MIGRATION.read_text(encoding='utf-8'))
+        for migration in MIGRATIONS:
+            await connection.execute(migration.read_text(encoding='utf-8'))
         await connection.execute('BEGIN; DROP SCHEMA retention CASCADE; ROLLBACK;')
         assert await connection.fetchval('SELECT count(*) FROM retention.artifact') == 1
         assert await connection.fetchval("SELECT to_regclass('public.retention_fixture_legacy')")
         await connection.execute('DROP SCHEMA retention CASCADE')
-        await connection.execute(MIGRATION.read_text(encoding='utf-8'))
+        for migration in MIGRATIONS:
+            await connection.execute(migration.read_text(encoding='utf-8'))
         assert await connection.fetchval('SELECT count(*) FROM retention.artifact') == 0
         assert await connection.fetchval("SELECT to_regclass('public.retention_fixture_legacy')")
     finally:
@@ -466,6 +537,7 @@ async def main():
     os._exit(23)
 asyncio.run(main())
 '''
+    program = program.replace('tenant-a', A.tenant_id).replace('project-a', A.project_id)
     env = dict(os.environ, RETENTION_FIXTURE_CRASH_BEFORE='1' if crash_before_commit else '0')
     child = await asyncio.create_subprocess_exec(sys.executable, '-c', program, env=env,
         cwd=Path(__file__).parents[1], stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)

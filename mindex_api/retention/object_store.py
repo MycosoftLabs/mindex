@@ -277,6 +277,41 @@ class PrivateObjectStore:
                 raise RetentionError("archive_deletion_unverified")
         return {"bucket": self.config.bucket, "key": key, "version": version, "deleted": True}
 
+    def reconcile_delete(self, row):
+        """Reconcile a tombstoned row whose archive version never reached Postgres.
+
+        The key is derived exclusively from canonical tenant/project/artifact UUIDs
+        in the persisted row. This performs no bucket/version listing and never
+        accepts an object coordinate supplied by a caller.
+        """
+        if row.get("object_version") is not None:
+            raise RetentionError("archive_integrity_failed")
+        key, digest, length, retained_until, artifact_id = self._row(row)
+        if retained_until > datetime.now(timezone.utc):
+            raise RetentionError("archive_retention_active", status=409)
+        self._policy()
+        existing = self._head_or_missing(key)
+        if existing is None:
+            return {"bucket": self.config.bucket, "key": key, "version": None,
+                    "deleted": True, "reconciled": True, "absent": True}
+        version = self._version(existing.get("VersionId"))
+        self._headers(existing, version, digest, length, retained_until, artifact_id)
+        reference = {"bucket": self.config.bucket, "key": key, "version": version}
+        # Validate complete immutable readback before the adapter removes anything.
+        self.read(row, reference)
+        now = datetime.now(timezone.utc)
+        if (_utc(existing["ObjectLockRetainUntilDate"]) > now
+                or existing.get("ObjectLockLegalHoldStatus") == "ON"):
+            raise RetentionError("archive_retention_active", status=409)
+        try:
+            self.client.delete_object(**self._args(key, version))
+        except Exception as exc:
+            if _error_code(exc) and _error_code(exc) not in _RETRYABLE:
+                raise RetentionError("archive_unavailable") from None
+        if self._head_or_missing(key, version) is not None:
+            raise RetentionError("archive_deletion_unverified")
+        return {**reference, "deleted": True, "reconciled": True, "absent": False}
+
 
 def create_object_store(config: RetentionConfig):
     """Explicit lazy factory; no import-time AWS calls or custom endpoint bypass."""

@@ -496,6 +496,47 @@ def test_delete_missing_version_is_idempotent_without_touching_other_versions(cf
     assert not any(op == "delete_object" for op, _ in client.calls)
 
 
+def test_reconcile_crashed_upload_uses_only_exact_tenant_key(cfg, row):
+    row["retention_until"] = datetime.now(timezone.utc) - timedelta(seconds=2)
+    client = FakeS3()
+    store = PrivateObjectStore(client, cfg)
+    reference_a = store.archive({**row, "retention_until": datetime.now(timezone.utc) + timedelta(days=1)})
+    other = {**row, "tenant_id": "7d76e1a4-e722-4dd4-9089-ae3edb46590e",
+             "project_id": "39c50ee8-8454-4735-9d78-cd7a411642a1",
+             "artifact_id": "a21f632c-1d81-46cc-82b7-76426a121899",
+             "retention_until": datetime.now(timezone.utc) + timedelta(days=30)}
+    reference_b = store.archive(other)
+    client.objects[(reference_a["key"], reference_a["version"])]["ObjectLockRetainUntilDate"] = row["retention_until"]
+    # The simulated crashed worker never persisted any of these coordinates.
+    row.update(object_bucket=None, object_key=None, object_version=None)
+    client.calls.clear()
+
+    proof = store.reconcile_delete(row)
+
+    assert proof == {"bucket": cfg.bucket, "key": reference_a["key"],
+                     "version": reference_a["version"], "deleted": True,
+                     "reconciled": True, "absent": False}
+    assert (reference_a["key"], reference_a["version"]) not in client.objects
+    assert (reference_b["key"], reference_b["version"]) in client.objects
+    object_calls = [(op, args) for op, args in client.calls
+                    if op in {"head_object", "get_object", "delete_object"}]
+    assert object_calls and all(args["Key"] == reference_a["key"] for _, args in object_calls)
+    assert all(args.get("VersionId") != reference_b["version"] for _, args in object_calls)
+
+
+def test_reconcile_missing_key_records_absence_without_listing(cfg, row):
+    row["retention_until"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    client = FakeS3()
+    store = PrivateObjectStore(client, cfg)
+
+    proof = store.reconcile_delete(row)
+
+    assert proof["deleted"] and proof["reconciled"] and proof["absent"]
+    assert proof["version"] is None
+    assert not any(op in {"list_objects", "list_object_versions", "get_object", "delete_object"}
+                   for op, _ in client.calls)
+
+
 def test_factory_is_lazy_validates_before_client_creation_and_bounds_network(cfg, monkeypatch):
     captured = []
     boto = ModuleType("boto3")

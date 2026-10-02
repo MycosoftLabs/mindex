@@ -43,9 +43,9 @@
     },
     {
       "path": "docs/retention/POSTGRES_QUALIFICATION.md",
-      "bytes": 13103,
-      "sha256": "8add888912f61f7ef6f44b7102d38ab29751f0650ccbccc42acb1d4426065160",
-      "normalized_lf_sha256": "8add888912f61f7ef6f44b7102d38ab29751f0650ccbccc42acb1d4426065160"
+      "bytes": 14334,
+      "sha256": "18b0918447492c646561d88b9abfa852e984e775fbd9797a758020843bfe2432",
+      "normalized_lf_sha256": "18b0918447492c646561d88b9abfa852e984e775fbd9797a758020843bfe2432"
     },
     {
       "path": "docs/retention/SHARED_ENGINEERING_CONTRACT.md",
@@ -58,6 +58,12 @@
       "bytes": 5764,
       "sha256": "09a9c7f8a16eeeeb17eabf6cf3af9a9a36011ceb4965a340c1d305d80b3f4275",
       "normalized_lf_sha256": "09a9c7f8a16eeeeb17eabf6cf3af9a9a36011ceb4965a340c1d305d80b3f4275"
+    },
+    {
+      "path": "migrations/20261002_private_orphan_reconciliation.sql",
+      "bytes": 270,
+      "sha256": "7ba0b2fc712720f59f8441b926550ede7ec6501d42d6d942d12cdd48c5bce401",
+      "normalized_lf_sha256": "7ba0b2fc712720f59f8441b926550ede7ec6501d42d6d942d12cdd48c5bce401"
     },
     {
       "path": "mindex_api/main.py",
@@ -91,21 +97,21 @@
     },
     {
       "path": "mindex_api/retention/object_store.py",
-      "bytes": 14200,
-      "sha256": "200f2e85c3bd36b203f9bc9d7816cb5915cb6ada3a8645cad56f72c5b158de07",
-      "normalized_lf_sha256": "200f2e85c3bd36b203f9bc9d7816cb5915cb6ada3a8645cad56f72c5b158de07"
+      "bytes": 16176,
+      "sha256": "c7f22d9f76efc8a6223f03ac94e7322ef42d5a38540d6c332da56f918ad2eebc",
+      "normalized_lf_sha256": "c7f22d9f76efc8a6223f03ac94e7322ef42d5a38540d6c332da56f918ad2eebc"
     },
     {
       "path": "mindex_api/retention/repository.py",
-      "bytes": 30625,
-      "sha256": "d2fff93f433e72fedbabcf73a90d58498c1cebf008cdfdca8ae259108505cd36",
-      "normalized_lf_sha256": "d2fff93f433e72fedbabcf73a90d58498c1cebf008cdfdca8ae259108505cd36"
+      "bytes": 31833,
+      "sha256": "4fd824ec65f35a31913c3e1544bdfc9b697711757523ef536dfa9853006943dd",
+      "normalized_lf_sha256": "4fd824ec65f35a31913c3e1544bdfc9b697711757523ef536dfa9853006943dd"
     },
     {
       "path": "mindex_api/retention/service.py",
-      "bytes": 5744,
-      "sha256": "cd863e494ee4abb872b592bad70be4505ba33e3efbd80723d41875b3c54530e7",
-      "normalized_lf_sha256": "cd863e494ee4abb872b592bad70be4505ba33e3efbd80723d41875b3c54530e7"
+      "bytes": 5868,
+      "sha256": "3f15486aa18f2e53ca14f9d20c542660d98ab7d0eb1f5481a84e7044b097bd90",
+      "normalized_lf_sha256": "3f15486aa18f2e53ca14f9d20c542660d98ab7d0eb1f5481a84e7044b097bd90"
     },
     {
       "path": "mindex_api/routers/retention.py",
@@ -133,15 +139,15 @@
     },
     {
       "path": "scripts/retention_fixture_benchmark.py",
-      "bytes": 5222,
-      "sha256": "3192a17db71593a1a2fe158c9ffd9f9aa802b6fd2cdd7b9fc0c57c468ac4f67c",
-      "normalized_lf_sha256": "3192a17db71593a1a2fe158c9ffd9f9aa802b6fd2cdd7b9fc0c57c468ac4f67c"
+      "bytes": 5356,
+      "sha256": "73042aa927d0042f34ec8d584e0c23017f8543d365f06b73c137ea1d22497dd5",
+      "normalized_lf_sha256": "73042aa927d0042f34ec8d584e0c23017f8543d365f06b73c137ea1d22497dd5"
     },
     {
       "path": "scripts/retention_manifest.py",
-      "bytes": 1550,
-      "sha256": "11640b7ad23dfc9a062de24857d18e5315c7bb041dc46f17179b38f01322d91d",
-      "normalized_lf_sha256": "11640b7ad23dfc9a062de24857d18e5315c7bb041dc46f17179b38f01322d91d"
+      "bytes": 1611,
+      "sha256": "08ca971148f167657fca38ad208f8b068ca27cf46813000365b3a41922d0695e",
+      "normalized_lf_sha256": "08ca971148f167657fca38ad208f8b068ca27cf46813000365b3a41922d0695e"
     },
     {
       "path": "sdk/retention-v1.schema.json",
@@ -175,15 +181,15 @@
     },
     {
       "path": "tests/test_retention_object_store.py",
-      "bytes": 25186,
-      "sha256": "373acdf0954881332cc37dd8eb075b562566a27e44cfa7e13ed476d0608e6bc7",
-      "normalized_lf_sha256": "373acdf0954881332cc37dd8eb075b562566a27e44cfa7e13ed476d0608e6bc7"
+      "bytes": 27368,
+      "sha256": "26a713d42455741a34855167bb6c7f83cae90ac7d7b6fb49296afd287a167c3c",
+      "normalized_lf_sha256": "26a713d42455741a34855167bb6c7f83cae90ac7d7b6fb49296afd287a167c3c"
     },
     {
       "path": "tests/test_retention_postgres.py",
-      "bytes": 25917,
-      "sha256": "925e6a40441a95bab06aa7f33c9d5df3b98a920785f1b6780d0b869d88835872",
-      "normalized_lf_sha256": "925e6a40441a95bab06aa7f33c9d5df3b98a920785f1b6780d0b869d88835872"
+      "bytes": 30188,
+      "sha256": "6cf097eb9d044372c00a0eea3a189a0324b15e930659086506e8bc5e0bd022bf",
+      "normalized_lf_sha256": "6cf097eb9d044372c00a0eea3a189a0324b15e930659086506e8bc5e0bd022bf"
     }
   ]
 }

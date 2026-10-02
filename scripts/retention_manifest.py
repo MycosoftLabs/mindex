@@ -7,6 +7,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 PATTERNS = ['mindex_api/retention/*.py', 'mindex_api/routers/retention.py',
     'mindex_api/main.py', 'pyproject.toml', 'migrations/20261001_shared_retention_v1.sql',
+    'migrations/20261002_private_orphan_reconciliation.sql',
     'mindex_etl/jobs/retention_worker.py', 'sdk/typescript/retention-v1*',
     'sdk/retention-v1.schema.json', 'tests/test_retention_*.py', 'scripts/retention_*.py',
     'scripts/retention_*.ps1', 'docs/retention/*.md']
