@@ -96,12 +96,15 @@ async def list_observations(
         where_clauses.append("o.observed_at <= :end")
         params["end"] = end
     if bbox_params:
+        # Viewports are inclusive coordinate rectangles, including wide/world bounds.
+        # Stored geography points must use planar geometry here; spherical polygon
+        # edges change the region and can be antipodal for otherwise valid bounds.
         where_clauses.append(
             "("
             "(o.location IS NOT NULL "
             "AND ST_Intersects("
-            "o.location, "
-            "ST_SetSRID(ST_MakeEnvelope(:min_lon, :min_lat, :max_lon, :max_lat), 4326)::geography"
+            "CAST(o.location AS geometry), "
+            "ST_MakeEnvelope(:min_lon, :min_lat, :max_lon, :max_lat, 4326)"
             ")) "
             "OR (o.location IS NULL "
             "AND COALESCE("

@@ -1,0 +1,67 @@
+{
+  "status": "WIP",
+  "deployment": false,
+  "repository": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\mindex-map-performance",
+  "sourceBranch": "codex/map-query-performance",
+  "checkpointBranch": "codex/checkpoint-mindex-map-performance-oct01-2026",
+  "currentBase": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
+  "scope": {
+    "sourceDeltaCount": 7,
+    "sourceDelta": [
+      {
+        "path": "docs/OBSERVATION_VIEWPORT_POSTGIS_SEP30_2026.md",
+        "operation": "write",
+        "bytes": 8700,
+        "sha256": "0c6764a950bbce68cf89f5b344348a892d638ab6450fc3d7aa0c05d898ff6d4a"
+      },
+      {
+        "path": "mindex_api/routers/observations.py",
+        "operation": "write",
+        "bytes": 18374,
+        "sha256": "8fd3d3a2815c0b9fac90262746d47c01de595952f336bd621084150d117f8275"
+      },
+      {
+        "path": "mindex_test3_utf8.txt",
+        "operation": "write",
+        "bytes": 12865,
+        "sha256": "cb2d45c17b8aaf0f4c8b8d7639e15f72a3ca929a82842ceb657020852158a8a6"
+      },
+      {
+        "path": "mindex_test4_utf8.txt",
+        "operation": "write",
+        "bytes": 10117,
+        "sha256": "5eac19074f06c42efb937be23ef8a593cb108354d9617f2d6e5995803ab85e79"
+      },
+      {
+        "path": "mindex_test5_utf8.txt",
+        "operation": "write",
+        "bytes": 9294,
+        "sha256": "649d65a923afbdc209a7157e2ba11a8a0ab04665c71675dbef129b6370f838d1"
+      },
+      {
+        "path": "mindex_test_utf8.txt",
+        "operation": "write",
+        "bytes": 15222,
+        "sha256": "413dcd93e52a9dbd8f257870af9e4cc0b1e3a528bce55614287880294c737bb9"
+      },
+      {
+        "path": "tests/test_observation_viewport_postgis.py",
+        "operation": "write",
+        "bytes": 16793,
+        "sha256": "80f0b76b4bb17ab3207a5aeb3f9f216b643860b4ff52c4fa95fceb4d542cce29"
+      }
+    ],
+    "overlay": [
+      "docs/checkpoints/oct01-2026/README.md",
+      "docs/checkpoints/oct01-2026/source-manifest.json"
+    ]
+  },
+  "excludedPaths": [],
+  "reviewFlags": [],
+  "validation": {
+    "tests": "not run",
+    "integration": "incomplete",
+    "releaseQualification": "incomplete"
+  },
+  "purpose": "local source preservation checkpoint only; no merge, publication, or deployment"
+}
