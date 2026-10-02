@@ -161,18 +161,20 @@ Local evidence: PostgreSQL 17.11 ran on loopback port 55909 as a shared,
 pre-existing fixture. The native transaction and HTTP-to-worker tests passed
 against isolated disposable databases `formspace_fixture_brief04_transactions_final`
 and `retention_fixture_brief04_api_final`. The database owner later stopped the
-shared server. A schema-scoped custom-format `pg_dump` and `pg_restore` into a
-new disposable database both exited successfully; the dump SHA-256 and timings
-are in `restore-receipt.json`. The source-versus-restored row/hash comparison
-could not be run after the shared server stopped, so data-level restore
-verification remains open. Fake S3 objects are outside that database dump and
-were not restored.
+shared server. To preserve that boundary, a task-owned PostgreSQL 17.11 cluster
+on loopback port 55917 independently restored the schema-scoped custom dump into
+two empty databases. All 10 tables and 16 rows had matching canonical row hashes;
+the verified artifact version, content hash and metadata hash also matched.
+Details are in `restore-comparison.json`. The previous shared restore target
+itself could not be queried after that server stopped, so direct comparison to
+that database remains open. The artifact row has no local payload bytes; FakeS3
+objects are outside the dump and were not restored or re-read.
 
 Required before actual end-to-end qualification:
 
-- Verify the restored database's input hashes and retained row counts from a
-  restarted, owner-approved fixture server. The production database has not been
-  touched.
+- If direct comparison to the prior shared restore target is still required,
+  have the coordinator provide its preserved local fixture checkpoint for an
+  isolated copy. Do not restart or reuse the stopped shared service.
 - Establish server-owned membership provisioning/revocation authority and test
   two real Supabase identities/two projects at the actual HTTP boundary.
 - Pin approved worker image/source/code hash; exercise worker process death and
