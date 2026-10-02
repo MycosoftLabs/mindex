@@ -1,0 +1,10 @@
+{
+  "dump_sha256": "cfc83d17df419cb650fe348f18e9dd92127ca4988d8a2d9f56538587be420aa7",
+  "restore_ms": 243.7165,
+  "dump_ms": 223.2968,
+  "scope": "Schema-scoped synthetic fixture metadata/input manifests and references only; FakeS3 bytes are not a restored AWS service",
+  "dump_exit_code": 0,
+  "restore_exit_code": 0,
+  "restore_data_comparison": "not_run_shared_postgres_stopped_before_comparison",
+  "production_data_touched": false
+}

@@ -112,7 +112,7 @@ async def admit(request: Request, response: Response, owner=Depends(principal), 
                                 request.headers.get("Idempotency-Key", ""), data["request"])
     response.status_code = 202 if created else 200
     response.headers["Cache-Control"] = "no-store"
-    return result
+    return {"schema": "formspace.job/v1", "job": result}
 
 
 @router.get("/jobs")
@@ -122,17 +122,17 @@ async def jobs(limit: int = Query(50, ge=1, le=100), owner=Depends(principal), a
 
 @router.get("/jobs/{job_id}")
 async def job(job_id: UUID, owner=Depends(principal), app=Depends(service)):
-    return receipt(await call(app.repository.get, owner, str(job_id)))
+    return {"schema": "formspace.job/v1", "job": receipt(await call(app.repository.get, owner, str(job_id)))}
 
 
 @router.post("/jobs/{job_id}/cancel")
 async def cancel(job_id: UUID, owner=Depends(principal), app=Depends(service)):
-    return await call(app.repository.cancel, owner, str(job_id))
+    return {"schema": "formspace.job/v1", "job": await call(app.repository.cancel, owner, str(job_id))}
 
 
 @router.post("/jobs/{job_id}/memory")
 async def memory(job_id: UUID, owner=Depends(principal), app=Depends(service)):
-    return await call(app.remember, owner, str(job_id))
+    return {"schema": "formspace.job/v1", "job": await call(app.remember, owner, str(job_id))}
 
 
 @router.get("/jobs/{job_id}/result")

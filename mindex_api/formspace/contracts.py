@@ -183,6 +183,9 @@ def idempotency(value: str) -> str:
 
 
 def receipt(row: dict) -> dict:
+    artifact_state = row.get("artifact_state") or "pending"
+    artifact_state = {"archiving": "pending", "quarantined": "failed",
+                      "cancelled": "unavailable", "deleted": "unavailable"}.get(artifact_state, artifact_state)
     return {
         "schema": "formspace.job/v1",
         "contract_version": CONTRACT_VERSION, "job_id": str(row["job_id"]),
@@ -191,7 +194,7 @@ def receipt(row: dict) -> dict:
         "engine_mode": "scalar-native-v1", "created_at": row["created_at"],
         "request_hash": row["request_hash"], "chart_hash": row["chart_hash"],
         "dataset_hash": row["dataset_hash"], "error_code": row.get("error_code"),
-        "artifact": {"state": row.get("artifact_state") or "pending",
+        "artifact": {"state": artifact_state,
                      "artifact_id": str(row["artifact_id"]) if row.get("artifact_id") else None,
                      "sha256": row.get("output_sha256")},
         "memory": {"state": "pending", "reference_state": row.get("memory_state") or "pending",

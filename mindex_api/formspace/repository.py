@@ -124,7 +124,8 @@ class FormSpaceRepository:
             row = (await session.execute(text("""SELECT j.* FROM formspace.outbox o
                 JOIN formspace.job j USING(job_id)
                 JOIN retention.membership m ON m.issuer=j.issuer AND m.subject=j.subject
-                    AND m.tenant_id=j.tenant_id AND m.project_id=j.project_id AND m.active
+                    AND m.tenant_id=CAST(j.tenant_id AS text)
+                    AND m.project_id=CAST(j.project_id AS text) AND m.active
                 WHERE NOT o.done AND o.available_at<=now()
                     AND (o.lease_until IS NULL OR o.lease_until<=clock_timestamp())
                     AND j.state IN ('admitted','running','archiving')

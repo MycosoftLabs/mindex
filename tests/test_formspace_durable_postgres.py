@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from mindex_api.formspace.contracts import FormSpaceError
@@ -45,18 +45,18 @@ async def test_real_postgres_admission_restart_fence_cancel_and_revocation():
             existing = (await conn.execute(text("SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('retention','formspace')"))).all()
             if existing:
                 pytest.fail("Fixture requires empty disposable DB; schemas already exist; nothing changed")
-            # Minimal shared-membership FIXTURE table uses actual shared repository
-            # authorization. Full retention archive qualification is a separate test.
-            await conn.execute(text("CREATE SCHEMA retention"))
-            await conn.execute(text("""CREATE TABLE retention.membership(
-                issuer text,subject text,tenant_id uuid,project_id uuid,active boolean,
-                PRIMARY KEY(issuer,subject,tenant_id,project_id))"""))
+        shared_migration = (Path(__file__).parents[1] / "migrations/20261001_shared_retention_v1.sql").read_text()
         migration = (Path(__file__).parents[1] / "migrations/20261001_formspace_durable.sql").read_text()
         # asyncpg supports migration scripts through its native driver, one server
         # command, preserving the migration's explicit transaction exactly.
         async with engine.connect() as conn:
             raw = await conn.get_raw_connection()
+            await raw.driver_connection.execute(shared_migration)
             await raw.driver_connection.execute(migration)
+            await raw.driver_connection.execute("CREATE TABLE public.formspace_fixture_keep (id integer); INSERT INTO public.formspace_fixture_keep VALUES (1)")
+            await raw.driver_connection.execute(migration)
+            await raw.driver_connection.execute("BEGIN; DROP SCHEMA formspace CASCADE; ROLLBACK;")
+            assert await raw.driver_connection.fetchval("SELECT count(*) FROM public.formspace_fixture_keep") == 1
         principal = Principal("https://fixture.invalid", "alice",
             "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")
         bob = Principal(principal.issuer, "bob", principal.tenant_id, principal.project_id)
@@ -65,9 +65,22 @@ async def test_real_postgres_admission_restart_fence_cancel_and_revocation():
         async with sessions() as session, session.begin():
             for owner in (principal, bob, other_project):
                 await session.execute(text("""INSERT INTO retention.membership
+                    (issuer,subject,tenant_id,project_id,active)
                     VALUES (:issuer,:subject,:tenant_id,:project_id,true)"""), owner.__dict__)
         shared = RetentionRepository(sessions, RetentionConfig(enabled=True))
         repository = FormSpaceRepository(shared, Principal)
+        def fail_before_outbox(_conn, _cursor, statement, _parameters, _context, _many):
+            if statement.lstrip().startswith("INSERT INTO formspace.outbox"):
+                raise RuntimeError("fixture failure before outbox commit")
+        event.listen(engine.sync_engine, "before_cursor_execute", fail_before_outbox)
+        try:
+            with pytest.raises(RuntimeError, match="fixture failure"):
+                await repository.admit(principal, "rolled-back", experiment())
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", fail_before_outbox)
+        async with sessions() as session:
+            for table in ("chart_revision", "job", "outbox"):
+                assert (await session.execute(text("SELECT count(*) FROM formspace." + table))).scalar_one() == 0
         attempts = await asyncio.gather(*[
             repository.admit(principal, "same", experiment()) for _ in range(4)])
         assert len({row["job_id"] for row, _ in attempts}) == 1

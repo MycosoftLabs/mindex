@@ -138,7 +138,7 @@ class FormSpaceService:
             from ..retention.contracts import admission_metadata
         metadata = admission_metadata("artifact", "formspace:" + job_id,
                                       "application/json", None, self.retention.config)
-        artifact, _ = await self.retention.repository.admit(principal, metadata, payload)
+        artifact, _ = await self.retention.admit(principal, metadata, payload)
         if artifact["state"] in ("cancelled", "deleted", "quarantined"):
             raise FormSpaceError("retained_artifact_unavailable", 409)
         verified = artifact["state"] == "verified"

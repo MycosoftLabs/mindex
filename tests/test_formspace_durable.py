@@ -204,7 +204,7 @@ def test_two_user_two_project_no_enumeration_mutation_and_restart_replay():
     url = "/api/mindex/formspace/v1/jobs"
     admitted = client.post(url, headers=headers(), json={"request": experiment()})
     assert admitted.status_code == 202, admitted.text
-    job_id = admitted.json()["job_id"]
+    job_id = admitted.json()["job"]["job_id"]
     assert admitted.headers["cache-control"] == "private, no-store"
     for denied in (headers("bob"), headers(project="33333333-3333-4333-8333-333333333333")):
         assert client.get(url, headers=denied).json()["jobs"] == []
@@ -213,7 +213,7 @@ def test_two_user_two_project_no_enumeration_mutation_and_restart_replay():
     restarted = TestClient(fixture_app(journal)[0])
     replay = restarted.post(url, headers=headers(), json={"request": experiment()})
     assert replay.status_code == 200
-    assert replay.json()["job_id"] == job_id
+    assert replay.json()["job"]["job_id"] == job_id
     restored = restarted.get(url + "/" + job_id + "/input", headers=headers())
     assert restored.content == canonical(experiment())
     assert restored.headers["X-Input-Durability"] == "postgres_committed"
@@ -391,8 +391,8 @@ def test_real_typescript_golden_to_router_compute_archive_readback_memory_retry(
     base = "/api/mindex/formspace/v1"
     admitted = client.post(base + "/jobs", headers=headers(), json={"request": request})
     assert admitted.status_code == 202, admitted.text
-    assert admitted.json()["request_hash"] == metadata["request_sha256"]
-    job_id = admitted.json()["job_id"]
+    assert admitted.json()["job"]["request_hash"] == metadata["request_sha256"]
+    job_id = admitted.json()["job"]["job_id"]
     claim = client.post(base + "/worker/claim", headers=worker_headers, json={"worker_id": "golden"}).json()
     assert claim["request"] == request and claim["has_output"] is False
     lease = {"lease_token": claim["lease"]["token"], "fence": claim["lease"]["fence"]}
@@ -419,7 +419,7 @@ def test_real_typescript_golden_to_router_compute_archive_readback_memory_retry(
     assert download.headers["X-Artifact-Version"] == "fixture-only-v1"
     assert strict_json(download.content)["first_crossing_index"] == 21
     retained.memory_fails = False
-    memory = client.post(base + "/jobs/" + job_id + "/memory", headers=headers()).json()["memory"]
+    memory = client.post(base + "/jobs/" + job_id + "/memory", headers=headers()).json()["job"]["memory"]
     assert memory["reference_state"] == "verified" and memory["memory_id"]
     assert memory["state"] == "pending" and memory["index_state"] == "pending"
 
