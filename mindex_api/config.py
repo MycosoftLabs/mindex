@@ -271,6 +271,19 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AWS_S3_MINDEX_BUCKET"),
         description="S3 bucket used for MINDEX cold copies / federation.",
     )
+    # Opt-in public-source retention. Never infer the capture target from a
+    # backup bucket or enable a worker at application startup.
+    source_capture_enabled: bool = False
+    source_capture_sources: str = ""
+    source_capture_max_payload_bytes: int = Field(8 * 1024 * 1024, gt=0, le=16 * 1024 * 1024)
+    source_capture_max_pending_bytes: int = Field(256 * 1024 * 1024, gt=0, le=1024 * 1024 * 1024)
+    source_capture_max_pending_count: int = Field(1000, gt=0, le=100000)
+    source_capture_lease_seconds: int = Field(120, ge=30, le=900)
+    source_capture_bucket: Optional[str] = None
+    source_capture_prefix: str = "source-captures"
+    source_capture_kms_key: Optional[str] = None
+    source_capture_expected_owner: Optional[str] = None
+    source_capture_region: Optional[str] = None
     prometheus_pushgateway_url: Optional[AnyHttpUrl] = Field(
         default=None,
         validation_alias=AliasChoices("PROMETHEUS_PUSHGATEWAY_URL"),

@@ -34,6 +34,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+storage = [
+    "boto3>=1.35,<2.0",
+]
 test = [
     "pytest>=8.3,<9.0",
     "pytest-asyncio>=0.23,<0.24",

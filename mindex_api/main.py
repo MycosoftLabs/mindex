@@ -15,6 +15,8 @@ from .middleware import (
     SecurityHeadersMiddleware,
 )
 from .routers.v1_ingest import router as v1_ingest_router
+from .routers.source_capture import router as source_capture_router
+from .routers.mission_requests import router as mission_requests_router
 from .routers import (
     a2a_agent_router,
     beta_router,
@@ -164,6 +166,8 @@ def create_app() -> FastAPI:
     # =========================================================================
     internal_prefix = settings.internal_prefix
     internal_deps = [Depends(require_internal_token)]
+    app.include_router(source_capture_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(mission_requests_router, prefix=internal_prefix, dependencies=internal_deps)
 
     # Device & telemetry routers
     app.include_router(mycobrain_router, prefix=internal_prefix, dependencies=internal_deps)

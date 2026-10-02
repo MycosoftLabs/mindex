@@ -1,7 +1,7 @@
 """
 Unified Earth Search Router — MINDEX v3
 
-Single endpoint that searches across ALL planetary data in parallel:
+Internal retained-data search across the selected domains:
 
 BIOLOGICAL:
   - Taxa (fungi, existing core.taxon)
@@ -47,17 +47,15 @@ KNOWLEDGE:
 Supports:
   - Full-text search across every domain
   - Location-based filtering (PostGIS)
-  - Temporal filtering (time ranges)
+  - Qualified event-time filtering for observations and CREP entities
   - Domain filtering (select which data types to search)
-  - Parallel execution via asyncio.gather()
+  - Sequential queries on one request session
   - CREP map pipeline (all results carry lat/lng for map rendering)
-  - Cache-first with live-scrape fallback (local-first data strategy)
-  - Redis/LRU cache → PostgreSQL → Supabase → live scrape → store locally
+  - Internal cache/PostgreSQL only; no provider fallback or acquisition tasks
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from functools import partial
@@ -71,7 +69,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session
-from ..utils.deep_agent_events import schedule_domain_event
+from ..history_query import parse_history_window, require_history_domains, history_sql, coverage
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +203,7 @@ class UnifiedSearchResponse(BaseModel):
     total_count: int
     timing_ms: int
     filters_applied: Dict[str, Any] = Field(default_factory=dict)
+    coverage: Dict[str, Any] = Field(default_factory=dict)
 
 
 class EarthSearchResponse(BaseModel):
@@ -1486,8 +1485,8 @@ async def unified_search(
     kingdom: Optional[str] = Query(None, description="Kingdom filter for species: Plantae, Animalia, Fungi, etc."),
     facility_type: Optional[str] = Query(None, description="Facility type filter: factory, power_plant, mining, dam, etc."),
     # Time filters
-    since: Optional[str] = Query(None, description="ISO datetime — only return results after this time"),
-    until: Optional[str] = Query(None, description="ISO datetime — only return results before this time"),
+    since: Optional[str] = Query(None, description="ISO datetime with UTC offset; inclusive lower event-time bound (qualified domains only)"),
+    until: Optional[str] = Query(None, description="ISO datetime with UTC offset; exclusive upper event-time bound (qualified domains only)"),
     session: AsyncSession = Depends(get_db_session),
 ):
     """
@@ -1510,20 +1509,31 @@ async def unified_search(
     """
     start_time = time.time()
 
-    domains = _resolve_domains(types) or ALL_DOMAINS
+    window = parse_history_window(since, until)
+    domains = _resolve_domains(types)
+    unknown = [v.strip() for v in types.lower().split(",")
+               if v.strip() and v.strip() not in ALL_DOMAINS and v.strip() not in DOMAIN_GROUPS]
+    if unknown or not domains:
+        raise HTTPException(422, detail={"code": "unknown_search_domain", "domains": unknown})
+    if window:
+        require_history_domains(domains)
+        if toxicity or kingdom or facility_type:
+            raise HTTPException(422, detail={"code": "history_filter_unsupported",
+                "message": "This event-time slice supports query, location and time filters only."})
     cache_types = ",".join(domains)
     cache_options = {
         "limit": limit, "lat": lat, "lng": lng, "radius": radius,
         "toxicity": toxicity, "kingdom": kingdom, "facility_type": facility_type,
-        "since": since, "until": until,
+        "since": since, "until": until, "read_policy": "internal-only-v1",
     }
 
     # ── TIER 0+1: Check cache first (LRU + Redis) ──────────────────────
     from ..cache import get_cache
     cache = get_cache()
-    await cache.connect()
+    if not window:
+        await cache.connect()
 
-    cached = await cache.get_cached_search(q, cache_types, options=cache_options)
+    cached = None if window else await cache.get_cached_search(q, cache_types, options=cache_options)
     if cached is not None:
         timing_ms = int((time.time() - start_time) * 1000)
         return UnifiedSearchResponse(
@@ -1533,40 +1543,23 @@ async def unified_search(
             total_count=cached.get("total_count", 0),
             timing_ms=timing_ms,
             filters_applied=cached.get("filters_applied", {}),
+            coverage=coverage(domains, cached.get("results", {}), window, cached=True),
         )
 
     # ── TIER 2: Local PostgreSQL (one shared session, sequential queries) ──
     dispatch = _build_dispatch(session, q, limit, lat, lng, radius, toxicity, kingdom, facility_type)
+    if window:
+        # Build every statement before executing any domain: validation precedes SQL/LIMIT.
+        statements = {domain: history_sql(domain, q, limit, window, lat, lng, radius)
+                      for domain in domains}
+        async def read_history(domain):
+            sql, params = statements[domain]
+            rows = await _safe_query(session, sql, params, domain)
+            return [dict(row._mapping) for row in rows]
+        dispatch = {domain: partial(read_history, domain) for domain in domains}
     results = await _run_domain_searches(dispatch, domains)
     task_names = list(results)
     total_count = sum(len(items) for items in results.values())
-    empty_domains = [name for name, items in results.items() if not items]
-
-    # ── TIER 4: Live-scrape for domains that returned 0 results ────────
-    # Only scrape domains that have live scrapers configured
-    from ..scrape_pipeline import LIVE_SCRAPERS
-    scrape_tasks = []
-    scrape_names = []
-    for domain in empty_domains:
-        if domain in LIVE_SCRAPERS:
-            scrape_tasks.append(
-                asyncio.get_event_loop().run_in_executor(
-                    None, LIVE_SCRAPERS[domain], q
-                )
-            )
-            scrape_names.append(domain)
-
-    if scrape_tasks:
-        scrape_results = await asyncio.gather(*scrape_tasks, return_exceptions=True)
-        for name, result in zip(scrape_names, scrape_results):
-            if isinstance(result, Exception):
-                logger.debug(f"Live scrape {name} failed: {result}")
-            elif result:
-                results[name] = result
-                total_count += len(result)
-                # Async: store scraped data locally for future searches
-                asyncio.create_task(_async_store_scraped(session, name, result))
-
     timing_ms = int((time.time() - start_time) * 1000)
 
     filters_applied: Dict[str, Any] = {}
@@ -1578,10 +1571,8 @@ async def unified_search(
         filters_applied["facility_type"] = facility_type
     if lat is not None and lng is not None:
         filters_applied["location"] = {"lat": lat, "lng": lng, "radius_km": radius}
-    if since:
-        filters_applied["since"] = since
-    if until:
-        filters_applied["until"] = until
+    if window:
+        filters_applied.update(window.filters())
 
     response_data = {
         "domains_searched": task_names,
@@ -1590,27 +1581,9 @@ async def unified_search(
         "filters_applied": filters_applied,
     }
 
-    # ── Cache the results for future requests ──────────────────────────
-    await cache.cache_search(q, cache_types, response_data, ttl=120, options=cache_options)
-
-    # ── Async: Sync to Supabase for global access ──────────────────────
-    from ..supabase_client import get_supabase
-    supa = get_supabase()
-    if supa.enabled and total_count > 0:
-        asyncio.create_task(supa.sync_search_results(q, results))
-
-    schedule_domain_event(
-        domain="search",
-        task=f"MINDEX unified-search completed: {q}",
-        context={
-            "route": "/unified-search",
-            "query": q,
-            "domains_searched": task_names,
-            "total_count": total_count,
-            "timing_ms": timing_ms,
-        },
-        preferred_agent="myca-research",
-    )
+    # Historical reads bypass cache: do not hide ingestion gaps behind an older result.
+    if not window:
+        await cache.cache_search(q, cache_types, response_data, ttl=120, options=cache_options)
 
     return UnifiedSearchResponse(
         query=q,
@@ -1619,35 +1592,8 @@ async def unified_search(
         total_count=total_count,
         timing_ms=timing_ms,
         filters_applied=filters_applied,
+        coverage=coverage(domains, results, window),
     )
-
-
-async def _async_store_scraped(session: AsyncSession, domain: str, records: List[dict]):
-    """Background task: store live-scraped data in local DB for future instant access."""
-    try:
-        for record in records:
-            lat = record.get("lat")
-            lng = record.get("lng")
-            if lat is not None and lng is not None:
-                import json as _json
-                await session.execute(text("""
-                    INSERT INTO crep.unified_entities (id, entity_type, geometry, state,
-                        observed_at, valid_from, source, confidence, s2_cell_id)
-                    VALUES (:id, :type, ST_MakePoint(:lng, :lat)::geography,
-                        :state::jsonb, COALESCE(:occurred_at::timestamptz, NOW()), NOW(),
-                        :source, 0.7, 0)
-                    ON CONFLICT (id, observed_at) DO NOTHING
-                """), {
-                    "id": str(record.get("id", f"{domain}_{id(record)}")),
-                    "type": record.get("entity_type", domain),
-                    "lng": lng, "lat": lat,
-                    "state": _json.dumps(record, default=str),
-                    "occurred_at": record.get("occurred_at"),
-                    "source": record.get("source", f"scrape_{domain}"),
-                })
-        await session.commit()
-    except Exception as e:
-        logger.debug(f"Async store scraped {domain} error: {e}")
 
 
 @router.get("/earth", response_model=EarthSearchResponse)
@@ -1717,18 +1663,7 @@ async def earth_search(
     if lat is not None and lng is not None:
         filters_applied["location"] = {"lat": lat, "lng": lng, "radius_km": radius}
 
-    schedule_domain_event(
-        domain="search",
-        task=f"MINDEX earth-search completed: {q}",
-        context={
-            "route": "/unified-search/earth",
-            "query": q,
-            "domains_searched": task_names,
-            "total_count": total_count,
-            "timing_ms": timing_ms,
-        },
-        preferred_agent="myca-research",
-    )
+
 
     return EarthSearchResponse(
         query=q,
@@ -1807,18 +1742,7 @@ async def search_nearby(
 
     timing_ms = int((time.time() - start_time) * 1000)
 
-    schedule_domain_event(
-        domain="search",
-        task="MINDEX nearby search completed",
-        context={
-            "route": "/unified-search/nearby",
-            "domains_searched": task_names,
-            "total_count": total_count,
-            "timing_ms": timing_ms,
-            "location": {"lat": lat, "lng": lng, "radius_km": radius},
-        },
-        preferred_agent="myca-research",
-    )
+
 
     return {
         "location": {"lat": lat, "lng": lng, "radius_km": radius},

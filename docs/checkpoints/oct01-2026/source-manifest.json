@@ -1,0 +1,175 @@
+{
+  "status": "WIP",
+  "deployment": false,
+  "repository": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\mindex-release",
+  "sourceBranch": "codex/durable-source-retention",
+  "checkpointBranch": "codex/checkpoint-mindex-release-oct01-2026",
+  "currentBase": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
+  "scope": {
+    "sourceDeltaCount": 25,
+    "sourceDelta": [
+      {
+        "path": "docs/CANONICAL_HISTORY_CONTRACT_OCT01_2026.md",
+        "operation": "write",
+        "bytes": 23705,
+        "sha256": "0aec3fd8790c61c26b23ece5686b8e62ff3384efb03100818a001daacc51757c"
+      },
+      {
+        "path": "docs/DROID_MISSION_INTAKE_CONTRACT_OCT01_2026.md",
+        "operation": "write",
+        "bytes": 8656,
+        "sha256": "73e6d0b14b81f663079741e680c3915275456e6454fc500c16c72b737746448f"
+      },
+      {
+        "path": "docs/DURABLE_SOURCE_CAPTURE.md",
+        "operation": "write",
+        "bytes": 12900,
+        "sha256": "0ad8184d0be3c43b6d20f297df9cd4e73c4a7a637bc74b5f67fd695ad2ee46a8"
+      },
+      {
+        "path": "migrations/20260930_source_capture_retention.sql",
+        "operation": "write",
+        "bytes": 1733,
+        "sha256": "cc7857ddbf1e20bc93dbeb6a138497310a65076d91b01892d3d546bef71627c1"
+      },
+      {
+        "path": "migrations/20261001_mission_requests.sql",
+        "operation": "write",
+        "bytes": 2324,
+        "sha256": "ed96703ef1df7c8f6fc8068b8c76571843b44682ed1885056d2c5d700bd37136"
+      },
+      {
+        "path": "mindex_api/config.py",
+        "operation": "write",
+        "bytes": 20677,
+        "sha256": "932462f753a4170dd3e33b9fc9b401349e49d91114678f2d658f2fa3e56cec71"
+      },
+      {
+        "path": "mindex_api/history_query.py",
+        "operation": "write",
+        "bytes": 5876,
+        "sha256": "3d83dfea4557c6f822d321b0a2bcf5e35c5bf85069f2a39591ab4720edc8c231"
+      },
+      {
+        "path": "mindex_api/main.py",
+        "operation": "write",
+        "bytes": 15457,
+        "sha256": "4cf5382f8d1d9a61ac3ebca7f2b1b31cefc267001b32258e11af90c11313dc88"
+      },
+      {
+        "path": "mindex_api/mission_requests.py",
+        "operation": "write",
+        "bytes": 15986,
+        "sha256": "19ea9d658a901d83c341d34184058310d7994c6ff8c72c125c5ec5d4b92fcab1"
+      },
+      {
+        "path": "mindex_api/routers/mission_requests.py",
+        "operation": "write",
+        "bytes": 4418,
+        "sha256": "c6836cf138796da233da53464a79471723b480dbfdf8b5867e014b7fdb45b325"
+      },
+      {
+        "path": "mindex_api/routers/source_capture.py",
+        "operation": "write",
+        "bytes": 4178,
+        "sha256": "a1ee04333eec5e243cb5b5e8b56110c9b47450908c2404e13ac39e7b5f531ca1"
+      },
+      {
+        "path": "mindex_api/routers/unified_search.py",
+        "operation": "write",
+        "bytes": 81834,
+        "sha256": "b3155d5fe361abd41e7cc52041f471895b026cf517195c02e3c691754e9c0d38"
+      },
+      {
+        "path": "mindex_api/source_capture.py",
+        "operation": "write",
+        "bytes": 11742,
+        "sha256": "34b21cc92c5fb987cea27c78861b07af9d7e9a67e817031de12199c7938972ca"
+      },
+      {
+        "path": "mindex_api/source_capture_s3.py",
+        "operation": "write",
+        "bytes": 5050,
+        "sha256": "73b7ca47413eb9c85fd5f06f7cc6be84c0b50b6731fc35916c78405bfdba11e0"
+      },
+      {
+        "path": "mindex_etl/jobs/archive_source_captures.py",
+        "operation": "write",
+        "bytes": 1418,
+        "sha256": "70c61cd0aa15123a3ee0d1134e79c8c35885fa79c118cd9a43e47db55f598260"
+      },
+      {
+        "path": "mindex_test3_utf8.txt",
+        "operation": "write",
+        "bytes": 12865,
+        "sha256": "cb2d45c17b8aaf0f4c8b8d7639e15f72a3ca929a82842ceb657020852158a8a6"
+      },
+      {
+        "path": "mindex_test4_utf8.txt",
+        "operation": "write",
+        "bytes": 10117,
+        "sha256": "5eac19074f06c42efb937be23ef8a593cb108354d9617f2d6e5995803ab85e79"
+      },
+      {
+        "path": "mindex_test5_utf8.txt",
+        "operation": "write",
+        "bytes": 9294,
+        "sha256": "649d65a923afbdc209a7157e2ba11a8a0ab04665c71675dbef129b6370f838d1"
+      },
+      {
+        "path": "mindex_test_utf8.txt",
+        "operation": "write",
+        "bytes": 15222,
+        "sha256": "413dcd93e52a9dbd8f257870af9e4cc0b1e3a528bce55614287880294c737bb9"
+      },
+      {
+        "path": "pyproject.toml",
+        "operation": "write",
+        "bytes": 1831,
+        "sha256": "9f8453f6c3308c1e431b3dd2676713265f53fa5c292beaf8e37bd6e3ab8e1dba"
+      },
+      {
+        "path": "tests/test_batch5_search_contract.py",
+        "operation": "write",
+        "bytes": 10660,
+        "sha256": "4cc966e5d24629dc701d9a2503bdeeb2efc60f1e8c84747f4d40c9351275ef68"
+      },
+      {
+        "path": "tests/test_history_query_contract.py",
+        "operation": "write",
+        "bytes": 8725,
+        "sha256": "495331b258210e4b6e09bb76a80d39aed10c814e4197e5f7a65684b9c7390e21"
+      },
+      {
+        "path": "tests/test_mission_requests_contract.py",
+        "operation": "write",
+        "bytes": 11912,
+        "sha256": "3d3e55cd0ca9c872cb72a7baea7bea26346d8d04c5c7410f921f7a94ddb5c78b"
+      },
+      {
+        "path": "tests/test_source_capture_contract.py",
+        "operation": "write",
+        "bytes": 11232,
+        "sha256": "de34cfa36c1bedfe6fe1d97e140b8e1727c5e81fe07a3227242be23606231aea"
+      },
+      {
+        "path": "tests/test_source_capture_postgres.py",
+        "operation": "write",
+        "bytes": 16214,
+        "sha256": "f05fe866d0a6a6a7fb456f6dcee6548aa269f2c29c8c6a6c3919e29ba4faeaa8"
+      }
+    ],
+    "overlay": [
+      "docs/checkpoints/oct01-2026/README.md",
+      "docs/checkpoints/oct01-2026/source-manifest.json"
+    ]
+  },
+  "excludedPaths": [],
+  "reviewFlags": [],
+  "validation": {
+    "tests": "not run",
+    "integration": "incomplete",
+    "releaseQualification": "incomplete"
+  },
+  "purpose": "local source preservation checkpoint only; no merge, publication, or deployment"
+}

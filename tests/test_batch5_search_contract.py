@@ -36,7 +36,6 @@ def offline_search(monkeypatch):
 
     monkeypatch.setattr(cache_module, "get_cache", lambda: cache)
     monkeypatch.setattr(search, "_build_dispatch", dispatch)
-    monkeypatch.setattr(search, "schedule_domain_event", lambda **kwargs: None)
     monkeypatch.setitem(sys.modules, "mindex_api.scrape_pipeline", SimpleNamespace(LIVE_SCRAPERS={}))
     monkeypatch.setitem(sys.modules, "mindex_api.supabase_client", SimpleNamespace(
         get_supabase=lambda: SimpleNamespace(enabled=False)))
@@ -49,7 +48,7 @@ def offline_search(monkeypatch):
 @pytest.mark.parametrize("option,value", [
     ("limit", 1), ("lat", 0.0), ("lng", 0.0), ("radius", 1.0),
     ("toxicity", "edible"), ("kingdom", "Fungi"),
-    ("facility_type", "dam"), ("since", "2026-01-01"), ("until", "2026-02-01"),
+    ("facility_type", "dam"),
 ])
 async def test_each_request_option_separates_cache_entries(offline_search, option, value):
     _, calls = offline_search
@@ -153,9 +152,7 @@ def domain_fixture(offline_search, monkeypatch):
         LIVE_SCRAPERS={domain: scrape for domain in search.ALL_DOMAINS}))
     monkeypatch.setitem(sys.modules, "mindex_api.supabase_client", SimpleNamespace(
         get_supabase=lambda: SimpleNamespace(enabled=True, sync_search_results=sync)))
-    monkeypatch.setattr(search, "_async_store_scraped", persist)
     monkeypatch.setattr(cache, "cache_search", cache_write)
-    monkeypatch.setattr(search, "schedule_domain_event", lambda **kw: effects.append("event"))
     return created, effects
 
 
