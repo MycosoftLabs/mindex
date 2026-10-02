@@ -90,6 +90,11 @@ metadata is constructed with `admission_metadata(kind,key,media_type,event_at,co
 `repository.authorize_in_session(session,principal)` holds the membership row lock
 inside an application compute transaction. Workers reconstruct identity only from
 their server-committed owner fields, never browser fields; do not store JWTs in jobs.
+Asyncpg consumers use the shared module function
+`await mindex_api.retention.repository.authorize_asyncpg(connection,principal)`
+inside their already-active transaction; it returns the same identity parameter
+mapping and holds the same membership lock. No app-specific authorization SQL copy
+is needed.
 
 FormSpace/NLM compute-specific outboxes belong to those domain owners inside the
 existing MINDEX database, with shared membership and retained result IDs. This

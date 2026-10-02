@@ -9,7 +9,7 @@ cover identity, API, object adapter, SDK, and the combined fixture vertical slic
 
 ## Evidence and boundaries
 
-`tests/test_retention_postgres.py`: **28 passed** against a real, local PostgreSQL
+`tests/test_retention_postgres.py`: **30 passed** against a real, local PostgreSQL
 17.11 process. No SQLite substitution, production database, network database,
 production migration, or installed PostgreSQL Windows service was used. Test
 archive proofs are fixture proofs; these tests do not establish deployed S3,
@@ -171,7 +171,9 @@ table ownership. The restricted fixture role test exercises admission/readback a
 proves denial of membership insertion/deletion/reactivation/identity substitution
 and access-grant updates. `authorize_in_session(session, principal)` requires an
 already active caller transaction and holds the authoritative membership row lock
-until its end. `require_membership` is a standalone fresh check. Neither replaces
+until its end. `require_membership` is a standalone fresh check. The asyncpg-native
+`authorize_asyncpg(connection,principal)` shares this lock contract and requires
+an active caller transaction; tests prove no-transaction and revoked-scope denial. Neither replaces
 object ownership predicates in app-specific compute tables.
 
 `get_job` returns a safe task receipt; `get` is internal and may contain private

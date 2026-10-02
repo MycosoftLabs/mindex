@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 
 from mindex_api.retention.contracts import Principal, RetentionConfig, RetentionError, admission_metadata
-from mindex_api.retention.repository import RetentionRepository
+from mindex_api.retention.repository import RetentionRepository, authorize_asyncpg
 
 
 MIGRATION = Path(__file__).parents[1] / 'migrations/20261001_shared_retention_v1.sql'
@@ -30,6 +30,33 @@ A = Principal('https://issuer.test/auth/v1', 'user-a', 'tenant-a', 'project-a')
 B = Principal(A.issuer, 'user-b', A.tenant_id, A.project_id)
 OTHER = Principal(A.issuer, A.subject, 'tenant-b', 'project-b')
 CONFIG = RetentionConfig(enabled=True, bucket='fixture-private')
+
+
+@pytest.mark.asyncio
+async def test_asyncpg_shared_authority_requires_caller_transaction(db):
+    connection = await asyncpg.connect(guarded_dsn())
+    try:
+        with pytest.raises(RetentionError) as error:
+            await authorize_asyncpg(connection, A)
+        assert error.value.code == 'authorization_transaction_required'
+        async with connection.transaction():
+            assert (await authorize_asyncpg(connection, A))['subject'] == A.subject
+    finally:
+        await connection.close()
+
+
+@pytest.mark.asyncio
+async def test_asyncpg_shared_authority_denies_revoked_scope(db):
+    sessions, _ = db
+    await sql(sessions, 'UPDATE retention.membership SET active=false WHERE subject=:s', s=A.subject)
+    connection = await asyncpg.connect(guarded_dsn())
+    try:
+        async with connection.transaction():
+            with pytest.raises(RetentionError) as error:
+                await authorize_asyncpg(connection, A)
+            assert error.value.status == 403
+    finally:
+        await connection.close()
 
 
 def guarded_dsn():

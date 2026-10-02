@@ -35,6 +35,20 @@ def _id():
     return str(uuid4())
 
 
+async def authorize_asyncpg(connection, principal):
+    """Shared membership lock inside a caller-owned asyncpg compute transaction."""
+    if not connection.is_in_transaction():
+        raise RetentionError('authorization_transaction_required', 503)
+    params = _identity(principal)
+    allowed = await connection.fetchval("""SELECT 1 FROM retention.membership
+        WHERE issuer=$1 AND subject=$2 AND tenant_id=$3 AND project_id=$4
+        AND active FOR SHARE""", params['issuer'], params['subject'],
+        params['tenant_id'], params['project_id'])
+    if allowed is None:
+        raise RetentionError('membership_required', 403)
+    return params
+
+
 def receipt(row):
     """Safe typed metadata only; callers never serialize a raw database row."""
     fields = ('artifact_id', 'job_id', 'kind', 'media_type', 'sha256', 'byte_length',
