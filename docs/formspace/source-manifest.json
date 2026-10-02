@@ -70,8 +70,8 @@
       "git_blob_sha256": "3cae76eafbc15cb2edbb46178c820d632361b875a0194a25252b8158a7012bcc"
     },
     "tests/test_formspace_durable_api_postgres.py": {
-      "working_tree_sha256": "ed0f3833d3f5d0726979dcbd2f95c688a9ee582e7a3b828dd9c2835a4acff43e",
-      "git_blob_sha256": "96d356dab3d7ccb7365062736fe6e29bd230327355dc9e36234038c6afe70eb8"
+      "working_tree_sha256": "9213e9c88eb58a720e0426755fe15ee9a4c635962d9d16d502fbeb43ee2c216d",
+      "git_blob_sha256": "5e24d60ffa3c5eed631aba0875636168d7460ec9acf0460b30d75d4cf8a9e6ff"
     }
   }
 }
