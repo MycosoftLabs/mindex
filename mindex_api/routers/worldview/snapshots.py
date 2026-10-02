@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...db import async_session_scope, get_db
-from ...worldview_snapshot_meta import snapshot_to_avani_meta
+from ...worldview_snapshot_meta import snapshot_to_avani_meta, unavailable_snapshot_meta
 
 router = APIRouter(prefix="/worldview/snapshots", tags=["worldview-internal-snapshots"])
 
@@ -34,40 +34,11 @@ class WorldviewSnapshotIn(BaseModel):
     entry_hash: Optional[str] = None
 
 
-CREATE_TABLE_SQL = """
-CREATE SCHEMA IF NOT EXISTS worldview;
-CREATE TABLE IF NOT EXISTS worldview.worldview_state_snapshots (
-    snapshot_id TEXT PRIMARY KEY,
-    captured_at TIMESTAMPTZ NOT NULL,
-    region JSONB NOT NULL DEFAULT '{}'::jsonb,
-    world_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-    summary_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-    sources_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-    source_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
-    source_freshness JSONB NOT NULL DEFAULT '{}'::jsonb,
-    degraded BOOLEAN NOT NULL DEFAULT FALSE,
-    confidence DOUBLE PRECISION NOT NULL DEFAULT 1.0,
-    provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
-    avani_verdict TEXT NOT NULL DEFAULT 'allow',
-    audit_trail_id TEXT,
-    entry_hash TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_worldview_state_snapshots_captured_at
-    ON worldview.worldview_state_snapshots (captured_at DESC);
-CREATE INDEX IF NOT EXISTS idx_worldview_state_snapshots_region
-    ON worldview.worldview_state_snapshots USING GIN (region);
-CREATE INDEX IF NOT EXISTS idx_worldview_state_snapshots_avani_verdict
-    ON worldview.worldview_state_snapshots (avani_verdict);
-CREATE INDEX IF NOT EXISTS idx_worldview_state_snapshots_audit_trail_id
-    ON worldview.worldview_state_snapshots (audit_trail_id);
-"""
-
-
-async def ensure_snapshot_table(db: AsyncSession) -> None:
-    for statement in [part.strip() for part in CREATE_TABLE_SQL.split(";") if part.strip()]:
-        await db.execute(text(statement))
-    await db.commit()
+def _store_unavailable() -> HTTPException:
+    return HTTPException(status_code=503, detail={
+        "code": "snapshot_store_unavailable",
+        "message": "Worldview snapshot store unavailable",
+    })
 
 
 def _row_to_dict(row: Any | None) -> Optional[Dict[str, Any]]:
@@ -85,7 +56,7 @@ def _row_to_dict(row: Any | None) -> Optional[Dict[str, Any]]:
 
 
 async def insert_snapshot(db: AsyncSession, snapshot: WorldviewSnapshotIn) -> Dict[str, Any]:
-    await ensure_snapshot_table(db)
+    # Schema setup is explicit: migrations/20260514_worldview_state_snapshots.sql.
     await db.execute(
         text(
             """
@@ -137,42 +108,46 @@ async def insert_snapshot(db: AsyncSession, snapshot: WorldviewSnapshotIn) -> Di
 
 
 async def get_snapshot(db: AsyncSession, snapshot_id: str) -> Optional[Dict[str, Any]]:
-    await ensure_snapshot_table(db)
-    result = await db.execute(
-        text("SELECT * FROM worldview.worldview_state_snapshots WHERE snapshot_id = :snapshot_id"),
-        {"snapshot_id": snapshot_id},
-    )
-    return _row_to_dict(result.first())
+    try:
+        result = await db.execute(
+            text("SELECT * FROM worldview.worldview_state_snapshots WHERE snapshot_id = :snapshot_id"),
+            {"snapshot_id": snapshot_id},
+        )
+        return _row_to_dict(result.first())
+    except Exception as exc:
+        raise _store_unavailable() from exc
 
 
 async def get_latest_snapshot(db: AsyncSession, region: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    await ensure_snapshot_table(db)
-    # Region-aware selection can become stricter once MAS starts materializing many regions.
-    result = await db.execute(
-        text(
-            """
-            SELECT * FROM worldview.worldview_state_snapshots
-            ORDER BY captured_at DESC
-            LIMIT 1
-            """
+    """Return the latest stored snapshot across all regions; regional matching is unsupported."""
+    if region is not None:
+        raise HTTPException(status_code=422, detail={
+            "code": "unsupported_snapshot_region",
+            "message": "Snapshot region filtering is not supported; omit region or request a snapshot by ID",
+        })
+    try:
+        result = await db.execute(
+            text(
+                """
+                SELECT * FROM worldview.worldview_state_snapshots
+                ORDER BY captured_at DESC, snapshot_id DESC
+                LIMIT 1
+                """
+            )
         )
-    )
-    return _row_to_dict(result.first())
+        return _row_to_dict(result.first())
+    except Exception as exc:
+        raise _store_unavailable() from exc
 
 
 async def get_latest_snapshot_meta(region: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if region is not None:
+        return unavailable_snapshot_meta("unsupported_region")
     try:
         async with async_session_scope() as db:
             return snapshot_to_avani_meta(await get_latest_snapshot(db, region=region))
-    except Exception as exc:
-        return {
-            "worldstate_snapshot_id": None,
-            "freshness": "degraded",
-            "degraded": True,
-            "confidence": 0.35,
-            "provenance": {"source": "mindex_worldview_snapshot_store", "error": str(exc)},
-            "audit_trail_id": None,
-        }
+    except Exception:
+        return unavailable_snapshot_meta("store_unavailable")
 
 
 @router.post("")
@@ -180,16 +155,21 @@ async def create_worldview_snapshot(
     snapshot: WorldviewSnapshotIn,
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
-    stored = await insert_snapshot(db, snapshot)
+    try:
+        stored = await insert_snapshot(db, snapshot)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _store_unavailable() from exc
     return {"status": "stored", "snapshot": stored}
 
 
 @router.get("/latest")
 async def latest_worldview_snapshot(
-    region: Optional[str] = Query(None),
+    region: Optional[str] = Query(None, description="Unsupported; omit region to read the latest stored snapshot across all regions"),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
-    snapshot = await get_latest_snapshot(db, region={"raw": region} if region else None)
+    snapshot = await get_latest_snapshot(db, region={"raw": region} if region is not None else None)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="No Worldview snapshot available")
     return {"snapshot": snapshot}

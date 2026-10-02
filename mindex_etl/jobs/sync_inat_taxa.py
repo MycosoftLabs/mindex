@@ -20,15 +20,30 @@ def sync_inat_taxa(
 ) -> int:
     """Sync iNaturalist taxa with checkpoint support. domain_mode: 'all' or 'fungi' (default from config)."""
     mode = domain_mode or settings.inat_domain_mode
+    inat._validate_page_arguments(per_page, start_page, max_pages)
+    per_page = min(per_page, 200)
+    query = {"source": "inat_taxa", "base_url": settings.inat_base_url,
+             "taxon_id": inat._root_taxon_id(mode), "per_page": per_page,
+             "is_active": True, "order_by": "observations_count", "rank": None}
+    if checkpoint_manager is not None:
+        # Bound to the configured destination as well as the source query. Only
+        # the combined fingerprint is persisted, never the raw connection URL.
+        query["database_target"] = settings.database_url
+        start_page = checkpoint_manager.resume_page(query=query, start_page=start_page)
     created = 0
-    checkpoint_interval = 10  # Save checkpoint every 10 pages
     
     with db_session() as conn:
-        page = start_page
+        def committed_page(page: int) -> None:
+            conn.commit()
+            if checkpoint_manager is not None:
+                checkpoint_manager.save_committed(page, query=query, records_processed=created)
+
         for taxon_payload, source, external_id in inat.iter_inat_taxa(
             per_page=per_page,
             max_pages=max_pages,
             domain_mode=mode,
+            start_page=start_page,
+            on_page=committed_page,
         ):
             taxon_id = upsert_taxon(conn, **taxon_payload)
             link_external_id(
@@ -40,18 +55,6 @@ def sync_inat_taxa(
             )
             created += 1
             
-            # Save checkpoint periodically
-            if checkpoint_manager and created % (per_page * checkpoint_interval) == 0:
-                checkpoint_manager.save(page, records_processed=created)
-                print(f"Checkpoint saved: page {page}, {created} records", flush=True)
-            
-            # Track current page (approximate)
-            if created % per_page == 0:
-                page += 1
-    
-    # Final checkpoint
-    if checkpoint_manager:
-        checkpoint_manager.save(page, records_processed=created, completed=True)
     
     return created
 

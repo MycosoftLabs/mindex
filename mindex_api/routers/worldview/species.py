@@ -64,7 +64,7 @@ async def worldview_list_observations(
     taxon_id: Optional[UUID] = Query(None),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
-    bbox: Optional[str] = Query(None, description="minLon,minLat,maxLon,maxLat"),
+    bbox: Optional[str] = Query(None, description="Finite WGS84 bbox minLon,minLat,maxLon,maxLat; min<max, no antimeridian wrapping."),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     caller: CallerIdentity = Depends(require_worldview_key),
@@ -78,6 +78,7 @@ async def worldview_list_observations(
     result = await list_observations(
         pagination=pagination, db=db,
         taxon_id=taxon_id, start=start, end=end, bbox=bbox,
+        kingdom=None, include_total=False,
     )
     data = result.model_dump() if hasattr(result, "model_dump") else result
     return await wrap_governed_response(data=data, caller=caller, source_domains=["observations", "species"])

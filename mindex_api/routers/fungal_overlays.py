@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session, require_api_key
+from ..utils.bbox import parse_wgs84_bbox
 
 router = APIRouter(
     prefix="/fungal-overlays",
@@ -87,23 +88,7 @@ class FciDeploymentResult(BaseModel):
 
 
 def _parse_bbox(bbox: Optional[str]) -> Optional[dict[str, float]]:
-    if not bbox:
-        return None
-    try:
-        parts = [float(x.strip()) for x in bbox.split(",")]
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid bbox format") from exc
-    if len(parts) != 4:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected bbox=minLon,minLat,maxLon,maxLat")
-    min_lon, min_lat, max_lon, max_lat = parts
-    if min_lon >= max_lon or min_lat >= max_lat:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid bbox coordinates")
-    return {
-        "min_lon": min_lon,
-        "min_lat": min_lat,
-        "max_lon": max_lon,
-        "max_lat": max_lat,
-    }
+    return parse_wgs84_bbox(bbox)
 
 
 def _clamp01(value: float) -> float:
@@ -144,7 +129,7 @@ def _compute_fci_priority(row: dict[str, Any], weights: FciScoreWeights) -> floa
 async def get_fungal_overlay_cells(
     db: AsyncSession = Depends(get_db_session),
     layer: str = Query("mycelium", description="mycelium|am|ecm|rarity|fci|samples"),
-    bbox: Optional[str] = Query(None, description="Bounding box minLon,minLat,maxLon,maxLat"),
+    bbox: Optional[str] = Query(None, description="Finite WGS84 bbox minLon,minLat,maxLon,maxLat; min<max, no antimeridian wrapping."),
     limit: int = Query(1200, ge=1, le=20000),
     resolution_deg: float = Query(0.25, ge=0.01, le=5.0),
 ) -> FungalOverlayCellsResponse:
@@ -366,7 +351,7 @@ async def get_fungal_overlay_cells(
 @router.get("/samples", response_model=FungalOverlaySamplesResponse)
 async def get_fungal_overlay_samples(
     db: AsyncSession = Depends(get_db_session),
-    bbox: Optional[str] = Query(None, description="Bounding box minLon,minLat,maxLon,maxLat"),
+    bbox: Optional[str] = Query(None, description="Finite WGS84 bbox minLon,minLat,maxLon,maxLat; min<max, no antimeridian wrapping."),
     limit: int = Query(5000, ge=1, le=20000),
 ) -> FungalOverlaySamplesResponse:
     bbox_params = _parse_bbox(bbox)
@@ -452,7 +437,7 @@ async def get_fungal_overlay_samples(
 @router.get("/deployment/land")
 async def get_land_deployment_ranking(
     db: AsyncSession = Depends(get_db_session),
-    bbox: str = Query(..., description="Bounding box minLon,minLat,maxLon,maxLat"),
+    bbox: str = Query(..., description="Finite WGS84 bbox minLon,minLat,maxLon,maxLat; min<max, no antimeridian wrapping."),
     limit: int = Query(20, ge=1, le=200),
     mission: str = Query("mushroom1-fci", description="Mission profile identifier"),
 ) -> dict[str, Any]:

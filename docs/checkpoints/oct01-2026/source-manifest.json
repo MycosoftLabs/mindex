@@ -1,0 +1,229 @@
+{
+  "status": "WIP",
+  "deployment": false,
+  "repository": "C:\\Users\\Owner1\\.codex\\worktrees\\system-audit-repairs\\CODE\\mindex-repair",
+  "sourceBranch": "codex/mindex-audit-repairs",
+  "checkpointBranch": "codex/checkpoint-mindex-repair-oct01-2026",
+  "currentBase": "b1137e9ba7eeabacbbd4f28a2e022dbeffbf3a2e",
+  "scope": {
+    "sourceDeltaCount": 34,
+    "sourceDelta": [
+      {
+        "path": "docs/BOUNDING_BOX_CONTRACT_BATCH9.md",
+        "operation": "write",
+        "bytes": 4680,
+        "sha256": "32451fbc77351204fbff0e0d9d1259c06f39115db6a71f166fec54ed387a1da3"
+      },
+      {
+        "path": "docs/INAT_COMMITTED_CHECKPOINTS_BATCH8.md",
+        "operation": "write",
+        "bytes": 8011,
+        "sha256": "580ee0cd6afbb8a75ea184545663c640478b0ac1e02db3868bdd8985a81d03aa"
+      },
+      {
+        "path": "docs/MINDEX_AUDIT_REPAIRS_SEP29_2026.md",
+        "operation": "write",
+        "bytes": 5381,
+        "sha256": "14a9745c281b663973f1f6912f50a8af60064dc699ef803a2fd3605373183ea6"
+      },
+      {
+        "path": "mindex_api/cache.py",
+        "operation": "write",
+        "bytes": 10568,
+        "sha256": "070fcf32e0a3dd7b00a98c1561c06ce8846a4fe3b89101431c1682d92154d4b3"
+      },
+      {
+        "path": "mindex_api/middleware/metering.py",
+        "operation": "write",
+        "bytes": 4861,
+        "sha256": "622dde93e2583e671fe9c326cb5cbcdc0b75acf6b830372be5150c80840b9925"
+      },
+      {
+        "path": "mindex_api/protocols/mdp_v1.py",
+        "operation": "write",
+        "bytes": 12496,
+        "sha256": "34bb929b897e677ce04270d0669a905189ccf6e2d01e6a376752651fe7115475"
+      },
+      {
+        "path": "mindex_api/routers/fungal_overlays.py",
+        "operation": "write",
+        "bytes": 22299,
+        "sha256": "81919f274d6266e9414225df6ddd089210ce31f641ce6406ce9af4e1ab634f66"
+      },
+      {
+        "path": "mindex_api/routers/observations.py",
+        "operation": "write",
+        "bytes": 17646,
+        "sha256": "ad675ea2471cee246220f2b452f6ba546eec5ac688749745d7f43bdfc94d44e6"
+      },
+      {
+        "path": "mindex_api/routers/unified_search.py",
+        "operation": "write",
+        "bytes": 82711,
+        "sha256": "1667987fb4423375b0a3c726d7111fa86d63f775ce1edcecd66841f10a0bae40"
+      },
+      {
+        "path": "mindex_api/routers/worldview/response_envelope.py",
+        "operation": "write",
+        "bytes": 4233,
+        "sha256": "f4b552134e07781987bcc3e358b94a0d97f40193cad927146586afd2d163c05b"
+      },
+      {
+        "path": "mindex_api/routers/worldview/search.py",
+        "operation": "write",
+        "bytes": 5416,
+        "sha256": "5bd65330a668c8e700529dd7f7d2dd35d6205a0ac4528ad17491adfe08d94359"
+      },
+      {
+        "path": "mindex_api/routers/worldview/snapshots.py",
+        "operation": "write",
+        "bytes": 7327,
+        "sha256": "b6f45540bf42c99ca55281876a48a3974fd1631aeb6bef273e20f76958d9a283"
+      },
+      {
+        "path": "mindex_api/routers/worldview/species.py",
+        "operation": "write",
+        "bytes": 5075,
+        "sha256": "f9b2256ac0fa3aacccca6f4b67a27ebd0ae87a357560e6fd3e221194a3af290b"
+      },
+      {
+        "path": "mindex_api/utils/bbox.py",
+        "operation": "write",
+        "bytes": 1249,
+        "sha256": "98de066017eff20f29397c943a30a295ed8ac6f5fc214c025d821a346a46c016"
+      },
+      {
+        "path": "mindex_api/worldview_snapshot_meta.py",
+        "operation": "write",
+        "bytes": 2242,
+        "sha256": "817ba40598df4a59348ed66def2782223b0e18abd3136420692a415af7431314"
+      },
+      {
+        "path": "mindex_etl/checkpoint.py",
+        "operation": "write",
+        "bytes": 5957,
+        "sha256": "a5a1d466d7ecd7201e3ad567aea0dd1cf4523d13acb45adc1d43deea893dcab3"
+      },
+      {
+        "path": "mindex_etl/jobs/sync_inat_observations.py",
+        "operation": "write",
+        "bytes": 19422,
+        "sha256": "6ce1994ed11320f4c780e21482460a6df6f2e52b486b25d28589e56edcfb89b1"
+      },
+      {
+        "path": "mindex_etl/jobs/sync_inat_taxa.py",
+        "operation": "write",
+        "bytes": 2827,
+        "sha256": "d309ffa4cc49e01cff53576e0a3c9de1b3f6804ce1949da384f4583055a28e76"
+      },
+      {
+        "path": "mindex_etl/sources/inat.py",
+        "operation": "write",
+        "bytes": 14291,
+        "sha256": "ba35f1b6387779deb33ba0ac8d0bc2f54ec9b974e60cb0a4a1b186c04f7cf7b9"
+      },
+      {
+        "path": "mindex_test3_utf8.txt",
+        "operation": "write",
+        "bytes": 12865,
+        "sha256": "cb2d45c17b8aaf0f4c8b8d7639e15f72a3ca929a82842ceb657020852158a8a6"
+      },
+      {
+        "path": "mindex_test4_utf8.txt",
+        "operation": "write",
+        "bytes": 10117,
+        "sha256": "5eac19074f06c42efb937be23ef8a593cb108354d9617f2d6e5995803ab85e79"
+      },
+      {
+        "path": "mindex_test5_utf8.txt",
+        "operation": "write",
+        "bytes": 9294,
+        "sha256": "649d65a923afbdc209a7157e2ba11a8a0ab04665c71675dbef129b6370f838d1"
+      },
+      {
+        "path": "mindex_test_utf8.txt",
+        "operation": "write",
+        "bytes": 15222,
+        "sha256": "413dcd93e52a9dbd8f257870af9e4cc0b1e3a528bce55614287880294c737bb9"
+      },
+      {
+        "path": "scripts/full_fungi_sync_v2.py",
+        "operation": "write",
+        "bytes": 4331,
+        "sha256": "8e6d50c61b7291b2cd1063593d32ee062f54c801bb3baa298437e3f3355faacc"
+      },
+      {
+        "path": "tests/test_batch5_inat_ingestion_contract.py",
+        "operation": "write",
+        "bytes": 8976,
+        "sha256": "265396f1512274d0a83160ac97da9d2f336e64487676df9e8b0576d9187ce9f3"
+      },
+      {
+        "path": "tests/test_batch5_search_contract.py",
+        "operation": "write",
+        "bytes": 10689,
+        "sha256": "69c0af6c5fc995272e7fb42b2056771e2405f0e6cd7c413159ab115fdeb17bb0"
+      },
+      {
+        "path": "tests/test_batch6_bulk_transaction_contract.py",
+        "operation": "write",
+        "bytes": 14100,
+        "sha256": "8709f475d6a550733856bf7adf404d19e39b8df12381068cbf7e605bf491b6b5"
+      },
+      {
+        "path": "tests/test_batch6_snapshot_contract.py",
+        "operation": "write",
+        "bytes": 14293,
+        "sha256": "67aad2744bf12bd73be91efd1ac13e6d4b8de624069c6714c1c9e7056a50c98c"
+      },
+      {
+        "path": "tests/test_batch7_mdp_integrity_contract.py",
+        "operation": "write",
+        "bytes": 5765,
+        "sha256": "b021819c0c9733a136801ca8625b0b6b1d17e1eb2cfd9e0fee5d165521c9bdaf"
+      },
+      {
+        "path": "tests/test_batch8_inat_checkpoint_contract.py",
+        "operation": "write",
+        "bytes": 16711,
+        "sha256": "d1fb0fe7d8e1f76f952e44a4c2c6762e0a20e8dc517064cd5b285abea3e04105"
+      },
+      {
+        "path": "tests/test_batch9_bbox_worldview_contract.py",
+        "operation": "write",
+        "bytes": 9476,
+        "sha256": "a0bf327b32e6eafd623f5d0506a2c0d14a3e460643358ea086156c4763384d6c"
+      },
+      {
+        "path": "tests/test_worldview_metering_contract.py",
+        "operation": "write",
+        "bytes": 2413,
+        "sha256": "50060fe2914f8e6bd8c1c435fb1754e597762be5ca5f251b49098abd7794fc56"
+      },
+      {
+        "path": "tests/test_worldview_search_contract.py",
+        "operation": "write",
+        "bytes": 3620,
+        "sha256": "3bf47153e9e7b98eec0425a78b8a09c817c9798fd5abfe783ccc350d418b71ba"
+      },
+      {
+        "path": "tests/test_worldview_snapshots.py",
+        "operation": "write",
+        "bytes": 1186,
+        "sha256": "1e8f030b43a93b8fcf4a1294850a8a0888703cea158fc690063685c406d51bd0"
+      }
+    ],
+    "overlay": [
+      "docs/checkpoints/oct01-2026/README.md",
+      "docs/checkpoints/oct01-2026/source-manifest.json"
+    ]
+  },
+  "excludedPaths": [],
+  "reviewFlags": [],
+  "validation": {
+    "tests": "not run",
+    "integration": "incomplete",
+    "releaseQualification": "incomplete"
+  },
+  "purpose": "local source preservation checkpoint only; no merge, publication, or deployment"
+}

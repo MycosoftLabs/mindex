@@ -175,7 +175,10 @@ def cobs_decode(data: bytes) -> bytes:
         if i + block_len > len(data):
             raise ValueError("COBS block extends past end of data")
         
-        output.extend(data[i:i + block_len])
+        block = data[i:i + block_len]
+        if b'\x00' in block:
+            raise ValueError("Zero byte in COBS data")
+        output.extend(block)
         i += block_len
         
         # Add implicit zero unless this was the last block or code was 0xFF
@@ -225,8 +228,12 @@ class MDPFrame:
     
     @property
     def is_valid(self) -> bool:
-        """Check if frame was successfully decoded."""
-        return self.message is not None and self.decode_error is None
+        """Check decoding and CRC integrity; a parsed message may be diagnostic."""
+        return (
+            self.message is not None
+            and self.decode_error is None
+            and self.message.crc_valid
+        )
 
 
 def decode_mdp_frame(frame: bytes) -> MDPFrame:
