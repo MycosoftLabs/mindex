@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from mindex_api.formspace.contracts import Admission, FormSpaceError, canonical, digest, receipt
+from mindex_api.formspace.contracts import Admission, FormSpaceError, canonical, chart_receipt, digest, receipt
 from mindex_api.formspace.service import FormSpaceService, strict_json
 from mindex_api.routers import formspace_durable as routes
 
@@ -52,6 +52,7 @@ class FixtureJournal:
     """Deliberate fake durable journal shared by restarted app fixture instances."""
     def __init__(self):
         self.rows = {}
+        self.charts = {}
         self.members = {FixturePrincipal(), FixturePrincipal(subject="bob"),
                         FixturePrincipal(project_id="33333333-3333-4333-8333-333333333333")}
 
@@ -96,6 +97,32 @@ class FixtureJournal:
     async def list(self, p, limit):
         self.authorize(p)
         return [receipt(row) for row in self.rows.values() if self.owner(row) == p][:limit]
+
+    async def save_chart(self, p, definition):
+        self.authorize(p)
+        key = (p, definition["chart_id"], definition["revision"])
+        chart_hash = digest(canonical(definition))
+        prior = self.charts.get(key)
+        if prior and prior["chart_hash"] != chart_hash:
+            raise FormSpaceError("chart_revision_conflict", 409)
+        created = prior is None
+        if created:
+            prior = {**p.__dict__, "definition": deepcopy(definition), "chart_hash": chart_hash,
+                     "created_at": datetime.now(timezone.utc)}
+            self.charts[key] = prior
+        return chart_receipt(prior), created
+
+    async def list_charts(self, p, limit=100):
+        self.authorize(p)
+        rows = [row for (owner, _, _), row in self.charts.items() if owner == p]
+        return [chart_receipt(row) for row in rows[:limit]]
+
+    async def get_chart(self, p, chart_id, revision):
+        self.authorize(p)
+        row = self.charts.get((p, chart_id, revision))
+        if not row:
+            raise FormSpaceError("chart_not_found", 404)
+        return chart_receipt(row)
 
     async def cancel(self, p, job_id):
         await self.get(p, job_id)
@@ -225,6 +252,32 @@ def test_two_user_two_project_no_enumeration_mutation_and_restart_replay():
     changed["chart_revision"]["title"] = "Different same revision"
     assert restarted.post(url, headers={**headers(), "Idempotency-Key": "new"},
                           json={"request": changed}).status_code == 409
+
+
+def test_owned_chart_save_list_exact_readback_and_immutable_revision_scope():
+    app, journal = fixture_app()
+    client = TestClient(app)
+    base = "/api/mindex/formspace/v1/charts"
+    definition = experiment()["chart_revision"]
+    first = client.post(base, headers=headers(), json=definition)
+    assert first.status_code == 200, first.text
+    assert first.json()["definition"] == definition
+    assert first.json()["chart_hash"] == digest(canonical(definition))
+    replay = client.post(base, headers=headers(), json=definition)
+    assert replay.status_code == 200 and replay.json() == first.json()
+    listed = client.get(base, headers=headers()).json()["charts"]
+    assert listed == [first.json()]
+    exact = client.get(base + "/fixture/chart?revision=1", headers=headers())
+    assert exact.status_code == 200 and exact.json() == first.json()
+    changed = {**definition, "title": "different same revision"}
+    assert client.post(base, headers=headers(), json=changed).status_code == 409
+    for denied in (headers("bob"), headers(project="33333333-3333-4333-8333-333333333333")):
+        assert client.get(base, headers=denied).json()["charts"] == []
+        assert client.get(base + "/fixture/chart?revision=1", headers=denied).status_code == 404
+    revision_two = {**definition, "revision": 2, "title": "Explicit fixture rev 2"}
+    assert client.post(base, headers=headers(), json=revision_two).status_code == 200
+    assert [chart["definition"]["revision"] for chart in client.get(base, headers=headers()).json()["charts"]] == [1, 2]
+    assert len(journal.charts) == 2
 
 
 @pytest.mark.parametrize("token", ["", "Bearer expired", "Bearer invalid", "service-key"])

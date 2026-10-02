@@ -202,3 +202,15 @@ def receipt(row: dict) -> dict:
                    "index_state": "pending", "learned": False},
         "replica": {"state": row.get("replica_state") or "unavailable"},
     }
+
+
+def chart_receipt(row: dict) -> dict:
+    definition = row["definition"]
+    if isinstance(definition, str):
+        definition = json.loads(definition)
+    return {
+        "schema": "formspace.chart/v1",
+        "definition": definition,
+        "chart_hash": str(row["chart_hash"]).strip(),
+        "created_at": row["created_at"],
+    }

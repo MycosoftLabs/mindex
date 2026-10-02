@@ -81,6 +81,21 @@ async def test_real_postgres_admission_restart_fence_cancel_and_revocation():
         async with sessions() as session:
             for table in ("chart_revision", "job", "outbox"):
                 assert (await session.execute(text("SELECT count(*) FROM formspace." + table))).scalar_one() == 0
+        chart = experiment()["chart_revision"]
+        chart["chart_id"] = "saved-chart"
+        saved, created = await repository.save_chart(principal, chart)
+        assert created and saved["definition"] == chart
+        replay, created = await repository.save_chart(principal, chart)
+        assert not created and replay == saved
+        assert await repository.list_charts(principal) == [saved]
+        assert await repository.get_chart(principal, "saved-chart", 1) == saved
+        for denied in (bob, other_project):
+            assert await repository.list_charts(denied) == []
+            with pytest.raises(FormSpaceError, match="chart_not_found"):
+                await repository.get_chart(denied, "saved-chart", 1)
+        changed_chart = {**chart, "title": "conflicting title"}
+        with pytest.raises(FormSpaceError, match="chart_revision_conflict"):
+            await repository.save_chart(principal, changed_chart)
         attempts = await asyncio.gather(*[
             repository.admit(principal, "same", experiment()) for _ in range(4)])
         assert len({row["job_id"] for row, _ in attempts}) == 1

@@ -55,6 +55,19 @@ async def test_signed_auth_real_database_actual_worker_and_verified_readback(sta
     monkeypatch.setenv('FORMSPACE_WORKER_TOKEN', token)
     http = stack['http']
     headers = {**stack['headers'](), 'Idempotency-Key':'actual-worker-path'}
+    chart_definition = request['chart_revision']
+    saved_chart = await http.post(BASE+'/charts', headers=headers, json=chart_definition)
+    assert saved_chart.status_code == 200, saved_chart.text
+    assert saved_chart.json()['definition'] == chart_definition
+    listed_charts = await http.get(BASE+'/charts', headers=headers)
+    assert listed_charts.status_code == 200 and listed_charts.json()['charts'] == [saved_chart.json()]
+    exact_chart = await http.get(BASE+'/charts/'+chart_definition['chart_id'], headers=headers,
+                                 params={'revision': chart_definition['revision']})
+    assert exact_chart.status_code == 200 and exact_chart.json() == saved_chart.json()
+    for denied in (stack['headers'](subject=USER_B), stack['headers'](project=PROJECT_B)):
+        assert (await http.get(BASE+'/charts', headers=denied)).json()['charts'] == []
+        assert (await http.get(BASE+'/charts/'+chart_definition['chart_id'], headers=denied,
+                               params={'revision': chart_definition['revision']})).status_code == 404
     for bad in ({'X-User-Id':USER_A}, {**headers,'Authorization':'Bearer '+stack['token'](exp=int(time.time())-30)},
                 {**headers,'Authorization':'Bearer '+stack['token'](aud='wrong')},
                 {**headers,'Authorization':'Bearer '+stack['token'](role='service_role')}):

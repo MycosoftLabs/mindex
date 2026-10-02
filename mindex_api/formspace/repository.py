@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from .contracts import (FormSpaceError, LEASE_SECONDS, MAX_ATTEMPTS, MAX_PENDING,
                         MAX_RUNNING, MAX_PROJECT_RUNNING,
-                        canonical, digest, idempotency, receipt)
+                        canonical, chart_receipt, digest, idempotency, receipt)
 
 SCOPE = "issuer=:issuer AND subject=:subject AND tenant_id=:tenant_id AND project_id=:project_id"
 
@@ -77,6 +77,44 @@ class FormSpaceRepository:
                 params)).mappings().one()
             await session.execute(text("INSERT INTO formspace.outbox(job_id) VALUES (:job_id)"), params)
             return receipt(dict(row)), True
+
+    async def save_chart(self, principal, definition):
+        encoded = canonical(definition)
+        params = dict(chart_id=definition["chart_id"], revision=definition["revision"],
+                      chart_hash=digest(encoded), chart=encoded.decode())
+        async with self.sessions() as session, session.begin():
+            params.update(await self._authorize(session, principal))
+            lock = int.from_bytes(bytes.fromhex(digest(canonical(
+                {"formspace": params["project_id"], "tenant": params["tenant_id"]})))[:8],
+                                  "big", signed=True)
+            await session.execute(text("SELECT pg_advisory_xact_lock(:lock)"), {"lock": lock})
+            existing = (await session.execute(text("SELECT * FROM formspace.chart_revision WHERE "
+                + SCOPE + " AND chart_id=:chart_id AND revision=:revision"), params)).mappings().first()
+            if existing:
+                if str(existing["chart_hash"]).strip() != params["chart_hash"]:
+                    raise FormSpaceError("chart_revision_conflict", 409)
+                return chart_receipt(dict(existing)), False
+            row = (await session.execute(text("""INSERT INTO formspace.chart_revision
+                (issuer,subject,tenant_id,project_id,chart_id,revision,chart_hash,definition)
+                VALUES (:issuer,:subject,:tenant_id,:project_id,:chart_id,:revision,:chart_hash,
+                        CAST(:chart AS jsonb)) RETURNING *"""), params)).mappings().one()
+            return chart_receipt(dict(row)), True
+
+    async def list_charts(self, principal, limit=100):
+        async with self.sessions() as session, session.begin():
+            params = dict(await self._authorize(session, principal), limit=limit)
+            rows = (await session.execute(text("SELECT * FROM formspace.chart_revision WHERE " + SCOPE
+                + " ORDER BY created_at DESC, chart_id, revision DESC LIMIT :limit"), params)).mappings().all()
+            return [chart_receipt(dict(row)) for row in rows]
+
+    async def get_chart(self, principal, chart_id, revision):
+        async with self.sessions() as session, session.begin():
+            params = dict(await self._authorize(session, principal), chart_id=chart_id, revision=revision)
+            row = (await session.execute(text("SELECT * FROM formspace.chart_revision WHERE " + SCOPE
+                + " AND chart_id=:chart_id AND revision=:revision"), params)).mappings().first()
+            if row is None:
+                raise FormSpaceError("chart_not_found", 404)
+            return chart_receipt(dict(row))
 
     async def get(self, principal, job_id):
         async with self.sessions() as session, session.begin():

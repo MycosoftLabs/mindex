@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 
-from ..formspace.contracts import (Admission, Claim, Computed, Failed, FormSpaceError,
+from ..formspace.contracts import (Admission, Chart, Claim, Computed, Failed, FormSpaceError,
                                   Lease, MAX_REQUEST_BYTES, MAX_RESULT_BYTES, receipt)
 from ..formspace.repository import FormSpaceRepository
 from ..formspace.service import FormSpaceService, strict_json
@@ -118,6 +118,27 @@ async def admit(request: Request, response: Response, owner=Depends(principal), 
 @router.get("/jobs")
 async def jobs(limit: int = Query(50, ge=1, le=100), owner=Depends(principal), app=Depends(service)):
     return {"schema": "formspace.jobs/v1", "jobs": await call(app.repository.list, owner, limit)}
+
+
+@router.post("/charts")
+async def save_chart(request: Request, owner=Depends(principal), app=Depends(service)):
+    data = await body(request, Chart, 16 * 1024)
+    result, _created = await call(app.repository.save_chart, owner, data)
+    return result
+
+
+@router.get("/charts")
+async def charts(limit: int = Query(100, ge=1, le=100), owner=Depends(principal), app=Depends(service)):
+    return {"schema": "formspace.charts/v1", "charts": await call(app.repository.list_charts, owner, limit)}
+
+
+@router.get("/charts/{chart_id:path}")
+async def chart(chart_id: str, revision: int = Query(..., ge=1, le=9007199254740991),
+                owner=Depends(principal), app=Depends(service)):
+    if not chart_id or len(chart_id) > 128:
+        raise HTTPException(422, detail={"code": "invalid_chart_id"})
+    result = await call(app.repository.get_chart, owner, chart_id, revision)
+    return result
 
 
 @router.get("/jobs/{job_id}")
