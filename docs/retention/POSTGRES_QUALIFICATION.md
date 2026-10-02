@@ -10,12 +10,12 @@ cover identity, API, object adapter, SDK, and the combined fixture vertical slic
 
 ## Evidence and boundaries
 
-`tests/test_retention_postgres.py`: **31 passed** against a real, local PostgreSQL
+`tests/test_retention_postgres.py`: **34 passed** against a real, local PostgreSQL
 17.11 process on the isolated, marked port-55919 fixture. No SQLite substitution, production database, network database,
 production migration, or installed PostgreSQL Windows service was used. Test
 archive proofs are fixture proofs; these tests do not establish deployed S3,
 Supabase issuer, customer membership provisioning, or learned model state.
-The complete `tests/test_retention_*.py` suite passed **228 tests** with the same
+The complete `tests/test_retention_*.py` suite passed **234 tests** with the same
 disposable PostgreSQL target configured, including identity, HTTP, object-store,
 and database boundary coverage.
 
@@ -49,6 +49,14 @@ The suite establishes:
   removes only the row-derived tenant/project/artifact key after retention. A
   second tenant's object remains intact. Missing objects are recorded as
   reconciled without claiming a physical deletion.
+- An upgrade fixture starts from the original schema and pre-upgrade terminal rows,
+  applies the reconciliation and backfill migrations twice, and recovers both an
+  uploaded fake object and an already absent key exactly once. It does not invent
+  deletion timestamps or enqueue still-live artifacts.
+- Successive expired purge leases, malformed/forged versionless proofs, deletion
+  before DB completion, and a separate-target dump/restore of expired purge and
+  orphan leases are exercised. Restored leases are reclaimed under new tokens and
+  both cleanup ledgers finish without touching another tenant's key.
 - Memory linking needs verified artifact state and the exact digest proof supplied
   only after service readback; references explicitly do not mean model learning.
 - Migration rerun, transactional rollback of schema removal, and destructive
@@ -163,11 +171,15 @@ this does not prove deployed backup or disaster recovery.
 
 ## Schema, privileges, and integration seams
 
-`migrations/20261001_shared_retention_v1.sql` and
-`migrations/20261002_private_orphan_reconciliation.sql` are additive in the new
-`retention` schema. The second migration adds `archive_reconciled_at` to distinguish
-confirmed absence/reconciliation from verified physical deletion. They touch no
-legacy application table. `membership` and `access_grant`
+`migrations/20261001_shared_retention_v1.sql`,
+`migrations/20261002_private_orphan_reconciliation.sql`, and
+`migrations/20261003_backfill_preupgrade_orphan_reconciliation.sql` are additive in
+the new `retention` schema. The second migration adds `archive_reconciled_at` to
+distinguish confirmed absence/reconciliation from verified physical deletion. The
+third idempotently queues pre-upgrade deleted/cancelled versionless rows that have
+not been reconciled or physically deleted; it preserves existing outbox rows and
+does not fabricate completion timestamps. They touch no legacy application table.
+`membership` and `access_grant`
 are operator-provisioned authority; no HTTP route may create them. The runtime
 login must neither own these tables nor inherit an operator/superuser role.
 No RLS policy is claimed: authorization is enforced in repository queries behind
@@ -235,11 +247,17 @@ tombstone/identity policy need operator review and deployment qualification.
 `register_orphan` records known successful uploads whose finalize fence was
 rejected. Terminal cleanup now queues a versionless purge as well, covering a hard
 process crash after object upload but before any database reference commit. The
-worker derives one exact key from the tombstoned database row, verifies its
-expected owner, version, KMS encryption, COMPLIANCE retention, artifact metadata,
-full readback size, and SHA-256, then deletes only that version after its lock
-expires. It does not enumerate or list other tenants' objects. If the exact key is
-already absent, the database records reconciliation while leaving
+backfill migration makes pre-upgrade versionless tombstones claimable. The worker
+derives one exact key from the tombstoned database row, enumerates versions only
+under that canonical key prefix, filters to exact full-key matches, and verifies
+each matching version's expected owner, version, KMS encryption, COMPLIANCE
+retention, artifact metadata, full readback size, and SHA-256 before deleting any
+matching version after its lock expires. It never reads or deletes prefix neighbors
+or another tenant's key. The scan is bounded to 100 versions and 32 pages and fails
+closed above either limit or when version listing is denied. The deployed worker
+role will need `ListBucketVersions` constrained to the private artifact prefix;
+that policy remains unqualified against AWS. If the exact key has no object
+versions, the database records reconciliation while leaving
 `physical_deleted_at` unset. A stale lease cannot commit either result. PostgreSQL
 and S3 fakes qualify this local flow only; deployed S3 permissions and production
 retention remain unverified. Quarantined digest mismatches must never become

@@ -418,14 +418,20 @@ class RetentionRepository:
                        for k in ('bucket', 'key', 'version'))
         expected_key = '/'.join((self.config.prefix, row['tenant_id'],
                                  row['project_id'], row['artifact_id']))
-        return (proof.get('reconciled') is True
-                and proof.get('bucket') == self.config.bucket
-                and proof.get('key') == expected_key
-                and ((proof.get('absent') is True and proof.get('version') is None)
-                     or (proof.get('absent') is False
-                         and isinstance(proof.get('version'), str)
-                         and 1 <= len(proof['version']) <= 1024
-                         and proof['version'] != 'null')))
+        if proof.get('reconciled') is not True or proof.get('verified') is not True:
+            return False
+        if (proof.get('bucket') != self.config.bucket or proof.get('key') != expected_key
+                or proof.get('sha256') != row.get('sha256')
+                or type(proof.get('byte_length')) is not int
+                or proof.get('byte_length') != row.get('byte_length')
+                or type(proof.get('versions_deleted')) is not int
+                or proof['versions_deleted'] < 0):
+            return False
+        if proof.get('absent') is True:
+            return proof.get('version') is None and proof['versions_deleted'] == 0
+        return (proof.get('absent') is False and proof['versions_deleted'] > 0
+                and isinstance(proof.get('version'), str)
+                and 1 <= len(proof['version']) <= 1024 and proof['version'] != 'null')
 
     async def complete_purge(self, row, proof):
         """Call only after the object adapter confirms exact-version absence."""
