@@ -2,8 +2,8 @@
   "baseline": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
   "files": {
     "docs/formspace/README.md": {
-      "working_tree_sha256": "fe023faf5df3fd06e8e35e2593cc5736ac219c310303cc759f1792d97515944c",
-      "git_blob_sha256": "fe023faf5df3fd06e8e35e2593cc5736ac219c310303cc759f1792d97515944c"
+      "working_tree_sha256": "a95f64aaa856f4f146dec745c1fbc046e63e0d81ffcea7288363b5e8827428f2",
+      "git_blob_sha256": "a95f64aaa856f4f146dec745c1fbc046e63e0d81ffcea7288363b5e8827428f2"
     },
     "docs/formspace/benchmark-receipt.json": {
       "working_tree_sha256": "3c9b3e4eb0e3f189e7414a58015da016940a40a9b6f87ed577b998bbbcdc439d",
@@ -72,6 +72,10 @@
     "tests/test_formspace_durable_api_postgres.py": {
       "working_tree_sha256": "9213e9c88eb58a720e0426755fe15ee9a4c635962d9d16d502fbeb43ee2c216d",
       "git_blob_sha256": "5e24d60ffa3c5eed631aba0875636168d7460ec9acf0460b30d75d4cf8a9e6ff"
+    },
+    "scripts/formspace-chart-qualification.ps1": {
+      "working_tree_sha256": "a93e17cc3ff269a93ce029aba293f99755a22c251e5d44b068cf65fbcdbd795c",
+      "git_blob_sha256": "6a99d11f5f06311777bf30155c17b9e942399be0a2470e05407b9a4c64712d51"
     }
   }
 }
