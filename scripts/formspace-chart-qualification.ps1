@@ -33,6 +33,54 @@ $websiteWorkerSourcePins = @{
 }
 $pytestTimeoutSeconds = 240
 $nodeHeapLimitMiB = 384
+$jobMemoryLimitMiB = 1152
+
+if (-not ('FormSpaceQualificationJob' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class FormSpaceQualificationJob {
+    [StructLayout(LayoutKind.Sequential)] struct BASIC_LIMITS {
+        public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+        public uint LimitFlags; public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+        public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass, SchedulingClass;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct IO_COUNTERS {
+        public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount;
+        public ulong ReadTransferCount, WriteTransferCount, OtherTransferCount;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct EXTENDED_LIMITS {
+        public BASIC_LIMITS BasicLimitInformation; public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+    }
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref EXTENDED_LIMITS info, uint length);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+    public static IntPtr CreateBoundedJob(ulong memoryBytes, uint maxProcesses) {
+        IntPtr job = CreateJobObject(IntPtr.Zero, null);
+        if (job == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        EXTENDED_LIMITS limits = new EXTENDED_LIMITS();
+        limits.BasicLimitInformation.LimitFlags = 0x00000200 | 0x00002000 | 0x00000008;
+        limits.BasicLimitInformation.ActiveProcessLimit = maxProcesses;
+        limits.JobMemoryLimit = (UIntPtr)memoryBytes;
+        if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(EXTENDED_LIMITS)))) {
+            int error = Marshal.GetLastWin32Error(); CloseHandle(job); throw new System.ComponentModel.Win32Exception(error);
+        }
+        return job;
+    }
+    public static void AssignCurrentProcess(IntPtr job) {
+        uint pid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+        IntPtr process = OpenProcess(0x0100 | 0x0200, false, pid);
+        if (process == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        try { if (!AssignProcessToJobObject(job, process)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()); }
+        finally { CloseHandle(process); }
+    }
+    public static void CloseJob(IntPtr job) { if (job != IntPtr.Zero) CloseHandle(job); }
+}
+'@
+}
 
 function Assert-WebsiteWorkerSourcePins([string]$Root) {
     foreach ($relativePath in $websiteWorkerSourcePins.Keys) {
@@ -113,6 +161,9 @@ if ($LASTEXITCODE -ne 0 -or $pgVersion -notmatch 'PostgreSQL\) 17\.11$') {
     throw "Expected the existing PostgreSQL 17.11 binary, received: $pgVersion"
 }
 
+$jobProbe = [FormSpaceQualificationJob]::CreateBoundedJob([UInt64]$jobMemoryLimitMiB * 1MB, 12)
+[FormSpaceQualificationJob]::CloseJob($jobProbe)
+
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $listener.Start()
 $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
@@ -124,13 +175,16 @@ Write-Output "Preflight passed: $($pythonVersions.Trim())"
 Write-Output "Website source: branch $websiteBranch at $websiteHead; reviewed worker closure: $requiredWebsiteSourceCommit"
 Write-Output "PostgreSQL: $pgVersion; Node: $nodeVersion; tsx: $tsxVersion; proposed loopback port: $port"
 Write-Output "New fixture only: $dataDir; database: $dbName"
-Write-Output "Bounded run limits: one pytest process, one PostgreSQL server (max_connections=12, shared_buffers=64MB, work_mem=4MB), one TS worker at a time (Node heap $nodeHeapLimitMiB MiB), pytest timeout $pytestTimeoutSeconds seconds, per-worker timeout 30 seconds."
+Write-Output "Bounded run limits: Windows Job Object caps the complete runner/pytest/PostgreSQL/worker process tree at $jobMemoryLimitMiB MiB committed job memory and 12 active processes; PostgreSQL max_connections=12/shared_buffers=64MB/work_mem=4MB; one TS worker at a time (Node heap $nodeHeapLimitMiB MiB); pytest timeout $pytestTimeoutSeconds seconds; per-worker timeout 30 seconds."
 Write-Output 'This preflight did not create a directory, database, or service.'
 
 if (-not $Run) { return }
 if ($env:MYCOSOFT_RESOURCE_SLOT_CONFIRMED -ne 'true' -or [string]::IsNullOrWhiteSpace($env:MYCOSOFT_RESOURCE_SLOT_ID)) {
     throw 'Refusing runtime startup without the coordinator-granted slot marker and slot ID.'
 }
+$runtimeJob = [FormSpaceQualificationJob]::CreateBoundedJob([UInt64]$jobMemoryLimitMiB * 1MB, 12)
+try { [FormSpaceQualificationJob]::AssignCurrentProcess($runtimeJob) }
+catch { [FormSpaceQualificationJob]::CloseJob($runtimeJob); throw 'Windows Job Object could not attach the runner; refusing runtime startup.' }
 if (Test-Path -LiteralPath $taskRoot) {
     throw "Refusing to reuse an existing fixture path; preserve it and choose a new task-owned directory: $taskRoot"
 }

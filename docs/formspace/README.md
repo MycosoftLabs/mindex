@@ -205,7 +205,12 @@ reuse the earlier restore-audit directory or shared/sibling database.
 The worker checkout is the recovered managed Website worktree at
 `C:\Users\Owner1\.codex\worktrees\formspace-recovered-oct03\website`, pinned to
 `codex/formspace-durable-experiments` at `b90a9d2299a610413c83360d59257c1f23348566`.
-The bounded test plan uses one pytest process, one loopback PostgreSQL 17.11 server
+The bounded test plan runs the entire qualification PowerShell runner and its child
+process tree under a Windows Job Object capped at 1,152 MiB committed job memory
+and 12 active processes. The cap is applied before the runner creates the fixture
+cluster, so it covers initdb, PostgreSQL, pytest, Python API processes, and TypeScript
+workers together. The bound is a hard configured ceiling, not a measured peak-RSS
+result. The test plan uses one pytest process, one loopback PostgreSQL 17.11 server
 (`max_connections=12`, `shared_buffers=64MB`, `work_mem=4MB`), and at most one
 TypeScript worker at a time (`NODE_OPTIONS=--max-old-space-size=384`). Each worker
 subprocess has a 30-second test timeout, the post-commit child has a 15-second
