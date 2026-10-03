@@ -110,16 +110,25 @@ fix. It excludes the unrelated catalog/devtools commit chain.
 The current repository has no configured webhooks and `main` is not branch
 protected. `Deploy MINDEX to VM 189` is configured only for matching `main`
 pushes or manual dispatch; do not push to `main` or dispatch it. A pull request
-runs `platform-one-build`. The latest observed PR run passed tests and skipped
+runs `platform-one-build`. The latest comparable PR run passed tests and skipped
 Iron Bank authentication/build/push; repository-level secrets did not list those
-inputs. Its failure fallback can call the external agent API. Organization-level
-secrets/variables and GitHub App installation policy could not be inspected
-with the available account (403/401), so this audit does not establish a fully
-safe PR or branch-push route. No branch was pushed and no PR was opened.
+inputs. Its failure fallback can call the external agent API. Root then confirmed
+fresh webhook results were empty for both MINDEX and Website and supplied current
+workflow evidence, authorizing publication on a sanitized branch with no merge
+or deploy.
 
-Before Cursor publishes this branch, a repository/org owner must verify there
-are no inherited `IRON_BANK_*` image-publish inputs or other push/PR automation
-that can publish/deploy, and confirm how to prevent or accept the agentic
-failure fallback. Then recheck the workflow files and installation/webhook
-policy immediately before push. Keep any PR draft; do not merge, dispatch a
+The sanitized branch was pushed as
+`codex/retention-s3-delete-markers-review-oct03`, and draft PR
+[MycosoftLabs/mindex#20](https://github.com/MycosoftLabs/mindex/pull/20) was
+opened against `main` at `42b876fcfca2e86b0365e8fe8afab628d6a94705`. For branch
+head `57f267b51d22a0073a1def2f92599b1bfa0157bb`, platform CI run
+`37111333110` and CodeQL run `37111331826` passed; Iron Bank authentication,
+image build/push, and `agentic-fallback` were skipped. GitHub reports no
+deployment for that head SHA. Keep the PR draft; do not merge, dispatch a
 workflow, apply a migration, or deploy as part of this qualification handoff.
+
+The draft PR check is concrete evidence for this configured route, not a claim
+that uninspected organization-level settings never change. Recheck workflows
+and webhook configuration before any later publication or merge. Remaining
+operator gates are identity/membership, effective AWS IAM/KMS/Object Lock,
+live version-marker recovery, and backup/restore acceptance as listed above.
