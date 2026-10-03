@@ -2,8 +2,8 @@
   "baseline": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
   "files": {
     "docs/formspace/README.md": {
-      "working_tree_sha256": "908af76d72b670d7c73aceb22afda1bb2adb6ba9fe23a686bb5b684ea52d31c9",
-      "git_blob_sha256": "7f5a9aa08aba29018a07a80aa45a2bbea731d7a4"
+      "working_tree_sha256": "fbddf0a1c7235172d069fb86ac93595bc963a7e94925fc76c2061687c40951f4",
+      "git_blob_sha256": "641a103fa0d39621b40dd58788142d273677ed98"
     },
     "docs/formspace/benchmark-receipt.json": {
       "working_tree_sha256": "3c9b3e4eb0e3f189e7414a58015da016940a40a9b6f87ed577b998bbbcdc439d",
@@ -74,8 +74,8 @@
       "git_blob_sha256": "5e24d60ffa3c5eed631aba0875636168d7460ec9acf0460b30d75d4cf8a9e6ff"
     },
     "scripts/formspace-chart-qualification.ps1": {
-      "working_tree_sha256": "340f61ecaec0a8579a31e9a2b9cb7c76cc216ac6992372da7aaade8dee712243",
-      "git_blob_sha256": "df9df70ec4ffe43859ccff1f9ccebfc84b7c2e69"
+      "working_tree_sha256": "e8c729de890b5b4d32a2ddf908385b4db0c6f07a5a463e453f4f3bcb86402277",
+      "git_blob_sha256": "05416ef6f37d389dda66158c53ab76df34fa4b92"
     }
   }
 }

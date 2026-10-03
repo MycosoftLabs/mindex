@@ -222,8 +222,12 @@ task-owned PostgreSQL executable. Pytest stdout and stderr stream into files wit
 a combined hard limit of 4 MiB; bytes beyond the limit are discarded and the
 pytest process tree is terminated. Before imports or child launches, the runner
 clears ambient environment variables and restores only the OS/runtime allowlist
-plus explicit resource-slot markers and test variables. The API test binds its
-ephemeral HTTP socket to `127.0.0.1`; PostgreSQL listens only on `127.0.0.1`.
+plus explicit resource-slot markers and test variables. `NODE_OPTIONS` is excluded
+from that inherited allowlist; the runner sets its pinned 384 MiB heap option before
+the first Node.js invocation, including preflight version checks. A task-owned server
+that needs forced process-tree termination after graceful `pg_ctl stop` failure is
+reaped when possible, but the qualification still fails closed. The API test binds
+its ephemeral HTTP socket to `127.0.0.1`; PostgreSQL listens only on `127.0.0.1`.
 This is an enforced resource ceiling, not a measured peak-RSS result; the
 coordinator still needs to allocate and measure the slot before execution.
 

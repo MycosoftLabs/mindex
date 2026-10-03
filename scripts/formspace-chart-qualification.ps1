@@ -17,7 +17,7 @@ $qualificationEnvironmentAllowlist = @(
     'PROCESSOR_REVISION','NUMBER_OF_PROCESSORS','MYCOSOFT_RESOURCE_SLOT_CONFIRMED',
     'MYCOSOFT_RESOURCE_SLOT_ID','FORMSPACE_QUALIFICATION_DEADLINE_UTC',
     'RETENTION_TEST_ALLOW_DISPOSABLE','RETENTION_TEST_DSN','FORMSPACE_WEBSITE_CHECKOUT',
-    'FORMSPACE_TSX_CLI','NODE_OPTIONS'
+    'FORMSPACE_TSX_CLI'
 )
 $qualificationEnvironment = [Environment]::GetEnvironmentVariables('Process')
 foreach ($environmentName in @($qualificationEnvironment.Keys)) {
@@ -25,6 +25,8 @@ foreach ($environmentName in @($qualificationEnvironment.Keys)) {
         [Environment]::SetEnvironmentVariable([string]$environmentName, $null, 'Process')
     }
 }
+$nodeHeapLimitMiB = 384
+$env:NODE_OPTIONS = "--max-old-space-size=$nodeHeapLimitMiB"
 $qualificationInvocationStart = [DateTimeOffset]::UtcNow
 
 if (-not ('FormSpaceQualificationJob' -as [type])) {
@@ -218,6 +220,17 @@ function Test-QualificationProcessSupervisor {
     } finally { [FormSpaceQualificationJob]::CloseHandleSafe($job) }
     if (-not $ok) { throw 'Process supervisor controls failed.' }
     Write-Output 'Process supervisor controls passed: suspended assignment, hard-job setup, natural exit, timeout termination, and bounded reap.'
+    $forcedRecovery = Get-PostgresCleanupOutcome -GracefulStopSucceeded $false -ForcedStopSucceeded $true -PostmasterStillAlive $false
+    if (-not $forcedRecovery.Cleaned -or $forcedRecovery.QualificationSucceeded) {
+        throw 'Cleanup policy accepted forced recovery as a successful qualification after graceful stop failure.'
+    }
+    $gracefulPass = Get-PostgresCleanupOutcome -GracefulStopSucceeded $true -ForcedStopSucceeded $false -PostmasterStillAlive $false
+    if (-not $gracefulPass.Cleaned -or -not $gracefulPass.QualificationSucceeded) {
+        throw 'Cleanup policy rejected a successful graceful stop.'
+    }
+    $unreaped = Get-PostgresCleanupOutcome -GracefulStopSucceeded $false -ForcedStopSucceeded $false -PostmasterStillAlive $true
+    if ($unreaped.Cleaned -or $unreaped.QualificationSucceeded) { throw 'Cleanup policy accepted an unreaped PostgreSQL process.' }
+    Write-Output 'Cleanup policy controls passed: forced recovery after graceful-stop failure fails qualification; graceful stop passes; unreaped process fails.'
 
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     $captureScratch = [IO.Path]::GetFullPath((Join-Path $tempRoot ('formspace-capture-guard-' + [Guid]::NewGuid().ToString('N'))))
@@ -315,7 +328,6 @@ $websiteWorkerSourcePins = @{
     'lib/formspace/native-ssm.ts' = '4c04deeb5ab1dfbeb819840464767bcc628682111b4926b10cd3fe930bdc78dd'
 }
 $pytestTimeoutSeconds = 240
-$nodeHeapLimitMiB = 384
 $qualificationDeadlineUnix = if ($env:FORMSPACE_QUALIFICATION_DEADLINE_UTC) { [long]$env:FORMSPACE_QUALIFICATION_DEADLINE_UTC } else { $null }
 $captureLimitBytes = 4MB
 $cleanupReserveSeconds = 15
@@ -333,6 +345,17 @@ function Get-CapturedOutputBytes([string[]]$Paths) {
         if (Test-Path -LiteralPath $path -PathType Leaf) { $total += (Get-Item -LiteralPath $path).Length }
     }
     return $total
+}
+
+function Get-PostgresCleanupOutcome([bool]$GracefulStopSucceeded, [bool]$ForcedStopSucceeded, [bool]$PostmasterStillAlive) {
+    $cleaned = ($GracefulStopSucceeded -or $ForcedStopSucceeded) -and -not $PostmasterStillAlive
+    $qualified = $GracefulStopSucceeded -and -not $PostmasterStillAlive
+    $message = if ($qualified) { $null } elseif (-not $cleaned) {
+        'Task-owned PostgreSQL cleanup failed; graceful and forced stop both failed or the process remains alive.'
+    } else {
+        'Task-owned PostgreSQL required forced cleanup after graceful pg_ctl stop failed; qualification fails closed.'
+    }
+    return [pscustomobject]@{ Cleaned = $cleaned; QualificationSucceeded = $qualified; Failure = $message }
 }
 
 function Stop-TaskOwnedProcessTree([Diagnostics.Process]$Process, [int]$ReapMilliseconds = 3000) {
@@ -373,6 +396,24 @@ function Stop-TaskOwnedPostgres {
     }
     if (-not (Stop-TaskOwnedProcessTree -Process $process -ReapMilliseconds 3000)) {
         throw "Task-owned PostgreSQL process tree rooted at PID $postgresPid could not be reaped within the bounded cleanup window."
+    }
+    return $true
+}
+
+function Test-TaskOwnedPostgresAlive {
+    $pidFile = Join-Path $dataDir 'postmaster.pid'
+    if (-not (Test-Path -LiteralPath $pidFile -PathType Leaf)) { return $false }
+    $pidText = (Get-Content -LiteralPath $pidFile -TotalCount 1).Trim()
+    [int]$postgresPid = 0
+    if (-not [int]::TryParse($pidText, [ref]$postgresPid) -or $postgresPid -le 0) {
+        throw "Refusing to inspect PostgreSQL with an invalid task-owned postmaster PID file: $pidFile"
+    }
+    $process = Get-Process -Id $postgresPid -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return $false }
+    $actualPath = [IO.Path]::GetFullPath($process.Path)
+    $expectedPath = [IO.Path]::GetFullPath($postgres)
+    if (-not $actualPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to treat PID $postgresPid as task-owned PostgreSQL because its executable path differs."
     }
     return $true
 }
@@ -445,6 +486,8 @@ if ($LASTEXITCODE -ne 0 -or $websiteBranch -ne $expectedWebsiteBranch) {
 if ($LASTEXITCODE -ne 0) { throw "Website checkout is not based on reviewed source $requiredWebsiteSourceCommit" }
 Assert-WebsiteWorkerSourcePins $website
 if ($TestSourceGuard) { Test-WebsiteWorkerSourceGuard }
+$expectedNodeOptions = "--max-old-space-size=$nodeHeapLimitMiB"
+if ($env:NODE_OPTIONS -cne $expectedNodeOptions) { throw 'NODE_OPTIONS is not the explicit pinned runner value before Node.js startup.' }
 $node = (Get-Command node -ErrorAction Stop).Source
 $nodeVersion = (& $node --version | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Node.js is unavailable for the bounded TypeScript worker subprocess.' }
@@ -490,6 +533,7 @@ $previousEnv = @{}
 foreach ($name in $envNames) { $previousEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 $serverStarted = $false
 $exitCode = 0
+$cleanupFailure = $null
 try {
     New-Item -ItemType Directory -Path $taskRoot | Out-Null
     [void](Get-RemainingQualificationMilliseconds)
@@ -529,26 +573,47 @@ try {
 }
 finally {
     if ($serverStarted) {
-        $remainingCleanupMs = Get-RemainingQualificationMilliseconds -AllowZero
-        $stopped = $false
-        if ($remainingCleanupMs -gt 0) {
-            $stopSeconds = [Math]::Max(1, [int][Math]::Floor($remainingCleanupMs / 1000))
-            & $pgCtl -D $dataDir -m fast -w -t $stopSeconds stop
-            $stopped = ($LASTEXITCODE -eq 0)
+        $gracefulStopSucceeded = $false
+        $forcedStopSucceeded = $false
+        $postmasterStillAlive = $false
+        $forcedStopFailure = $null
+        try {
+            $remainingCleanupMs = Get-RemainingQualificationMilliseconds -AllowZero
+            if ($remainingCleanupMs -gt 0) {
+                $stopSeconds = [Math]::Max(1, [int][Math]::Floor($remainingCleanupMs / 1000))
+                & $pgCtl -D $dataDir -m fast -w -t $stopSeconds stop
+                $gracefulStopSucceeded = ($LASTEXITCODE -eq 0)
+            }
         }
-        if (-not $stopped) { $stopped = Stop-TaskOwnedPostgres }
-        if (-not $stopped) { throw 'Task-owned PostgreSQL cleanup did not complete successfully.' }
-        $pidFile = Join-Path $dataDir 'postmaster.pid'
-        if (Test-Path -LiteralPath $pidFile) {
-            $pidText = (Get-Content -LiteralPath $pidFile -TotalCount 1).Trim()
-            [int]$remainingPid = 0
-            if ([int]::TryParse($pidText, [ref]$remainingPid) -and (Get-Process -Id $remainingPid -ErrorAction SilentlyContinue)) {
-                throw "Task-owned PostgreSQL PID $remainingPid remains alive after cleanup."
+        catch {
+            $cleanupFailure = "Bounded graceful PostgreSQL stop failed: $($_.Exception.Message)"
+        }
+        try { $postmasterStillAlive = Test-TaskOwnedPostgresAlive }
+        catch {
+            if (-not $cleanupFailure) { $cleanupFailure = "PostgreSQL ownership could not be verified after graceful stop: $($_.Exception.Message)" }
+            $postmasterStillAlive = $true
+        }
+        if (-not $gracefulStopSucceeded -or $postmasterStillAlive) {
+            try { $forcedStopSucceeded = Stop-TaskOwnedPostgres }
+            catch { $forcedStopFailure = $_.Exception.Message }
+        }
+        try { $postmasterStillAlive = Test-TaskOwnedPostgresAlive }
+        catch {
+            if (-not $cleanupFailure) { $cleanupFailure = "PostgreSQL ownership could not be verified after forced cleanup: $($_.Exception.Message)" }
+            $postmasterStillAlive = $true
+        }
+        $cleanupOutcome = Get-PostgresCleanupOutcome $gracefulStopSucceeded $forcedStopSucceeded $postmasterStillAlive
+        if (-not $cleanupOutcome.QualificationSucceeded) {
+            $cleanupFailure = $cleanupOutcome.Failure
+            if ($forcedStopFailure) { $cleanupFailure += " Forced cleanup error: $forcedStopFailure" }
+            if ($cleanupFailure -and $cleanupOutcome.Cleaned -and -not $forcedStopFailure) {
+                $cleanupFailure = $cleanupOutcome.Failure
             }
         }
     }
     foreach ($name in $envNames) { [Environment]::SetEnvironmentVariable($name, $previousEnv[$name], 'Process') }
     if (Test-Path -LiteralPath $logFile) { Write-Output "Preserved task-owned PostgreSQL log: $logFile" }
     Write-Output "Preserved task-owned fixture files: $taskRoot"
+    if ($cleanupFailure) { throw $cleanupFailure }
 }
 exit $exitCode
