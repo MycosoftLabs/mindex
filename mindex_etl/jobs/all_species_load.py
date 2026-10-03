@@ -89,6 +89,7 @@ BATCH_SQL = [
           ON lower(t.canonical_name) = lower(s2.canonical_name)
          AND t.kingdom = ANY (ARRAY[s2.kingdom, 'Undesignated'])
          AND t.rank IN ('species', 'sp.')
+         AND NOT coalesce(t.metadata ? 'merged_into', false)
         WHERE s2.seq > %(lo)s AND s2.seq <= %(hi)s AND s2.taxon_id IS NULL
           AND (NOT s2.homonym OR t.kingdom = s2.kingdom)
           AND NOT EXISTS (SELECT 1 FROM core.taxon_external_id x WHERE x.taxon_id = t.id AND x.source = %(source)s)
@@ -103,6 +104,7 @@ BATCH_SQL = [
         SELECT s2.seq, (array_agg(t.id))[1] AS id, (array_agg(t.kingdom))[1] AS kingdom
         FROM stage_taxon s2
         JOIN core.taxon t ON lower(t.canonical_name) = lower(s2.canonical_name) AND t.rank IN ('species', 'sp.')
+         AND NOT coalesce(t.metadata ? 'merged_into', false)
         WHERE s2.seq > %(lo)s AND s2.seq <= %(hi)s AND s2.taxon_id IS NULL AND NOT s2.homonym
         GROUP BY s2.seq, s2.kingdom
         HAVING count(*) = 1

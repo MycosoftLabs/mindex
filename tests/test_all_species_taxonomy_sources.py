@@ -2,7 +2,15 @@ import csv
 import gzip
 import json
 
+from datetime import datetime
+
+from mindex_etl.jobs.merge_duplicate_species import Row, effective_kingdom, plan_group
 from mindex_etl.jobs.taxonomy_sources import BINOMIAL, Writer, ncbi_kingdom, rewrite_common_names
+
+
+def make_row(row_id, source, kingdom, effective=None, rank="species", fungip=False, lineage_len=6, day=1):
+    return Row(row_id, "abortiporus roseus", "Abortiporus roseus", rank, source, kingdom,
+               effective or kingdom, lineage_len, 1, fungip, datetime(2026, 6, day))
 
 
 def read_rows(path):
@@ -43,3 +51,30 @@ def test_writer_dedupes_and_patches_common_names(tmp_path):
     assert lineage == "Fungi|Basidiomycota"
     assert json.loads(metadata) == {"col_id": "1"}
     assert read_rows(tmp_path / "col_synonyms.tsv.gz") == [["2", "1", "Agaricus muscarius"]]
+
+
+def test_merge_folds_gbif_undesignated_into_mycobank_fungus():
+    gbif = make_row("g", "gbif", "Undesignated", effective="Undesignated", lineage_len=1, day=1)
+    myco = make_row("m", "mycobank", "Fungi", rank="sp.", day=2)
+    assert plan_group([gbif, myco]) == [("g", "m", "same_name_same_kingdom")]
+
+
+def test_merge_keeps_fungus_as_survivor_over_protist_and_skips_true_homonyms():
+    inat = make_row("i", "inat", "Protista")
+    myco = make_row("m", "mycobank", "Fungi", rank="sp.")
+    assert plan_group([inat, myco]) == [("i", "m", "same_name_fungi_protista")]
+    animal = make_row("a", "inat", "Animalia")
+    assert plan_group([animal, myco]) == []
+
+
+def test_merge_prefers_fungip_row_and_never_merges_two_fungip_rows():
+    myco = make_row("m", "mycobank", "Fungi", rank="sp.")
+    curated = make_row("c", "inat", "Fungi", fungip=True)
+    assert plan_group([myco, curated]) == [("m", "c", "same_name_same_kingdom")]
+    assert plan_group([make_row("x", "inat", "Fungi", fungip=True), curated]) == []
+
+
+def test_effective_kingdom_maps_protozoa_and_chromista():
+    assert effective_kingdom("Undesignated", "Chromista") == "Protista"
+    assert effective_kingdom("Fungi", "Plantae") == "Fungi"
+    assert effective_kingdom("Undesignated", None) == "Undesignated"
