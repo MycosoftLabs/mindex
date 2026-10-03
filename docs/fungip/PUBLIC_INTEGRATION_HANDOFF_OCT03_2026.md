@@ -5,7 +5,7 @@ Prepared 2026-10-03. This branch is a source integration for operator review, no
 ## Source relationship
 
 - Public base: `42b876fcfca2e86b0365e8fe8afab628d6a94705`.
-- Integrated source/test checkpoint including by-location correction: `b3ba7d2f6a1b828e3b3e8cb0fd801595698d756f`.
+- Integrated source/test checkpoint including the by-location correction and CI fixture repair: `284ae4b50fd206d6376491e65e22d29eab6f4cb2`.
 - Local feature checkpoint: `a54b2a4ad1b5286d5014987a6fd3993a9e0dd3d0`.
 - Feature comparison base: `687d3d9074e1af6a17c92b9c6b4b6887373b0c00`.
 - Selected source, migrations and tests were applied as an aggregate three-way diff. The original local commit history and internal artifacts are not parents of this publication branch.
@@ -61,7 +61,7 @@ From the repository root, in PowerShell with the repository's test dependencies 
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
 $env:PYTHONDONTWRITEBYTECODE = '1'
-$featureTests = @(git diff --name-only --diff-filter=A 42b876fcfca2e86b0365e8fe8afab628d6a94705 b3ba7d2f6a1b828e3b3e8cb0fd801595698d756f -- tests | Where-Object { $_ -match '^tests/test_.*\.py$' })
+$featureTests = @(git diff --name-only --diff-filter=A 42b876fcfca2e86b0365e8fe8afab628d6a94705 284ae4b50fd206d6376491e65e22d29eab6f4cb2 -- tests | Where-Object { $_ -match '^tests/test_.*\.py$' })
 if ($LASTEXITCODE -ne 0 -or $featureTests.Count -ne 20) { throw 'Expected the 20 pinned feature test files' }
 python -B -m pytest -o addopts='' -p pytest_asyncio.plugin -p no:cacheprovider -q --tb=short @featureTests tests/test_batch5_search_contract.py tests/test_batch9_bbox_worldview_contract.py tests/test_worldview_search_contract.py
 if ($LASTEXITCODE -ne 0) { throw 'Selected offline qualification failed' }
@@ -76,7 +76,18 @@ python -B -m pytest -o addopts='' -p pytest_asyncio.plugin -p no:cacheprovider -
 if ($LASTEXITCODE -ne 0) { throw 'Affected offline qualification failed' }
 ```
 
-[The source manifest](PUBLIC_SOURCE_MANIFEST_OCT03_2026.json) binds the 49 selected postimage files by repository-relative path, raw byte size and SHA-256. It excludes itself to avoid recursive hashing. Its source checkpoint is the code/test commit; this handoff and manifest are a subsequent documentation-only change. Line-ending conversion in a different checkout can change raw-byte hashes without changing Git's normalized text blob.
+[The source manifest](PUBLIC_SOURCE_MANIFEST_OCT03_2026.json) binds the 50 selected postimage files by repository-relative path, raw byte size and SHA-256. It excludes itself to avoid recursive hashing. Its source checkpoint is the code/test commit; this handoff and manifest are a subsequent documentation-only change. Line-ending conversion in a different checkout can change raw-byte hashes without changing Git's normalized text blob.
+
+### Reproduce the CI unit scope without database smoke tests
+
+The GitHub workflow runs `pytest` over `tests`. The local CI follow-up used the same test-directory scope except the two SQL smoke cases, which can connect to and write a database. With the same offline environment settings above and captured-data inputs unset:
+
+```powershell
+python -B -m pytest -o addopts='' -p pytest_asyncio.plugin -p no:cacheprovider -q --tb=short --ignore=tests/test_sql_smoke.py
+if ($LASTEXITCODE -ne 0) { throw 'Offline CI test-directory scope failed' }
+```
+
+This exclusion applies only to the local command; the workflow and SQL smoke tests are unchanged. The local interpreter was Python 3.12; the GitHub workflow selects Python 3.11. A remote rerun is required to establish that environment's result.
 
 ## Verification performed
 
@@ -84,6 +95,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Affected offline qualification failed' }
 - After the encoding-only correction and removal of a redundant cancellation recovery branch, the affected portable Search/Earth/cache checks and optional-data subset passed: 79 passed, 92 explicitly skipped with no captured inputs configured. The 72 Search/Earth/current-main checks within that subset passed.
 - Earlier integration failures exposed missing savepoint/cache methods in predecessor test doubles and an absent standalone FungiP dispatch stub. Those were reconciled to the merged contracts before the passing runs. No production failure was inferred from those fixtures.
 - Independent review then found that `/unified-search/taxa/by-location` still converted a recovered query exception into HTTP 200 with no results. The correction uses the same strict domain runner as the main endpoints. Three new in-process HTTP tests exercise failure of either actual observation query (HTTP 503, sanitized error, one rollback) versus both genuinely empty queries (HTTP 200). The affected Search/Earth/current-main suite passed 161 cases after this correction; it uses fake SQL sessions and does not qualify a native database. The earlier counts above are historical runs before this correction.
+- The first GitHub unit run at `4718175` reported 2 failed, 638 passed and 94 skipped. Both failures came from the existing route test double exhausting its old response list before the optional-index query and lacking async rollback. The test-only repair supplies explicit missing-table/error responses plus scalar/rollback methods, preserves the original taxa assertions, and adds availability, response-privacy and exact rollback-count assertions. The ordinary detail enrichment callback is replaced with an asserted test sink to avoid a filesystem side effect. No application behavior changed.
+- After that fixture repair, 34 focused route/enrichment/read-only/detail cases passed. The complete local test-directory scope excluding only `tests/test_sql_smoke.py` passed **642 cases with 92 explicit captured-data skips** and 90 warnings in 28.02 seconds. The excluded two SQL cases were not run or counted as passes. Deprecation and existing duplicate OpenAPI operation-ID warnings remain. Remote CI, Docker/image build and runtime qualification are separate.
 - Existing Pydantic and datetime deprecation warnings remain. This is not a full repository, application build, provider, authenticated browser or native database qualification.
 
 Operator review must confirm schema/migrations against the intended existing database, use the separately retained data and receipts, and qualify the exact integrated revision. No migrations, catalog imports, genetics imports, API reloads, provider calls, publication, deployment or rollback were performed by this preparation. Production integration remains with the designated operator.

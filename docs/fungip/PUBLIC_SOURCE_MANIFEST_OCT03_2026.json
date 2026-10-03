@@ -2,19 +2,19 @@
   "schema_version": 1,
   "purpose": "Selected public source handoff; not a repository backup or runtime acceptance record",
   "public_base_commit": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
-  "source_code_test_commit": "b3ba7d2f6a1b828e3b3e8cb0fd801595698d756f",
-  "source_tree": "449ae52bdc61da17ee0db4f1b7c95984acb74386",
+  "source_code_test_commit": "284ae4b50fd206d6376491e65e22d29eab6f4cb2",
+  "source_tree": "4098031d10c467d2f3a85f72f32bc96460309924",
   "local_feature_reference": "a54b2a4ad1b5286d5014987a6fd3993a9e0dd3d0",
   "documentation_successor": true,
   "hash_semantics": "SHA-256 of raw file bytes in the prepared checkout; Git text normalization may differ",
   "manifest_self_excluded": true,
-  "file_count": 49,
-  "total_bytes": 667331,
+  "file_count": 50,
+  "total_bytes": 676520,
   "files": [
     {
       "path": "docs/fungip/PUBLIC_INTEGRATION_HANDOFF_OCT03_2026.md",
-      "bytes": 10691,
-      "sha256": "5c66bcc047c9da4b64b5d52845a0a250793183c1f14ba8c4cd25cafcf61048e4"
+      "bytes": 12573,
+      "sha256": "e84688f8b25f87f16ad5913aa88e35b03be6c98cbfc88efefabedf710049af08"
     },
     {
       "path": "migrations/fungip_001_catalog.sql",
@@ -160,6 +160,11 @@
       "path": "tests/test_ancestry_fungip_index.py",
       "bytes": 10323,
       "sha256": "f7ee4d07a0d9c95d71f50e4e21cc9b05b1b5ee485861b0fa2ed3c2bc6eba51b1"
+    },
+    {
+      "path": "tests/test_api_routes.py",
+      "bytes": 7307,
+      "sha256": "ff6162cab20894c85ae47851f6749ae953397d41bef54a153ae7343461594778"
     },
     {
       "path": "tests/test_batch5_search_contract.py",
