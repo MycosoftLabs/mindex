@@ -112,7 +112,7 @@ def download(spec: SourceSpec, data_dir: Path) -> Path:
 
 @dataclass(frozen=True)
 class DwcaFile:
-    location: str
+    locations: tuple[str, ...]
     row_type: str
     delimiter: str
     quote: str
@@ -125,7 +125,7 @@ def _parse_file_node(node: ET.Element, ns: str) -> DwcaFile:
     def unescape(value: str) -> str:
         return value.replace("\\t", "\t").replace("\\n", "\n")
 
-    location = node.find(f"{ns}files/{ns}location").text.strip()
+    locations = tuple(loc.text.strip() for loc in node.findall(f"{ns}files/{ns}location") if loc.text)
     id_node = node.find(f"{ns}id")
     if id_node is None:
         id_node = node.find(f"{ns}coreid")
@@ -136,7 +136,7 @@ def _parse_file_node(node: ET.Element, ns: str) -> DwcaFile:
         term = field.get("term", "").rsplit("/", 1)[-1]
         fields[term] = int(field.get("index"))
     return DwcaFile(
-        location=location,
+        locations=locations,
         row_type=node.get("rowType", ""),
         delimiter=unescape(node.get("fieldsTerminatedBy", ",")),
         quote=unescape(node.get("fieldsEnclosedBy", "")),
@@ -156,7 +156,12 @@ def read_meta(archive: zipfile.ZipFile) -> tuple[DwcaFile, list[DwcaFile]]:
 
 def iter_rows(archive: zipfile.ZipFile, spec: DwcaFile) -> Iterator[list[str]]:
     csv.field_size_limit(sys.maxsize)
-    with archive.open(spec.location) as raw:
+    for location in spec.locations:
+        yield from _iter_file_rows(archive, spec, location)
+
+
+def _iter_file_rows(archive: zipfile.ZipFile, spec: DwcaFile, location: str) -> Iterator[list[str]]:
+    with archive.open(location) as raw:
         text = io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="")
         if spec.quote:
             reader = csv.reader(text, delimiter=spec.delimiter, quotechar=spec.quote)
@@ -203,7 +208,7 @@ CREATE TEMP TABLE IF NOT EXISTS stage_vernacular (source_id bigint, name text);
 def stage_source(conn: psycopg.Connection, spec: SourceSpec, archive_path: Path) -> int:
     with zipfile.ZipFile(archive_path) as archive:
         core, extensions = read_meta(archive)
-        log(f"[{spec.name}] core={core.location} fields={sorted(core.fields)}")
+        log(f"[{spec.name}] core={core.locations} fields={sorted(core.fields)}")
         staged = 0
         skipped_rank = 0
         with conn.cursor() as cur:
@@ -270,16 +275,14 @@ def stage_source(conn: psycopg.Connection, spec: SourceSpec, archive_path: Path)
                 for ext in vernacular_files:
                     for row in iter_rows(archive, ext):
                         language = (_cell(row, ext, "language") or "").lower()
-                        if language and language not in ("en", "eng", "english"):
-                            continue
-                        if not language and "english" not in ext.location.lower():
+                        if language not in ("en", "eng", "english"):
                             continue
                         source_id = _source_id(row[ext.id_index] if ext.id_index < len(row) else None)
                         name = _cell(row, ext, "vernacularName")
                         if source_id is not None and name:
                             copy.write_row((source_id, name[:300]))
                             kept += 1
-            log(f"[{spec.name}] staged {kept} English vernacular names from {len(vernacular_files)} file(s)")
+            log(f"[{spec.name}] staged {kept} English vernacular names from {sum(len(e.locations) for e in vernacular_files)} file(s)")
             cur.execute(
                 """
                 UPDATE stage_taxon s SET common_name = v.name
