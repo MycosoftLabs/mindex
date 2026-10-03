@@ -2,19 +2,19 @@
   "schema_version": 1,
   "purpose": "Selected public source handoff; not a repository backup or runtime acceptance record",
   "public_base_commit": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
-  "source_code_test_commit": "b78e1fb59b21fd2b02c808e32dc68dfaf4be4150",
-  "source_tree": "b86e5c250448a6cf4d75f43f76b3169eb9f19b2c",
+  "source_code_test_commit": "b3ba7d2f6a1b828e3b3e8cb0fd801595698d756f",
+  "source_tree": "449ae52bdc61da17ee0db4f1b7c95984acb74386",
   "local_feature_reference": "a54b2a4ad1b5286d5014987a6fd3993a9e0dd3d0",
   "documentation_successor": true,
   "hash_semantics": "SHA-256 of raw file bytes in the prepared checkout; Git text normalization may differ",
   "manifest_self_excluded": true,
   "file_count": 49,
-  "total_bytes": 664195,
+  "total_bytes": 667331,
   "files": [
     {
       "path": "docs/fungip/PUBLIC_INTEGRATION_HANDOFF_OCT03_2026.md",
-      "bytes": 9963,
-      "sha256": "3ec8c7083d44eb865dc07d6c88a15bfedee5a0f6ca60a4a0751b32a767d81d61"
+      "bytes": 10691,
+      "sha256": "5c66bcc047c9da4b64b5d52845a0a250793183c1f14ba8c4cd25cafcf61048e4"
     },
     {
       "path": "migrations/fungip_001_catalog.sql",
@@ -68,8 +68,8 @@
     },
     {
       "path": "mindex_api/routers/unified_search.py",
-      "bytes": 89746,
-      "sha256": "c476ae58c2b492ade08d07032c3a2838f5664de2a798f9fd221e48272f7cc0d8"
+      "bytes": 89713,
+      "sha256": "496fd76187131153da268f7f09972243c180274700a1fc1b567132f05bd409a2"
     },
     {
       "path": "mindex_api/schemas/taxon.py",
@@ -253,8 +253,8 @@
     },
     {
       "path": "tests/test_unified_search_session_contract.py",
-      "bytes": 10873,
-      "sha256": "bed2f63dc0fb8db757e301dd998c2e2cf5e5170d8d3382ab56459d2f07d0c189"
+      "bytes": 13314,
+      "sha256": "94ce3a711e11de0ecdf83bbcfd5ff3d39132895b4c2a9bbaad4006679243f107"
     }
   ],
   "limits": [
