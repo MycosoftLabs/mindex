@@ -278,6 +278,24 @@ reconciliation path, queues purge only when an object version is already stored,
 and drops the associated tests. Landing PR #21 as-is after PR #20 could therefore
 replace the newer crash-gap recovery behavior with its older snapshot.
 
+The blob audit covered 32 overlapping paths. The shared-auth verifier
+`mindex_api/retention/identity.py` is `957cc80808ebf6dc5d98236bb90c0d741322f8e3`
+on both heads; `mindex_api/routers/retention.py` is
+`61a1d423e64b09b7bc2d56f7ee06088556929253`; the initial schema migration is
+`be08750fce3a0b8d1c6db145ee9ca71b0b465e92`; and the retention SDK schema is
+`64146cdb20b513344efa0562cf167a79a8d344ef`. In contrast, `object_store.py` is
+PR #20 blob `e3106c71cde3a3fab9f8c99189513428ede23da4` versus FormSpace
+`6666e4d27334f9866337223607f210248e340573`; `repository.py` is
+`ec4a2254fab631fc7c9436a9c4ed2c23cfcb8069` versus
+`421cebfa32c7057db6789d745259433278d5de55`; and `service.py` is
+`a2210db22382a0c7de583aeaf2abc9951b5ddf77` versus
+`8bf756b6da90c56920bc2450dc83d30549f012b5`. The corresponding object-store
+test blobs are `cfb33107fc1362ae397021a1f4b7aff32980e884` versus
+`98d362c3758112d61cc2419668e527101295ab81`; PostgreSQL test blobs are
+`6f32e0bf07af12239df569c83dda9703d9691140` versus
+`5471f2997cc36e10d22287d19c2660508018b834`. PR #20's two reconciliation
+migrations have no counterpart in the FormSpace head.
+
 Required order: merge PR #20 first, then restack FormSpace commits on its merged
 head while preserving the newer retention implementation and migrations. Regenerate
 the source manifest and rerun the focused retention reconciliation/backfill tests
