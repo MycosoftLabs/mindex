@@ -138,3 +138,33 @@ async def test_stats_reports_real_grouped_counts_and_caches():
     assert payload["by_linked_source"] == [{"source": "gbif", "species": 30_604}]
     assert await route.taxa_stats(db=db) is payload
     assert len(db.calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_kingdom_filter_resolves_undesignated_imports_and_accepts_csv():
+    db = Session(Result(rows=[row()]), Result(scalar=11))
+    await call_list(db, rank="species,sp.", kingdom="Protozoa,Chromista")
+    sql, params = db.calls[0]
+    assert params["rank_variants"] == ["species", "sp."]
+    assert params["kingdom_0"] == "Protozoa" and params["kingdom_1"] == "Chromista"
+    assert "kingdom IN (:kingdom_0, :kingdom_1)" in sql
+    assert "metadata->>'kingdom'" in sql and "iconic_taxon_name" in sql
+
+
+@pytest.mark.asyncio
+async def test_kingdom_all_is_unfiltered():
+    db = Session(Result(rows=[]), Result(scalar=0))
+    await call_list(db, kingdom="all")
+    assert not any(key.startswith("kingdom_") for key in db.calls[0][1])
+
+
+@pytest.mark.asyncio
+async def test_kingdom_counts_group_by_effective_kingdom_and_cache():
+    db = Session(Result(rows=[{"kingdom": "Fungi", "taxon_count": 441_280}, {"kingdom": "Animalia", "taxon_count": 6_858}]))
+    payload = await route.taxa_kingdom_counts(rank="species", db=db)
+    sql, params = db.calls[0]
+    assert params["rank_variants"] == ["species", "sp."]
+    assert "metadata->>'kingdom'" in sql and "GROUP BY 1" in sql
+    assert payload["total"] == 448_138
+    assert await route.taxa_kingdom_counts(rank="sp.", db=db) is not None
+    assert await route.taxa_kingdom_counts(rank="species", db=db) is payload
