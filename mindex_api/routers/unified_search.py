@@ -1905,11 +1905,11 @@ async def search_taxa_by_location(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Get taxa observed near a specific location (fungi + all species)."""
-    result = (await _execute_selected_domains(
+    domains = await _run_domain_searches(
         session, {"observations": lambda: search_observations(session, "", limit, lat, lng, radius)},
         ["observations"],
-    ))[0]
-    results = [] if isinstance(result, Exception) else result
+    )
+    results = domains["observations"]
     return {
         "results": results[:limit],
         "location": {"lat": lat, "lng": lng, "radius_km": radius},

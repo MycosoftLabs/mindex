@@ -262,3 +262,65 @@ def test_actual_rag_path_uses_same_sequential_recovery(route, monkeypatch, faile
     assert session.events.count("rollback") == int(failed)
     assert response.total_chunks == (1 if failed else 2)
     assert response.chunks[-1].source_id == "vessels-1"
+
+
+class LocationSession:
+    """Real by-location query chain, empty rows or an explicit SQL failure."""
+
+    def __init__(self, fail=None):
+        self.fail = fail
+        self.calls = []
+        self.rollbacks = 0
+
+    def begin_nested(self):
+        return nullcontext()
+
+    async def execute(self, statement, params):
+        sql = str(statement)
+        table = "observations" if "FROM obs.observation o" in sql else "sightings"
+        assert "FROM obs.observation o" in sql or "FROM species.sightings s" in sql
+        assert params["lat"] == 0 and params["lng"] == 0 and params["radius_m"] == 10000
+        self.calls.append(table)
+        if self.fail == table:
+            raise RuntimeError("private-fixture-database-detail")
+        return SimpleNamespace(fetchall=lambda: [])
+
+    async def rollback(self):
+        self.rollbacks += 1
+
+
+def location_http_response(route, session):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(route.router)
+    app.dependency_overrides[route.get_db_session] = lambda: session
+    with TestClient(app) as client:
+        return client.get("/unified-search/taxa/by-location", params={
+            "lat": 0, "lng": 0, "radius": 10, "limit": 2,
+        })
+
+
+@pytest.mark.parametrize("failed_table", ["observations", "sightings"])
+def test_by_location_database_failure_is_http_503_not_empty_success(route, failed_table):
+    session = LocationSession(fail=failed_table)
+    response = location_http_response(route, session)
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["status"] == "unavailable"
+    assert detail["domain_errors"] == {"observations": {"code": "domain_unavailable"}}
+    assert detail["results"] == {} and detail["total_count"] == 0
+    assert "private-fixture-database-detail" not in response.text
+    assert session.rollbacks == 1
+    assert session.calls == (["observations"] if failed_table == "observations" else ["observations", "sightings"])
+
+
+def test_by_location_genuine_empty_queries_are_http_200(route):
+    session = LocationSession()
+    response = location_http_response(route, session)
+    assert response.status_code == 200
+    assert response.json() == {
+        "results": [], "location": {"lat": 0.0, "lng": 0.0, "radius_km": 10.0}, "total": 0,
+    }
+    assert session.calls == ["observations", "sightings"] and session.rollbacks == 0
