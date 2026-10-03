@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -13,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session
-from .unified_search import ALL_DOMAINS, _build_dispatch, _resolve_domains
+from .unified_search import ALL_DOMAINS, _build_dispatch, _execute_selected_domains, _resolve_domains
 
 logger = logging.getLogger(__name__)
 
@@ -130,14 +129,12 @@ async def rag_retrieve(
         None,
     )
 
-    tasks = []
     names: list[str] = []
     for d in domains:
         if d in dispatch:
-            tasks.append(dispatch[d])
             names.append(d)
 
-    if not tasks:
+    if not names:
         timing_ms = int((time.time() - start) * 1000)
         return RAGRetrieveResponse(
             query=body.query,
@@ -148,7 +145,7 @@ async def rag_retrieve(
             total_chunks=0,
         )
 
-    raw = await asyncio.gather(*tasks, return_exceptions=True)
+    raw = await _execute_selected_domains(session, dispatch, names)
     results: dict[str, list] = {}
     for name, result in zip(names, raw):
         if isinstance(result, Exception):

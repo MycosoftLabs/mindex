@@ -14,7 +14,7 @@ taxonomy/genome patches, and Droid mission intake remain untouched.
 | BFF/shared SDK | Versioned TypeScript/Python clients relay original user token and selected scope; runtime receipt checks, bounded bytes, hash validation and post-download reauthorization.12 actual TypeScript client tests. | Sibling application integration and real browser account switching. Their local vendor copies must pin the canonical SDK hash and converge to one shared package at integration. |
 | Identity | Fixed issuer/audience RSA/EC JWT/JWKS verifier, bounded cache/fetch, strict role and nonanonymous user.107 signed-token cases. No unsigned user/role header authority. | Owner-approved Supabase issuer/audience, membership mirror provision/revoke lifecycle, live session revocation policy. |
 | MINDEX API | Actual private HTTP handlers with streaming admission limits, per-operation membership, no-store projections, bounded subscriptions, unavailable/pending/error states.9 end-to-end local boundary cases. | Nonproduction routed MINDEX identity/storage configuration; default remains disabled. |
-| Authoritative storage | Additive membership/grant/artifact/job/outbox/memory/orphan schema, atomic admission, quota/idempotency, immutable bytes, leases/fencing, revoke/delete/expiry.28 native PostgreSQL cases plus dump/restore. | Review migration and least-privilege deployment roles, volume/WAL/backup retention, real backup/restore acceptance. |
+| Authoritative storage | Additive membership/grant/artifact/job/outbox/memory/orphan schema, atomic admission, quota/idempotency, immutable bytes, leases/fencing, revoke/delete/expiry.30 native PostgreSQL cases plus dump/restore. | Review migration and least-privilege deployment roles, volume/WAL/backup retention, real backup/restore acceptance. |
 | Archive | Private S3 bucket controls, expected owner, KMS, conditional immutable versions, COMPLIANCE retention, exact version/hash/size readback, deferred exact deletion.79 fake-error/SDK-shape tests. | Actual AWS IAM/bucket/KMS/Object Lock tests, retained-version inventory and physical erasure reconciliation, lease latency under live failures. |
 | MYCA memory | Canonical MINDEX reference plus exact artifact and reference readback; Python `MycaMemoryAdapter`. Cross-user search/direct-ID denial, learned=false. | External MYCA coordinator/vector indexing is not wired or claimed. NAS replication and restored replicas are not implemented by this substrate. |
 
@@ -42,7 +42,7 @@ tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --lib ES202
 python scripts/retention_manifest.py
 ```
 
-Combined Python: **223 passed** in7.87s. TypeScript client:**12 passed**.
+Combined Python: **225 passed** in7.45s. TypeScript client:**12 passed**.
 Scoped TypeScript:**zero diagnostics**. Actual `create_app()` registered the route
 and returned503 with feature disabled, with no database/cloud call. Existing
 Pydantic class-config and multipart import deprecation warnings remain. The four
@@ -69,8 +69,13 @@ branch does not dispatch them. Repository webhooks list was empty. Pull requests
 run `platform-one-build`; its optional Iron Bank publish and agentic fallback
 require secret names not present in the current repository secret metadata.
 No secret values were accessed. The Supabase compliance workflow does not match
-this patch's paths. Revalidate these conditions immediately before publication;
-they are time-specific evidence, not permanent deployment safety.
+this patch's paths. The initial source-only branch commit c626870 was pushed after that review.
+A subsequent organization installation check found the Supabase GitHub App
+installed for all repositories. Its automatic branch/PR deployment policy is
+not established, so no draft PR or further push was made. Read-only project
+branch listing was empty; GitHub showed no check/deployment for this commit.
+That absence does not prove future PR safety. External integration policy
+review remains the exact publication gate. These are time-specific observations.
 
 No merge, deploy, production schema operation, paid engine/cloud launch, ledger
 transaction, payment or hardware actuation is authorized. Use the manual

@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from ..contracts.v1.ancestry_index import FungiPIndexAvailability, FungiPIndexMember
 from .common import PaginationMeta, TimestampedModel
 
 
@@ -41,12 +42,15 @@ class TaxonBase(TimestampedModel):
     interaction_count: Optional[int] = None
     publication_count: Optional[int] = None
     characteristic_count: Optional[int] = None
+    fungip: Optional[FungiPIndexMember] = None
 
 
 class TaxonResponse(TaxonBase):
     traits: List[TaxonTrait] = Field(default_factory=list)
+    fungip_index: Optional[FungiPIndexAvailability] = None
 
 
 class TaxonListResponse(BaseModel):
     data: List[TaxonBase]
     pagination: PaginationMeta
+    fungip_index: Optional[FungiPIndexAvailability] = None

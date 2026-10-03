@@ -104,7 +104,9 @@ async def purge_one(repository, object_store) -> bool:
             return False
     try:
         async with asyncio.timeout(40):
-            proof = await asyncio.to_thread(object_store.delete, row)
+            delete = (object_store.reconcile_delete if row.get("object_version") is None
+                      else object_store.delete)
+            proof = await asyncio.to_thread(delete, row)
         if orphan:
             await repository.complete_orphan_purge(row, proof)
         else:

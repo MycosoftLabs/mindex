@@ -35,20 +35,34 @@ def _id():
     return str(uuid4())
 
 
+async def authorize_asyncpg(connection, principal):
+    """Shared membership lock inside a caller-owned asyncpg compute transaction."""
+    if not connection.is_in_transaction():
+        raise RetentionError('authorization_transaction_required', 503)
+    params = _identity(principal)
+    allowed = await connection.fetchval("""SELECT 1 FROM retention.membership
+        WHERE issuer=$1 AND subject=$2 AND tenant_id=$3 AND project_id=$4
+        AND active FOR SHARE""", params['issuer'], params['subject'],
+        params['tenant_id'], params['project_id'])
+    if allowed is None:
+        raise RetentionError('membership_required', 403)
+    return params
+
+
 def receipt(row):
     """Safe typed metadata only; callers never serialize a raw database row."""
     fields = ('artifact_id', 'job_id', 'kind', 'media_type', 'sha256', 'byte_length',
               'tenant_id', 'project_id', 'classification', 'source_event_at',
               'received_at', 'available_at', 'retention_until', 'state',
-              'attempt_count', 'deletion_requested_at', 'physical_deleted_at')
+              'attempt_count', 'deletion_requested_at', 'physical_deleted_at',
+              'archive_reconciled_at')
     result = public_receipt(dict(row))
     result.update({key: row.get(key) for key in fields})
     result.update(contract_version='retention.v1', task_id=row.get('job_id'),
                   retained=row['state'] == 'verified',
                   coverage_watermark=row.get('available_at') if row['state'] == 'verified' else None,
                   physical_deletion_pending=bool(row.get('deletion_requested_at')
-                                                 and row.get('object_version')
-                                                 and not row.get('physical_deleted_at')))
+                                                 and not row.get('archive_reconciled_at')))
     return result
 
 
@@ -200,7 +214,9 @@ class RetentionRepository:
             if row['state'] == 'verified':
                 raise RetentionError('task_already_completed', 409)
             await self._terminal(session, row, 'cancelled')
-            return receipt(dict(row, state='cancelled', available_at=None))
+            current = (await session.execute(text(_SELECT + ' WHERE a.artifact_id=:artifact_id'),
+                                             {'artifact_id': row['artifact_id']})).mappings().one()
+            return receipt(dict(current))
 
     async def _terminal(self, session, row, state):
         params = {'artifact_id': row['artifact_id'], 'state': state}
@@ -212,10 +228,11 @@ class RetentionRepository:
             lease_token=NULL,lease_expires_at=NULL WHERE artifact_id=:artifact_id AND event='archive'"""), params)
         await session.execute(text("""UPDATE retention.memory_reference SET revoked_at=now(),summary=''
             WHERE artifact_id=:artifact_id AND revoked_at IS NULL"""), params)
-        if row.get('object_version'):
-            await session.execute(text("""INSERT INTO retention.outbox(artifact_id,job_id,event)
-                VALUES (:artifact_id,:job_id,'purge_object') ON CONFLICT (artifact_id,event) DO NOTHING"""),
-                dict(params, job_id=row['job_id']))
+        # Queue reconciliation even without a persisted version: the archive worker
+        # may have died after object-store commit but before its fenced DB finalize.
+        await session.execute(text("""INSERT INTO retention.outbox(artifact_id,job_id,event)
+            VALUES (:artifact_id,:job_id,'purge_object') ON CONFLICT (artifact_id,event) DO NOTHING"""),
+            dict(params, job_id=row['job_id']))
 
     async def delete(self, principal, artifact_id):
         async with self.sessions() as session, session.begin():
@@ -381,7 +398,8 @@ class RetentionRepository:
                 WHERE o.event='purge_object' AND o.state IN ('pending','leased')
                 AND (o.lease_expires_at IS NULL OR o.lease_expires_at<=now())
                 AND a.state IN ('deleted','cancelled') AND a.retention_until<=now()
-                AND a.object_version IS NOT NULL AND a.physical_deleted_at IS NULL
+                AND ((a.object_version IS NOT NULL AND a.physical_deleted_at IS NULL)
+                    OR (a.object_version IS NULL AND a.archive_reconciled_at IS NULL))
                 ORDER BY o.outbox_id FOR UPDATE OF a,o SKIP LOCKED LIMIT 1"""))).mappings().first()
             if not row:
                 return None
@@ -392,11 +410,28 @@ class RetentionRepository:
                 {'artifact_id': row['artifact_id'], 'token': token, 'seconds': self.config.lease_seconds})
             return dict(row, purge_lease_token=token)
 
-    @staticmethod
-    def _deletion_proof(row, proof):
-        return (isinstance(proof, dict) and proof.get('deleted') is True
-                and all(proof.get(k) == row.get('object_' + k)
-                        for k in ('bucket', 'key', 'version')))
+    def _deletion_proof(self, row, proof):
+        if not isinstance(proof, dict) or proof.get('deleted') is not True:
+            return False
+        if row.get('object_version') is not None:
+            return all(proof.get(k) == row.get('object_' + k)
+                       for k in ('bucket', 'key', 'version'))
+        expected_key = '/'.join((self.config.prefix, row['tenant_id'],
+                                 row['project_id'], row['artifact_id']))
+        if proof.get('reconciled') is not True or proof.get('verified') is not True:
+            return False
+        if (proof.get('bucket') != self.config.bucket or proof.get('key') != expected_key
+                or proof.get('sha256') != row.get('sha256')
+                or type(proof.get('byte_length')) is not int
+                or proof.get('byte_length') != row.get('byte_length')
+                or type(proof.get('versions_deleted')) is not int
+                or proof['versions_deleted'] < 0):
+            return False
+        if proof.get('absent') is True:
+            return proof.get('version') is None and proof['versions_deleted'] == 0
+        return (proof.get('absent') is False and proof['versions_deleted'] > 0
+                and isinstance(proof.get('version'), str)
+                and 1 <= len(proof['version']) <= 1024 and proof['version'] != 'null')
 
     async def complete_purge(self, row, proof):
         """Call only after the object adapter confirms exact-version absence."""
@@ -408,8 +443,11 @@ class RetentionRepository:
                 AND lease_token=:purge_lease_token AND lease_expires_at>now() RETURNING artifact_id"""), row)
             if result.scalar_one_or_none() is None:
                 return False
-            await session.execute(text("""UPDATE retention.artifact SET physical_deleted_at=now()
-                WHERE artifact_id=:artifact_id"""), row)
+            await session.execute(text("""UPDATE retention.artifact
+                SET archive_reconciled_at=now(),
+                    physical_deleted_at=CASE WHEN :absent THEN physical_deleted_at ELSE now() END
+                WHERE artifact_id=:artifact_id"""),
+                dict(row, absent=proof.get('absent') is True))
             return True
 
     def _archive_proof(self, row, reference):

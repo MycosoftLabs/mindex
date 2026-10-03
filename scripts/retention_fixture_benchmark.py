@@ -58,8 +58,11 @@ async def main():
     connection = await asyncpg.connect(dsn)
     version = await connection.fetchval('SELECT version()')
     await connection.execute('DROP SCHEMA IF EXISTS retention CASCADE')
-    migration = Path(__file__).parents[1] / 'migrations/20261001_shared_retention_v1.sql'
-    await connection.execute(migration.read_text(encoding='utf-8'))
+    migration_dir = Path(__file__).parents[1] / 'migrations'
+    for migration in (migration_dir / '20261001_shared_retention_v1.sql',
+                      migration_dir / '20261002_private_orphan_reconciliation.sql',
+                      migration_dir / '20261003_backfill_preupgrade_orphan_reconciliation.sql'):
+        await connection.execute(migration.read_text(encoding='utf-8'))
     await connection.close()
     engine = create_async_engine(dsn.replace('postgresql://', 'postgresql+asyncpg://', 1))
     sessions = async_sessionmaker(engine, expire_on_commit=False)

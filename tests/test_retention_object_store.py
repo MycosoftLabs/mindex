@@ -52,6 +52,8 @@ class FakeS3:
         self.chunk_size = None
         self.fail_body = False
         self.delete_outcome = "delete"
+        self.delete_markers = {}
+        self.version_pages = []
         self.versioning = {"Status": "Enabled"}
         self.public_block = {"PublicAccessBlockConfiguration": dict.fromkeys(
             ("BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"), True)}
@@ -84,7 +86,8 @@ class FakeS3:
         outcome = self.upload_outcomes.pop(0) if self.upload_outcomes else "success"
         if isinstance(outcome, Exception):
             raise outcome
-        if args["Key"] in self.latest:
+        if (args["Key"] in self.latest
+                and (args["Key"], self.latest[args["Key"]]) in self.objects):
             raise S3Error("PreconditionFailed")
         version = f"version-{len(self.objects) + 1}"
         self.objects[(args["Key"], version)] = {
@@ -120,10 +123,34 @@ class FakeS3:
         result["Body"] = self.body
         return result
 
+    def list_object_versions(self, **args):
+        self._record("list_object_versions", args)
+        if self.version_pages:
+            return copy.deepcopy(self.version_pages.pop(0))
+        prefix = args["Prefix"]
+        versions = [{"Key": key, "VersionId": version,
+                     "IsLatest": self.latest.get(key) == version}
+                    for key, version in self.objects if key.startswith(prefix)]
+        versions.reverse()
+        markers = [{"Key": key, "VersionId": version,
+                    "IsLatest": False}
+                   for key, ids in self.delete_markers.items() if key.startswith(prefix)
+                   for version in ids]
+        return {"Versions": versions, "DeleteMarkers": markers, "IsTruncated": False}
+
     def delete_object(self, **args):
         self._record("delete_object", args)
         if self.delete_outcome != "keep":
-            self.objects.pop((args["Key"], args["VersionId"]), None)
+            key, version = args["Key"], args["VersionId"]
+            self.objects.pop((key, version), None)
+            self.delete_markers[key] = [item for item in self.delete_markers.get(key, [])
+                                        if item != version]
+            if self.latest.get(key) == version:
+                remaining = [item_version for item_key, item_version in self.objects if item_key == key]
+                if remaining:
+                    self.latest[key] = remaining[-1]
+                else:
+                    self.latest.pop(key, None)
         if self.delete_outcome == "commit-timeout":
             raise TimeoutError("PRIVATE SOURCE CONTENT")
         return {"VersionId": args["VersionId"]}
@@ -496,6 +523,206 @@ def test_delete_missing_version_is_idempotent_without_touching_other_versions(cf
     assert not any(op == "delete_object" for op, _ in client.calls)
 
 
+def test_reconcile_crashed_upload_uses_only_exact_tenant_key(cfg, row):
+    row["retention_until"] = datetime.now(timezone.utc) - timedelta(seconds=2)
+    client = FakeS3()
+    store = PrivateObjectStore(client, cfg)
+    reference_a = store.archive({**row, "retention_until": datetime.now(timezone.utc) + timedelta(days=1)})
+    other = {**row, "tenant_id": "7d76e1a4-e722-4dd4-9089-ae3edb46590e",
+             "project_id": "39c50ee8-8454-4735-9d78-cd7a411642a1",
+             "artifact_id": "a21f632c-1d81-46cc-82b7-76426a121899",
+             "retention_until": datetime.now(timezone.utc) + timedelta(days=30)}
+    reference_b = store.archive(other)
+    client.objects[(reference_a["key"], reference_a["version"])]["ObjectLockRetainUntilDate"] = row["retention_until"]
+    neighbor_key = reference_a["key"] + "-prefix-neighbor"
+    neighbor_version = "neighbor-version"
+    client.objects[(neighbor_key, neighbor_version)] = copy.deepcopy(
+        client.objects[(reference_b["key"], reference_b["version"])])
+    client.objects[(neighbor_key, neighbor_version)]["VersionId"] = neighbor_version
+    client.latest[neighbor_key] = neighbor_version
+    assert any(item["Key"] == neighbor_key for item in client.list_object_versions(
+        Bucket=cfg.bucket, ExpectedBucketOwner=cfg.expected_owner,
+        Prefix=reference_a["key"], MaxKeys=1000)["Versions"])
+    # The simulated crashed worker never persisted any of these coordinates.
+    row.update(object_bucket=None, object_key=None, object_version=None)
+    client.calls.clear()
+
+    proof = store.reconcile_delete(row)
+
+    assert proof == {"bucket": cfg.bucket, "key": reference_a["key"],
+                     "version": reference_a["version"], "deleted": True,
+                     "reconciled": True, "absent": False, "verified": True,
+                     "sha256": row["sha256"], "byte_length": row["byte_length"],
+                     "versions_deleted": 1}
+    assert (reference_a["key"], reference_a["version"]) not in client.objects
+    assert (reference_b["key"], reference_b["version"]) in client.objects
+    assert (neighbor_key, neighbor_version) in client.objects
+    object_calls = [(op, args) for op, args in client.calls
+                    if op in {"head_object", "get_object", "delete_object"}]
+    assert object_calls and all(args["Key"] == reference_a["key"] for _, args in object_calls)
+    assert all(args.get("VersionId") != reference_b["version"] for _, args in object_calls)
+    assert all(args["Prefix"] == reference_a["key"] for op, args in client.calls
+               if op == "list_object_versions")
+    assert all(args.get("Key") != neighbor_key for _, args in client.calls)
+
+
+def test_reconcile_missing_key_records_absence_from_exact_prefix_inventory(cfg, row):
+    row["retention_until"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    client = FakeS3()
+    store = PrivateObjectStore(client, cfg)
+
+    proof = store.reconcile_delete(row)
+
+    assert proof == {"bucket": cfg.bucket, "key": store._row(row)[0], "version": None,
+                     "deleted": True, "reconciled": True, "absent": True,
+                     "verified": True, "sha256": row["sha256"],
+                     "byte_length": row["byte_length"], "versions_deleted": 0}
+    listing = [(op, args) for op, args in client.calls if op == "list_object_versions"]
+    assert len(listing) == 1 and listing[0][1]["Prefix"] == store._row(row)[0]
+    assert not any(op in {"head_object", "get_object", "delete_object"} for op, _ in client.calls)
+
+
+def test_reconcile_removes_every_exact_key_version_with_latest_fallback(cfg, row):
+    store, client, reference = expired(cfg, row)
+    earlier = "earlier-version"
+    client.objects[(reference["key"], earlier)] = copy.deepcopy(
+        client.objects[(reference["key"], reference["version"])])
+    client.objects[(reference["key"], earlier)]["VersionId"] = earlier
+    row.update(object_bucket=None, object_key=None, object_version=None)
+    client.calls.clear()
+
+    proof = store.reconcile_delete(row)
+
+    assert proof["versions_deleted"] == 2 and proof["verified"] is True
+    assert not any(key == reference["key"] for key, _ in client.objects)
+    assert reference["key"] not in client.latest
+    deleted = {args["VersionId"] for op, args in client.calls if op == "delete_object"}
+    assert deleted == {reference["version"], earlier}
+    listings = [args for op, args in client.calls if op == "list_object_versions"]
+    assert len(listings) == 2 and all(args["Prefix"] == reference["key"] for args in listings)
+
+
+def test_reconcile_paginates_sdk_shaped_versions_and_permanently_removes_markers(cfg, row):
+    store, client, reference = expired(cfg, row)
+    key = reference["key"]
+    client.delete_markers[key] = ["marker-one", "marker-two"]
+    client.version_pages = [
+        {"Versions": [{"Key": key, "VersionId": reference["version"], "IsLatest": False}],
+         "DeleteMarkers": [{"Key": key, "VersionId": "marker-one", "IsLatest": True}],
+         "IsTruncated": True,
+         "NextKeyMarker": key, "NextVersionIdMarker": "marker-one"},
+        {"Versions": [],
+         "DeleteMarkers": [{"Key": key, "VersionId": "marker-two", "IsLatest": False}],
+         "IsTruncated": False},
+    ]
+    row.update(object_bucket=None, object_key=None, object_version=None)
+
+    proof = store.reconcile_delete(row)
+
+    assert proof["absent"] is False and proof["versions_deleted"] == 1
+    assert proof["version"] == reference["version"]
+    assert (key, reference["version"]) not in client.objects
+    assert client.delete_markers[key] == []
+    listing_args = [args for op, args in client.calls if op == "list_object_versions"]
+    assert listing_args[1]["KeyMarker"] == key
+    assert listing_args[1]["VersionIdMarker"] == "marker-one"
+    deletes = [args for op, args in client.calls if op == "delete_object"]
+    assert {args["VersionId"] for args in deletes} == {
+        reference["version"], "marker-one", "marker-two"}
+    assert all(args["Key"] == key for args in deletes)
+
+
+def test_reconcile_marker_only_inventory_is_removed_before_absence_proof(cfg, row):
+    row["retention_until"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    client = FakeS3()
+    store = PrivateObjectStore(client, cfg)
+    key = store._row(row)[0]
+    client.delete_markers[key] = ["marker-only"]
+
+    proof = store.reconcile_delete(row)
+
+    assert proof["absent"] is True and proof["version"] is None
+    assert proof["versions_deleted"] == 0 and client.delete_markers[key] == []
+    assert [args["VersionId"] for op, args in client.calls if op == "delete_object"] == ["marker-only"]
+
+
+def test_reconcile_marker_delete_ack_without_marker_absence_is_unverified(cfg, row):
+    row["retention_until"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    client = FakeS3()
+    store = PrivateObjectStore(client, cfg)
+    client.delete_markers[store._row(row)[0]] = ["marker-stays"]
+    client.delete_outcome = "keep"
+
+    with pytest.raises(RetentionError, match="archive_deletion_unverified"):
+        store.reconcile_delete(row)
+
+
+@pytest.mark.parametrize("page", [
+    {"Versions": [], "DeleteMarkers": [], "IsTruncated": True,
+     "NextVersionIdMarker": "v1"},
+    {"Versions": [], "DeleteMarkers": [], "IsTruncated": True,
+     "NextKeyMarker": ""},
+    {"Versions": [], "DeleteMarkers": []},
+    {"Versions": [], "DeleteMarkers": [{"Key": "exact-key"}], "IsTruncated": False},
+])
+def test_reconcile_rejects_malformed_listing_contract_before_deletes(cfg, row, page):
+    row["retention_until"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    page = copy.deepcopy(page)
+    marker = next(iter(page.get("DeleteMarkers", [])), None)
+    if marker is not None:
+        marker["Key"] = PrivateObjectStore(FakeS3(), cfg)._row(row)[0]
+    client = FakeS3()
+    client.version_pages = [page]
+
+    with pytest.raises(RetentionError, match="archive_integrity_failed"):
+        PrivateObjectStore(client, cfg).reconcile_delete(row)
+
+    assert not any(op == "delete_object" for op, _ in client.calls)
+
+
+def test_reconcile_rejects_repeated_pagination_cursor_before_deletes(cfg, row):
+    row["retention_until"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    key = PrivateObjectStore(FakeS3(), cfg)._row(row)[0]
+    page = {"Versions": [], "DeleteMarkers": [], "IsTruncated": True,
+            "NextKeyMarker": key, "NextVersionIdMarker": "same-cursor"}
+    client = FakeS3()
+    client.version_pages = [page, page]
+
+    with pytest.raises(RetentionError, match="archive_integrity_failed"):
+        PrivateObjectStore(client, cfg).reconcile_delete(row)
+
+    assert not any(op == "delete_object" for op, _ in client.calls)
+
+
+def test_reconcile_list_permission_failure_fails_closed(cfg, row):
+    row["retention_until"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    client = FakeS3()
+    client.failures["list_object_versions"] = S3Error("AccessDenied")
+    store = PrivateObjectStore(client, cfg)
+
+    with pytest.raises(RetentionError, match="archive_unavailable"):
+        store.reconcile_delete(row)
+
+    assert not any(op in {"head_object", "get_object", "delete_object"} for op, _ in client.calls)
+
+
+def test_reconcile_exceeding_version_bound_fails_before_object_io(cfg, row):
+    store, client, reference = expired(cfg, row)
+    template = copy.deepcopy(client.objects[(reference["key"], reference["version"])])
+    for index in range(100):
+        version = f"extra-version-{index}"
+        client.objects[(reference["key"], version)] = {**copy.deepcopy(template), "VersionId": version}
+    client.latest[reference["key"]] = "extra-version-99"
+    row.update(object_bucket=None, object_key=None, object_version=None)
+    client.calls.clear()
+
+    with pytest.raises(RetentionError, match="archive_reconciliation_limit"):
+        store.reconcile_delete(row)
+
+    assert not any(op in {"head_object", "get_object", "delete_object"} for op, _ in client.calls)
+    assert len(client.objects) == 101
+
+
 def test_factory_is_lazy_validates_before_client_creation_and_bounds_network(cfg, monkeypatch):
     captured = []
     boto = ModuleType("boto3")
@@ -515,6 +742,34 @@ def test_factory_is_lazy_validates_before_client_creation_and_bounds_network(cfg
                                 "ignore_configured_endpoint_urls": True,
                                 "retries": {"mode": "standard", "total_max_attempts": 2}}
     assert "endpoint_url" not in kwargs
+
+
+def test_list_versions_pagination_matches_botocore_shapes_without_network(cfg, row):
+    boto3 = pytest.importorskip("boto3")
+    stub = pytest.importorskip("botocore.stub")
+    from botocore.config import Config
+
+    client = boto3.client("s3", region_name=cfg.region, aws_access_key_id="offline-fixture",
+                          aws_secret_access_key="offline-fixture",
+                          config=Config(ignore_configured_endpoint_urls=True))
+    key = PrivateObjectStore(client, cfg)._row(row)[0]
+    owner = {"Bucket": cfg.bucket, "ExpectedBucketOwner": cfg.expected_owner,
+             "Prefix": key, "MaxKeys": 1000}
+    first = {"Versions": [{"Key": key, "VersionId": "data-v1", "IsLatest": False}],
+             "DeleteMarkers": [{"Key": key, "VersionId": "marker-v1", "IsLatest": True}],
+             "IsTruncated": True, "NextKeyMarker": key,
+             "NextVersionIdMarker": "marker-v1"}
+    second = {"Versions": [],
+              "DeleteMarkers": [{"Key": key, "VersionId": "marker-v2", "IsLatest": False}],
+              "IsTruncated": False}
+    with stub.Stubber(client) as calls:
+        calls.add_response("list_object_versions", first, owner)
+        calls.add_response("list_object_versions", second,
+                           {**owner, "KeyMarker": key, "VersionIdMarker": "marker-v1"})
+        assert PrivateObjectStore(client, cfg)._listed_versions(key) == (
+            ["data-v1"], ["marker-v1", "marker-v2"])
+        calls.assert_no_pending_responses()
+    client.close()
 
 
 def test_real_sdk_stubber_validates_encrypted_retained_request_shapes(cfg, row):

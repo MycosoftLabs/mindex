@@ -9,10 +9,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
+import tempfile
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
+from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -22,14 +26,48 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 
 from mindex_api.retention.contracts import Principal, RetentionConfig, RetentionError, admission_metadata
-from mindex_api.retention.repository import RetentionRepository
+from mindex_api.retention.repository import RetentionRepository, authorize_asyncpg
+from mindex_api.retention.service import purge_one
+from test_retention_object_store import FakeS3
+from mindex_api.retention.object_store import PrivateObjectStore
 
 
-MIGRATION = Path(__file__).parents[1] / 'migrations/20261001_shared_retention_v1.sql'
-A = Principal('https://issuer.test/auth/v1', 'user-a', 'tenant-a', 'project-a')
+MIGRATIONS = [Path(__file__).parents[1] / 'migrations/20261001_shared_retention_v1.sql',
+              Path(__file__).parents[1] / 'migrations/20261002_private_orphan_reconciliation.sql',
+              Path(__file__).parents[1] / 'migrations/20261003_backfill_preupgrade_orphan_reconciliation.sql']
+A = Principal('https://issuer.test/auth/v1', 'user-a', '2c05e220-8d2f-4c86-bf47-8b0cd12a8b23',
+              '5b84ee26-f338-4385-bd2a-c4a588be9cd8')
 B = Principal(A.issuer, 'user-b', A.tenant_id, A.project_id)
-OTHER = Principal(A.issuer, A.subject, 'tenant-b', 'project-b')
+OTHER = Principal(A.issuer, A.subject, '7d76e1a4-e722-4dd4-9089-ae3edb46590e',
+                  '39c50ee8-8454-4735-9d78-cd7a411642a1')
 CONFIG = RetentionConfig(enabled=True, bucket='fixture-private')
+
+
+@pytest.mark.asyncio
+async def test_asyncpg_shared_authority_requires_caller_transaction(db):
+    connection = await asyncpg.connect(guarded_dsn())
+    try:
+        with pytest.raises(RetentionError) as error:
+            await authorize_asyncpg(connection, A)
+        assert error.value.code == 'authorization_transaction_required'
+        async with connection.transaction():
+            assert (await authorize_asyncpg(connection, A))['subject'] == A.subject
+    finally:
+        await connection.close()
+
+
+@pytest.mark.asyncio
+async def test_asyncpg_shared_authority_denies_revoked_scope(db):
+    sessions, _ = db
+    await sql(sessions, 'UPDATE retention.membership SET active=false WHERE subject=:s', s=A.subject)
+    connection = await asyncpg.connect(guarded_dsn())
+    try:
+        async with connection.transaction():
+            with pytest.raises(RetentionError) as error:
+                await authorize_asyncpg(connection, A)
+            assert error.value.status == 403
+    finally:
+        await connection.close()
 
 
 def guarded_dsn():
@@ -49,7 +87,8 @@ async def db():
     dsn = guarded_dsn()
     conn = await asyncpg.connect(dsn)
     await conn.execute('DROP SCHEMA IF EXISTS retention CASCADE')
-    await conn.execute(MIGRATION.read_text(encoding='utf-8'))
+    for migration in MIGRATIONS:
+        await conn.execute(migration.read_text(encoding='utf-8'))
     await conn.close()
     engine = create_async_engine(dsn.replace('postgresql://', 'postgresql+asyncpg://', 1),
                                  pool_size=12, max_overflow=0)
@@ -278,6 +317,339 @@ async def test_delete_revokes_memory_and_defers_physical_cleanup_until_retention
 
 
 @pytest.mark.asyncio
+async def test_crash_after_archive_commit_reconciles_only_tombstoned_tenant_key(db):
+    sessions, repo = db
+    object_config = replace(CONFIG, prefix='private-retention-v1', expected_owner='123456789012',
+                            region='us-west-2',
+                            kms_key='arn:aws:kms:us-west-2:123456789012:key/test-key')
+    client = FakeS3()
+    store = PrivateObjectStore(client, object_config)
+
+    rec_a, _ = await repo.admit(A, meta('crashed-a'), b'{}')
+    uploaded_a = await repo.claim()
+    reference_a = store.archive(uploaded_a)
+    assert reference_a['verified'] is True
+    # Simulate hard process death here: deliberately skip complete/register_orphan.
+    assert (await repo.cancel(A, rec_a['job_id']))['physical_deletion_pending']
+
+    rec_missing, _ = await repo.admit(B, meta('missing-object'), b'{}')
+    await repo.cancel(B, rec_missing['job_id'])
+
+    rec_other, _ = await repo.admit(OTHER, meta('other-tenant'), b'{}')
+    uploaded_other = await repo.claim()
+    reference_other = store.archive(uploaded_other)
+    await repo.cancel(OTHER, rec_other['job_id'])
+
+    await sql(sessions, "UPDATE retention.artifact SET retention_until=now()-interval '2 seconds'")
+    expired_rows = await sql(sessions, """SELECT artifact_id,retention_until FROM retention.artifact
+        WHERE artifact_id IN (:a,:b)""", a=rec_a['artifact_id'], b=rec_other['artifact_id'])
+    expired_by_id = {row['artifact_id']: row['retention_until'] for row in expired_rows}
+    client.objects[(reference_a['key'], reference_a['version'])]['ObjectLockRetainUntilDate'] = (
+        expired_by_id[rec_a['artifact_id']])
+    client.objects[(reference_other['key'], reference_other['version'])]['ObjectLockRetainUntilDate'] = (
+        expired_by_id[rec_other['artifact_id']])
+    client.calls.clear()
+
+    assert await purge_one(repo, store)
+    assert (reference_a['key'], reference_a['version']) not in client.objects
+    assert (reference_other['key'], reference_other['version']) in client.objects
+    object_calls = [(op, args) for op, args in client.calls
+                    if op in {'head_object', 'get_object', 'delete_object'}]
+    assert object_calls and all(args['Key'] == reference_a['key'] for _, args in object_calls)
+    assert all(args.get('VersionId') != reference_other['version'] for _, args in object_calls)
+    assert all(args['Prefix'] == reference_a['key'] for op, args in client.calls
+               if op == 'list_object_versions')
+
+    # The next tombstone never reached S3. Reconciliation records confirmed
+    # absence and does not mislabel that as a physical delete.
+    client.calls.clear()
+    assert await purge_one(repo, store)
+    absent_calls = [(op, args) for op, args in client.calls
+                    if op in {'head_object', 'get_object', 'delete_object'}]
+    absent_list_calls = [(op, args) for op, args in client.calls
+                         if op == 'list_object_versions']
+    missing_key = f"{object_config.prefix}/{B.tenant_id}/{B.project_id}/"
+    assert not absent_calls
+    assert len(absent_list_calls) == 1 and absent_list_calls[0][1]['Prefix'].startswith(missing_key)
+    assert not any(op in {'get_object', 'delete_object'} for op, _ in absent_calls)
+    assert (reference_other['key'], reference_other['version']) in client.objects
+    rows = await sql(sessions, """SELECT a.tenant_id,a.object_version,a.physical_deleted_at,
+        a.archive_reconciled_at,o.state AS purge_state FROM retention.artifact a
+        JOIN retention.outbox o USING (artifact_id) WHERE o.event='purge_object'
+        ORDER BY a.received_at""")
+    assert rows[0]['tenant_id'] == A.tenant_id and rows[0]['object_version'] is None
+    assert rows[0]['physical_deleted_at'] and rows[0]['archive_reconciled_at']
+    assert rows[0]['purge_state'] == 'done'
+    assert rows[1]['tenant_id'] == B.tenant_id and rows[1]['physical_deleted_at'] is None
+    assert rows[1]['archive_reconciled_at'] and rows[1]['purge_state'] == 'done'
+    assert rows[2]['tenant_id'] == OTHER.tenant_id and rows[2]['physical_deleted_at'] is None
+    assert rows[2]['archive_reconciled_at'] is None and rows[2]['purge_state'] == 'pending'
+
+
+@pytest.mark.asyncio
+async def test_upgrade_backfills_preexisting_terminal_rows_once_and_recovers_both_keys(db):
+    sessions, _ = db
+    connection = await asyncpg.connect(guarded_dsn())
+    await connection.execute('DROP SCHEMA IF EXISTS retention CASCADE')
+    await connection.execute(MIGRATIONS[0].read_text(encoding='utf-8'))
+    for principal in (A, B, OTHER):
+        await connection.execute("""INSERT INTO retention.membership
+            (issuer,subject,tenant_id,project_id,active) VALUES($1,$2,$3,$4,true)""",
+            principal.issuer, principal.subject, principal.tenant_id, principal.project_id)
+    await connection.close()
+
+    repo = RetentionRepository(sessions, CONFIG)
+    object_config = replace(CONFIG, prefix='private-retention-v1', expected_owner='123456789012',
+                            region='us-west-2', kms_key='arn:aws:kms:us-west-2:123456789012:key/test-key')
+    client = FakeS3()
+    store = PrivateObjectStore(client, object_config)
+    rec_object, _ = await repo.admit(A, meta('legacy-uploaded'), b'{}')
+    uploading = await repo.claim()
+    reference = store.archive(uploading)
+    rec_absent, _ = await repo.admit(OTHER, meta('legacy-absent'), b'{}')
+    rec_live, _ = await repo.admit(B, meta('still-live'), b'{}')
+
+    # Emulate terminal rows from the pre-reconciliation application: archive
+    # outboxes were cancelled, but no purge_object row was created without a DB ref.
+    await sql(sessions, """UPDATE retention.artifact SET state='cancelled',payload=NULL,
+        deletion_requested_at=now() WHERE artifact_id IN (:uploaded,:absent)""",
+        uploaded=rec_object['artifact_id'], absent=rec_absent['artifact_id'])
+    await sql(sessions, """UPDATE retention.job SET state='cancelled',lease_token=NULL,
+        lease_expires_at=NULL WHERE artifact_id IN (:uploaded,:absent)""",
+        uploaded=rec_object['artifact_id'], absent=rec_absent['artifact_id'])
+    await sql(sessions, """UPDATE retention.outbox SET state='cancelled',completed_at=now(),
+        lease_token=NULL,lease_expires_at=NULL WHERE event='archive'
+        AND artifact_id IN (:uploaded,:absent)""",
+        uploaded=rec_object['artifact_id'], absent=rec_absent['artifact_id'])
+    assert (await sql(sessions, """SELECT count(*) AS n FROM retention.outbox
+        WHERE event='purge_object'"""))[0]['n'] == 0
+    await sql(sessions, """INSERT INTO retention.outbox
+        (artifact_id,job_id,event,state,lease_token,lease_expires_at)
+        VALUES (:artifact,:job,'purge_object','leased','preupgrade-live-lease',
+            now()+interval '1 hour')""", artifact=rec_absent['artifact_id'], job=rec_absent['job_id'])
+
+    connection = await asyncpg.connect(guarded_dsn())
+    try:
+        for migration in MIGRATIONS[1:]:
+            await connection.execute(migration.read_text(encoding='utf-8'))
+        await connection.execute(MIGRATIONS[2].read_text(encoding='utf-8'))
+    finally:
+        await connection.close()
+    queued = await sql(sessions, """SELECT artifact_id,state,lease_token,completed_at
+        FROM retention.outbox WHERE event='purge_object' ORDER BY artifact_id""")
+    assert {r['artifact_id'] for r in queued} == {rec_object['artifact_id'], rec_absent['artifact_id']}
+    queued_by_id = {r['artifact_id']: r for r in queued}
+    assert queued_by_id[rec_object['artifact_id']]['state'] == 'pending'
+    assert queued_by_id[rec_object['artifact_id']]['lease_token'] is None
+    assert queued_by_id[rec_absent['artifact_id']]['state'] == 'leased'
+    assert queued_by_id[rec_absent['artifact_id']]['lease_token'] == 'preupgrade-live-lease'
+    assert all(r['completed_at'] is None for r in queued)
+    assert (await sql(sessions, """SELECT count(*) AS n FROM retention.outbox
+        WHERE event='purge_object'"""))[0]['n'] == 2
+    before_cleanup = await sql(sessions, """SELECT archive_reconciled_at,physical_deleted_at
+        FROM retention.artifact WHERE artifact_id IN (:uploaded,:absent)""",
+        uploaded=rec_object['artifact_id'], absent=rec_absent['artifact_id'])
+    assert all(r['archive_reconciled_at'] is None and r['physical_deleted_at'] is None
+               for r in before_cleanup)
+
+    await sql(sessions, """UPDATE retention.artifact SET retention_until=now()-interval '2 seconds'
+        WHERE artifact_id IN (:uploaded,:absent)""",
+        uploaded=rec_object['artifact_id'], absent=rec_absent['artifact_id'])
+    await sql(sessions, """UPDATE retention.outbox SET lease_expires_at=now()-interval '1 second'
+        WHERE artifact_id=:id AND event='purge_object'""", id=rec_absent['artifact_id'])
+    retention_row = await sql(sessions, "SELECT retention_until FROM retention.artifact WHERE artifact_id=:id",
+                              id=rec_object['artifact_id'])
+    client.objects[(reference['key'], reference['version'])]['ObjectLockRetainUntilDate'] = (
+        retention_row[0]['retention_until'])
+    client.calls.clear()
+    assert await purge_one(repo, store)
+    assert await purge_one(repo, store)
+    assert (reference['key'], reference['version']) not in client.objects
+    assert (await sql(sessions, """SELECT count(*) AS n FROM retention.outbox
+        WHERE event='purge_object' AND state='done'"""))[0]['n'] == 2
+    assert (await sql(sessions, """SELECT count(*) AS n FROM retention.artifact
+        WHERE artifact_id=:id AND physical_deleted_at IS NOT NULL
+        AND archive_reconciled_at IS NOT NULL""", id=rec_object['artifact_id']))[0]['n'] == 1
+    assert (await sql(sessions, """SELECT count(*) AS n FROM retention.artifact
+        WHERE artifact_id=:id AND physical_deleted_at IS NULL
+        AND archive_reconciled_at IS NOT NULL""", id=rec_absent['artifact_id']))[0]['n'] == 1
+    live = await sql(sessions, """SELECT state FROM retention.artifact WHERE artifact_id=:id""",
+                     id=rec_live['artifact_id'])
+    assert live[0]['state'] == 'pending'
+
+
+@pytest.mark.asyncio
+async def test_versionless_purge_retries_fences_stale_and_rejects_forged_proofs(db):
+    sessions, repo = db
+    object_config = replace(CONFIG, prefix='private-retention-v1', expected_owner='123456789012',
+                            region='us-west-2', kms_key='arn:aws:kms:us-west-2:123456789012:key/test-key')
+    client = FakeS3()
+    store = PrivateObjectStore(client, object_config)
+    rec, _ = await repo.admit(A, meta('versionless-fence'), b'{}')
+    archive_row = await repo.claim()
+    reference = store.archive(archive_row)
+    await repo.cancel(A, rec['job_id'])
+    await sql(sessions, """UPDATE retention.artifact SET retention_until=now()-interval '2 seconds'
+        WHERE artifact_id=:id""", id=rec['artifact_id'])
+    retention_row = await sql(sessions, "SELECT retention_until FROM retention.artifact WHERE artifact_id=:id",
+                              id=rec['artifact_id'])
+    client.objects[(reference['key'], reference['version'])]['ObjectLockRetainUntilDate'] = (
+        retention_row[0]['retention_until'])
+
+    # Two workers die after claiming but before the object-store step.
+    for _ in range(2):
+        crashed = await repo.claim_purge()
+        assert crashed and crashed['object_version'] is None
+        await sql(sessions, """UPDATE retention.outbox SET lease_expires_at=now()-interval '1 second'
+            WHERE artifact_id=:id AND event='purge_object'""", id=rec['artifact_id'])
+
+    purge = await repo.claim_purge()
+    assert purge and purge['object_version'] is None
+    key = '/'.join((object_config.prefix, A.tenant_id, A.project_id, rec['artifact_id']))
+    valid_shape = {'deleted': True, 'reconciled': True, 'verified': True, 'absent': False,
+                   'bucket': object_config.bucket, 'key': key, 'version': reference['version'],
+                   'sha256': purge['sha256'], 'byte_length': purge['byte_length'],
+                   'versions_deleted': 1}
+    forged = [dict(valid_shape, bucket='other-private-bucket'),
+              dict(valid_shape, key=f"{object_config.prefix}/{OTHER.tenant_id}/{OTHER.project_id}/"
+                   f"{rec['artifact_id']}"),
+              dict(valid_shape, sha256='0' * 64),
+              dict(valid_shape, byte_length=purge['byte_length'] + 1),
+              dict(valid_shape, version='null'),
+              dict(valid_shape, verified=False),
+              dict(valid_shape, versions_deleted=0),
+              {key: value for key, value in valid_shape.items() if key != 'versions_deleted'}]
+    for proof_shape in forged:
+        assert not await repo.complete_purge(purge, proof_shape)
+    assert (await sql(sessions, """SELECT state FROM retention.outbox
+        WHERE artifact_id=:id AND event='purge_object'""", id=rec['artifact_id']))[0]['state'] == 'leased'
+
+    # The external delete succeeds, then the process dies before DB completion.
+    deleted_proof = store.reconcile_delete(purge)
+    assert (reference['key'], reference['version']) not in client.objects
+    await sql(sessions, """UPDATE retention.outbox SET lease_expires_at=now()-interval '1 second'
+        WHERE artifact_id=:id AND event='purge_object'""", id=rec['artifact_id'])
+    assert not await repo.complete_purge(purge, deleted_proof)
+
+    recovered = await repo.claim_purge()
+    assert recovered and recovered['purge_lease_token'] != purge['purge_lease_token']
+    absent_proof = store.reconcile_delete(recovered)
+    assert absent_proof['absent'] is True and absent_proof['versions_deleted'] == 0
+    assert await repo.complete_purge(recovered, absent_proof)
+    final = (await sql(sessions, """SELECT a.archive_reconciled_at,a.physical_deleted_at,
+        o.state,o.attempt_count FROM retention.artifact a JOIN retention.outbox o USING (artifact_id)
+        WHERE a.artifact_id=:id AND o.event='purge_object'""", id=rec['artifact_id']))[0]
+    assert final['archive_reconciled_at'] and final['physical_deleted_at'] is None
+    assert final['state'] == 'done' and final['attempt_count'] == 4
+
+
+@pytest.mark.asyncio
+async def test_restored_expired_orphan_and_purge_leases_recover_exact_key(db):
+    sessions, repo = db
+    dsn = urlsplit(guarded_dsn())
+    tools_dir = Path(__file__).parents[2] / 'runtime/postgres/pgsql/bin'
+    tools = {name: tools_dir / f'{name}.exe' for name in ('pg_dump', 'pg_restore', 'createdb', 'dropdb')}
+    if any(not path.is_file() for path in tools.values()):
+        pytest.skip('task-owned portable PostgreSQL dump/restore tools unavailable')
+    database = f'retention_fixture_restore_{uuid4().hex[:10]}'
+    source_database = dsn.path.lstrip('/')
+    host, port, user = dsn.hostname or '127.0.0.1', dsn.port or 5432, unquote(dsn.username or 'retention_fixture')
+    dump_args = ['-h', host, '-p', str(port), '-U', user]
+    target_dsn = f'postgresql://{user}@{host}:{port}/{database}'
+    object_config = replace(CONFIG, prefix='private-retention-v1', expected_owner='123456789012',
+                            region='us-west-2', kms_key='arn:aws:kms:us-west-2:123456789012:key/test-key')
+    client = FakeS3()
+    store = PrivateObjectStore(client, object_config)
+    rec, _ = await repo.admit(A, meta('restore-orphan'), b'{}')
+    archive_row = await repo.claim()
+    reference = store.archive(archive_row)
+    await repo.cancel(A, rec['job_id'])
+    assert not await repo.complete(archive_row, reference)
+    assert await repo.register_orphan(archive_row, reference)
+    await sql(sessions, """UPDATE retention.artifact SET retention_until=now()-interval '2 seconds'
+        WHERE artifact_id=:id""", id=rec['artifact_id'])
+    retention_row = await sql(sessions, "SELECT retention_until FROM retention.artifact WHERE artifact_id=:id",
+                              id=rec['artifact_id'])
+    client.objects[(reference['key'], reference['version'])]['ObjectLockRetainUntilDate'] = (
+        retention_row[0]['retention_until'])
+    purge_lease = await repo.claim_purge()
+    orphan_lease = await repo.claim_orphan_purge()
+    assert purge_lease and orphan_lease
+    assert orphan_lease['object_version'] == reference['version']
+    old_purge_token, old_orphan_token = purge_lease['purge_lease_token'], orphan_lease['orphan_lease_token']
+    await sql(sessions, """UPDATE retention.outbox SET lease_expires_at=now()-interval '1 second'
+        WHERE artifact_id=:id AND event='purge_object'""", id=rec['artifact_id'])
+    await sql(sessions, """UPDATE retention.orphan_archive SET lease_expires_at=now()-interval '1 second'
+        WHERE artifact_id=:id""", id=rec['artifact_id'])
+    with tempfile.TemporaryDirectory(prefix='brief09-restore-') as workdir:
+        dump_path = Path(workdir) / 'retention.dump'
+        created = False
+        try:
+            catalog_dsn = f'postgresql://{user}@{host}:{port}/postgres'
+            catalog = await asyncpg.connect(catalog_dsn)
+            try:
+                exists = await catalog.fetchval('SELECT 1 FROM pg_database WHERE datname=$1', database)
+                assert exists is None
+            finally:
+                await catalog.close()
+            result = subprocess.run([str(tools['createdb']), *dump_args, database],
+                                    capture_output=True, text=True, check=False)
+            assert result.returncode == 0, result.stderr
+            created = True
+            result = subprocess.run([str(tools['pg_dump']), *dump_args, '-d', source_database,
+                                     '--schema=retention', '--format=custom', '--file', str(dump_path)],
+                                    capture_output=True, text=True, check=False)
+            assert result.returncode == 0, result.stderr
+            result = subprocess.run([str(tools['pg_restore']), *dump_args, '--dbname', target_dsn,
+                                     '--exit-on-error', '--no-owner', '--no-privileges', str(dump_path)],
+                                    capture_output=True, text=True, check=False)
+            assert result.returncode == 0, result.stderr
+
+            restored_engine = create_async_engine(target_dsn.replace(
+                'postgresql://', 'postgresql+asyncpg://', 1))
+            try:
+                restored_sessions = async_sessionmaker(restored_engine, expire_on_commit=False)
+                restored_repo = RetentionRepository(restored_sessions, CONFIG)
+                restored_state = (await sql(restored_sessions, """SELECT a.object_version,
+                    a.archive_reconciled_at,a.physical_deleted_at,o.state,o.lease_token,
+                    o.attempt_count,oa.state AS orphan_state,oa.lease_token AS orphan_token
+                    FROM retention.artifact a JOIN retention.outbox o USING (artifact_id)
+                    JOIN retention.orphan_archive oa USING (artifact_id)
+                    WHERE a.artifact_id=:id AND o.event='purge_object'""", id=rec['artifact_id']))[0]
+                assert restored_state['object_version'] is None
+                assert restored_state['archive_reconciled_at'] is None
+                assert restored_state['physical_deleted_at'] is None
+                assert restored_state['state'] == 'leased' and restored_state['lease_token'] == old_purge_token
+                assert restored_state['orphan_state'] == 'leased'
+                assert restored_state['orphan_token'] == old_orphan_token
+
+                recovered_purge = await restored_repo.claim_purge()
+                recovered_orphan = await restored_repo.claim_orphan_purge()
+                assert recovered_purge and recovered_orphan
+                assert recovered_purge['purge_lease_token'] != old_purge_token
+                assert recovered_orphan['orphan_lease_token'] != old_orphan_token
+                purge_proof = store.reconcile_delete(recovered_purge)
+                assert await restored_repo.complete_purge(recovered_purge, purge_proof)
+                orphan_proof = store.delete(recovered_orphan)
+                assert await restored_repo.complete_orphan_purge(recovered_orphan, orphan_proof)
+                final = (await sql(restored_sessions, """SELECT a.archive_reconciled_at,
+                    a.physical_deleted_at,o.state AS purge_state,oa.state AS orphan_state
+                    FROM retention.artifact a JOIN retention.outbox o USING (artifact_id)
+                    JOIN retention.orphan_archive oa USING (artifact_id)
+                    WHERE a.artifact_id=:id AND o.event='purge_object'""", id=rec['artifact_id']))[0]
+                assert final['archive_reconciled_at'] and final['physical_deleted_at']
+                assert final['purge_state'] == 'done' and final['orphan_state'] == 'done'
+                assert (reference['key'], reference['version']) not in client.objects
+            finally:
+                await restored_engine.dispose()
+        finally:
+            if created:
+                result = subprocess.run([str(tools['dropdb']), *dump_args, database],
+                                        capture_output=True, text=True, check=False)
+                assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
 async def test_expiry_denies_reads_then_sweeps_payload_and_memory(db):
     sessions, repo = db
     rec, _ = await repo.admit(A, meta(), b'{}')
@@ -324,12 +696,14 @@ async def test_migration_rerun_and_transactional_reversal_preserve_legacy(db):
     rec, _ = await repo.admit(A, meta(), b'{}')
     connection = await asyncpg.connect(guarded_dsn())
     try:
-        await connection.execute(MIGRATION.read_text(encoding='utf-8'))
+        for migration in MIGRATIONS:
+            await connection.execute(migration.read_text(encoding='utf-8'))
         await connection.execute('BEGIN; DROP SCHEMA retention CASCADE; ROLLBACK;')
         assert await connection.fetchval('SELECT count(*) FROM retention.artifact') == 1
         assert await connection.fetchval("SELECT to_regclass('public.retention_fixture_legacy')")
         await connection.execute('DROP SCHEMA retention CASCADE')
-        await connection.execute(MIGRATION.read_text(encoding='utf-8'))
+        for migration in MIGRATIONS:
+            await connection.execute(migration.read_text(encoding='utf-8'))
         assert await connection.fetchval('SELECT count(*) FROM retention.artifact') == 0
         assert await connection.fetchval("SELECT to_regclass('public.retention_fixture_legacy')")
     finally:
@@ -439,6 +813,7 @@ async def main():
     os._exit(23)
 asyncio.run(main())
 '''
+    program = program.replace('tenant-a', A.tenant_id).replace('project-a', A.project_id)
     env = dict(os.environ, RETENTION_FIXTURE_CRASH_BEFORE='1' if crash_before_commit else '0')
     child = await asyncio.create_subprocess_exec(sys.executable, '-c', program, env=env,
         cwd=Path(__file__).parents[1], stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)

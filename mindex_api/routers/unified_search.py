@@ -49,7 +49,7 @@ Supports:
   - Location-based filtering (PostGIS)
   - Temporal filtering (time ranges)
   - Domain filtering (select which data types to search)
-  - Parallel execution via asyncio.gather()
+  - Serialized database execution on the request-owned AsyncSession
   - CREP map pipeline (all results carry lat/lng for map rendering)
   - Cache-first with live-scrape fallback (local-first data strategy)
   - Redis/LRU cache → PostgreSQL → Supabase → live scrape → store locally
@@ -71,6 +71,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session
+from ..contracts.v1.ancestry_index import FungiPIndexAvailability
+from ..services.ancestry_public_members import search_public_fungip
 from ..utils.deep_agent_events import schedule_domain_event
 
 logger = logging.getLogger(__name__)
@@ -84,7 +86,7 @@ router = APIRouter(prefix="/unified-search", tags=["Unified Earth Search"])
 
 ALL_DOMAINS = [
     # Biological
-    "taxa", "species", "compounds", "genetics", "observations",
+    "taxa", "species", "fungip", "compounds", "genetics", "observations",
     # Earth events
     "earthquakes", "volcanoes", "wildfires", "storms", "lightning", "tornadoes", "floods",
     # Atmosphere
@@ -113,8 +115,8 @@ ALL_DOMAINS = [
 # Grouped domain aliases for convenience
 DOMAIN_GROUPS = {
     "all": ALL_DOMAINS,
-    "biological": ["taxa", "species", "compounds", "genetics", "observations"],
-    "life": ["taxa", "species", "observations"],
+    "biological": ["taxa", "species", "fungip", "compounds", "genetics", "observations"],
+    "life": ["taxa", "species", "fungip", "observations"],
     "earth_events": ["earthquakes", "volcanoes", "wildfires", "storms", "lightning", "tornadoes", "floods"],
     "hazards": ["earthquakes", "volcanoes", "wildfires", "storms", "tornadoes", "floods"],
     "atmosphere": ["air_quality", "greenhouse_gas", "weather", "remote_sensing"],
@@ -155,7 +157,8 @@ class SearchResult(BaseModel):
 
 
 class TaxonResult(BaseModel):
-    id: int
+    id: int | str
+    mindex_uuid: Optional[str] = None
     scientific_name: str
     common_name: Optional[str] = None
     rank: Optional[str] = None
@@ -168,7 +171,7 @@ class TaxonResult(BaseModel):
 
 
 class CompoundResult(BaseModel):
-    id: int
+    id: int | str
     name: str
     formula: Optional[str] = None
     molecular_weight: Optional[float] = None
@@ -181,7 +184,7 @@ class CompoundResult(BaseModel):
 class GeneticsResult(BaseModel):
     id: int
     accession: str
-    species_name: str
+    species_name: Optional[str] = None
     gene: Optional[str] = None
     sequence_length: int = 0
     source: str = "genbank"
@@ -205,6 +208,7 @@ class UnifiedSearchResponse(BaseModel):
     total_count: int
     timing_ms: int
     filters_applied: Dict[str, Any] = Field(default_factory=dict)
+    domain_availability: Dict[str, Any] = Field(default_factory=dict)
 
 
 class EarthSearchResponse(BaseModel):
@@ -222,18 +226,31 @@ class EarthSearchResponse(BaseModel):
 # HELPER: Safe query executor
 # =============================================================================
 
+class _SessionRecoveryError(RuntimeError):
+    """The request session cannot safely serve another operation."""
+
+
+class _DomainQueryError(RuntimeError):
+    """A query failed and its transaction has already been rolled back."""
+
+
+async def _rollback_search_session(session: AsyncSession) -> None:
+    try:
+        await session.rollback()
+    except Exception:
+        raise _SessionRecoveryError("Search session recovery failed") from None
+
+
 async def _safe_query(session: AsyncSession, sql: str, params: dict, domain: str) -> list:
-    """Keep query failures distinct from a healthy query with no matches."""
+    """Recover failed requests without treating failed queries as healthy empty data."""
     try:
         async with session.begin_nested():
             result = await session.execute(text(sql), params)
             return result.fetchall()
-    except Exception as e:
-        logger.warning("%s query unavailable (%s)", domain, type(e).__name__)
-        raise HTTPException(status_code=503, detail={
-            "status": "unavailable",
-            "domain_errors": {domain: {"code": "domain_unavailable"}},
-        }) from e
+    except Exception as exc:
+        await _rollback_search_session(session)
+        logger.warning("%s query unavailable (%s)", domain, type(exc).__name__)
+        raise _DomainQueryError(f"{domain} query failed") from None
 
 
 # =============================================================================
@@ -245,23 +262,41 @@ async def search_taxa(
     toxicity_filter: Optional[str] = None,
     lat: Optional[float] = None, lng: Optional[float] = None, radius: Optional[float] = None,
 ) -> List[dict]:
-    """Search fungi taxa (core.taxon)."""
-    where_clauses = ["(canonical_name ILIKE :query OR common_name ILIKE :query)"]
+    """Search canonical taxa and their stored edibility metadata/traits."""
+    edibility = "COALESCE(t.metadata->>'edibility', trait_edibility.value_text)"
+    where_clauses = ["(t.canonical_name ILIKE :query OR t.common_name ILIKE :query)"]
     params: Dict[str, Any] = {"query": f"%{query}%", "limit": limit, "exact_query": query}
+
+    if lat is not None and lng is not None:
+        where_clauses.append("""EXISTS (
+            SELECT 1 FROM obs.observation nearby
+            WHERE nearby.taxon_id = t.id
+              AND ST_DWithin(nearby.location,
+                  ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius_m)
+        )""")
+        params.update({"lat": lat, "lng": lng,
+                       "radius_m": (radius if radius is not None else 100) * 1000})
 
     if toxicity_filter:
         if toxicity_filter in ("poisonous", "toxic", "deadly"):
-            where_clauses.append("(metadata->>'toxicity' IS NOT NULL OR metadata->>'poisonous' = 'true')")
+            where_clauses.append("(t.metadata->>'toxicity' IS NOT NULL OR t.metadata->>'poisonous' = 'true')")
         elif toxicity_filter == "edible":
-            where_clauses.append("(edibility = 'edible' OR metadata->>'edible' = 'true')")
+            where_clauses.append(f"({edibility} = 'edible' OR t.metadata->>'edible' = 'true')")
         elif toxicity_filter in ("psychedelic", "hallucinogenic"):
-            where_clauses.append("(metadata->>'psychoactive' = 'true' OR canonical_name ILIKE '%psilocybe%')")
+            where_clauses.append("(t.metadata->>'psychoactive' = 'true' OR t.canonical_name ILIKE '%psilocybe%')")
 
     sql = f"""
         SELECT t.id, t.canonical_name, t.common_name, t.rank, t.description,
                NULL as image_url, 0 as observation_count,
-               t.metadata->>'toxicity' as toxicity, t.edibility
+               t.metadata->>'toxicity' as toxicity, {edibility} as edibility
         FROM core.taxon t
+        LEFT JOIN LATERAL (
+            SELECT CASE WHEN COUNT(DISTINCT NULLIF(BTRIM(tt.value_text), '')) = 1
+                        THEN MIN(NULLIF(BTRIM(tt.value_text), ''))
+                        ELSE NULL END AS value_text
+            FROM bio.taxon_trait tt
+            WHERE tt.taxon_id = t.id AND tt.trait_name = 'edibility'
+        ) trait_edibility ON TRUE
         WHERE {' AND '.join(where_clauses)}
         ORDER BY CASE WHEN t.canonical_name ILIKE :exact_query THEN 0 ELSE 1 END, t.canonical_name
         LIMIT :limit
@@ -269,7 +304,9 @@ async def search_taxa(
     rows = await _safe_query(session, sql, params, "taxa")
     return [
         TaxonResult(
-            id=r.id, scientific_name=r.canonical_name, common_name=r.common_name,
+            id=(str(r.id) if isinstance(r.id, UUID) else r.id),
+            mindex_uuid=(str(r.id) if isinstance(r.id, UUID) else None),
+            scientific_name=r.canonical_name, common_name=r.common_name,
             rank=r.rank, description=r.description, image_url=r.image_url,
             observation_count=r.observation_count or 0, toxicity=r.toxicity, edibility=r.edibility,
         ).model_dump()
@@ -308,21 +345,31 @@ async def search_species(session: AsyncSession, query: str, limit: int, kingdom:
 
 
 async def search_compounds(session: AsyncSession, query: str, limit: int) -> List[dict]:
-    """Search compounds (core.compounds)."""
+    """Search stored compounds and explicit taxon-compound associations."""
     sql = """
-        SELECT c.id, c.name, c.molecular_formula as formula, c.molecular_weight,
-               c.compound_class as chemical_class, c.smiles,
-               COALESCE(c.producing_species, ARRAY[]::text[]) as species
-        FROM core.compounds c
-        WHERE c.name ILIKE :query OR c.molecular_formula ILIKE :query OR c.iupac_name ILIKE :query
-           OR EXISTS (SELECT 1 FROM unnest(c.producing_species) ps WHERE ps ILIKE :query)
+        SELECT c.id, c.name, c.formula, c.molecular_weight, c.chemical_class, c.smiles,
+               ARRAY(
+                   SELECT DISTINCT t.canonical_name
+                   FROM bio.taxon_compound tc
+                   JOIN core.taxon t ON t.id = tc.taxon_id
+                   WHERE tc.compound_id = c.id
+                   ORDER BY t.canonical_name
+               ) as species
+        FROM bio.compound c
+        WHERE c.name ILIKE :query OR c.formula ILIKE :query OR c.iupac_name ILIKE :query
+           OR EXISTS (
+               SELECT 1 FROM bio.taxon_compound tc_match
+               JOIN core.taxon t_match ON t_match.id = tc_match.taxon_id
+               WHERE tc_match.compound_id = c.id AND t_match.canonical_name ILIKE :query
+           )
         ORDER BY CASE WHEN c.name ILIKE :exact_query THEN 0 ELSE 2 END, c.name
         LIMIT :limit
     """
     rows = await _safe_query(session, sql, {"query": f"%{query}%", "exact_query": query, "limit": limit}, "compounds")
     return [
         CompoundResult(
-            id=r.id, name=r.name, formula=r.formula, molecular_weight=r.molecular_weight,
+            id=(str(r.id) if isinstance(r.id, UUID) else r.id),
+            name=r.name, formula=r.formula, molecular_weight=r.molecular_weight,
             chemical_class=r.chemical_class, smiles=r.smiles, source_species=r.species or [],
         ).model_dump()
         for r in rows
@@ -330,13 +377,14 @@ async def search_compounds(session: AsyncSession, query: str, limit: int) -> Lis
 
 
 async def search_genetics(session: AsyncSession, query: str, limit: int) -> List[dict]:
-    """Search genetics (core.dna_sequences)."""
+    """Search stored genetic sequences without inventing a species or gene."""
     sql = """
-        SELECT id, accession, scientific_name as species_name, gene_region as gene,
-               COALESCE(sequence_length, 0) as sequence_length, COALESCE(source, 'genbank') as source
-        FROM core.dna_sequences
-        WHERE scientific_name ILIKE :query OR accession ILIKE :query OR gene_region ILIKE :query
-        ORDER BY CASE WHEN scientific_name ILIKE :exact_query THEN 0 ELSE 1 END, scientific_name
+        SELECT gs.id, gs.accession, gs.species_name, gs.gene,
+               gs.sequence_length, gs.source
+        FROM bio.genetic_sequence gs
+        WHERE gs.species_name ILIKE :query OR gs.accession ILIKE :query
+           OR gs.gene ILIKE :query OR gs.region ILIKE :query
+        ORDER BY CASE WHEN gs.species_name ILIKE :exact_query THEN 0 ELSE 1 END, gs.species_name
         LIMIT :limit
     """
     rows = await _safe_query(session, sql, {"query": f"%{query}%", "exact_query": query, "limit": limit}, "genetics")
@@ -353,38 +401,43 @@ async def search_observations(
     session: AsyncSession, query: str, limit: int,
     lat: Optional[float] = None, lng: Optional[float] = None, radius: Optional[float] = None,
 ) -> List[dict]:
-    """Search observations (core.observation + species.sightings)."""
+    """Search stored canonical observations and all-kingdom sightings."""
     results = []
 
-    # Core observations (fungi)
+    observation_where = "TRUE"
+    observation_params: Dict[str, Any] = {"query": f"%{query}%", "limit": limit}
     if lat is not None and lng is not None:
-        sql = """
-            SELECT o.id::text, o.taxon_id::text, t.canonical_name as taxon_name,
-                   o.location_name as location, ST_Y(o.geom) as lat, ST_X(o.geom) as lng,
-                   o.observed_at::text as observed_at, NULL as image_url
-            FROM core.observation o
-            JOIN core.taxon t ON t.id = o.taxon_id
-            WHERE ST_DWithin(o.geom::geography, ST_MakePoint(:lng, :lat)::geography, :radius_m)
-              AND (t.canonical_name ILIKE :query OR t.common_name ILIKE :query)
-            ORDER BY o.observed_at DESC LIMIT :limit
-        """
-        rows = await _safe_query(session, sql, {
-            "query": f"%{query}%", "lat": lat, "lng": lng,
-            "radius_m": (radius or 100) * 1000, "limit": limit,
-        }, "observations")
-        for r in rows:
-            results.append({
-                "id": r.id, "taxon_id": r.taxon_id, "taxon_name": r.taxon_name,
-                "location": r.location, "lat": r.lat, "lng": r.lng,
-                "observed_at": r.observed_at, "image_url": r.image_url, "source": "mindex",
-            })
+        observation_where = """ST_DWithin(o.location,
+            ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius_m)"""
+        observation_params.update({"lat": lat, "lng": lng,
+                                   "radius_m": (radius if radius is not None else 100) * 1000})
+    sql = f"""
+        SELECT o.id::text, o.taxon_id::text,
+               COALESCE(t.canonical_name, o.metadata->>'taxon_name') as taxon_name,
+               NULL as location, ST_Y(o.location::geometry) as lat, ST_X(o.location::geometry) as lng,
+               o.observed_at::text as observed_at, NULL as image_url, o.source
+        FROM obs.observation o
+        LEFT JOIN core.taxon t ON t.id = o.taxon_id
+        WHERE {observation_where}
+          AND (:query = '%%' OR t.canonical_name ILIKE :query OR t.common_name ILIKE :query
+               OR o.metadata->>'taxon_name' ILIKE :query)
+        ORDER BY o.observed_at DESC LIMIT :limit
+    """
+    rows = await _safe_query(session, sql, observation_params, "observations")
+    for r in rows:
+        results.append({
+            "id": r.id, "taxon_id": r.taxon_id, "taxon_name": r.taxon_name,
+            "location": r.location, "lat": r.lat, "lng": r.lng,
+            "observed_at": r.observed_at, "image_url": r.image_url, "source": r.source,
+        })
 
     # Species sightings (all kingdoms)
     sight_where = "TRUE"
     sight_params: Dict[str, Any] = {"query": f"%{query}%", "limit": limit}
     if lat is not None and lng is not None:
-        sight_where = "ST_DWithin(s.location, ST_MakePoint(:lng, :lat)::geography, :radius_m)"
-        sight_params.update({"lat": lat, "lng": lng, "radius_m": (radius or 100) * 1000})
+        sight_where = "ST_DWithin(s.location, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius_m)"
+        sight_params.update({"lat": lat, "lng": lng,
+                             "radius_m": (radius if radius is not None else 100) * 1000})
 
     sql2 = f"""
         SELECT s.id::text, s.organism_id::text, o.scientific_name, o.common_name,
@@ -1411,17 +1464,39 @@ def _build_dispatch(session, query, limit, lat, lng, radius, toxicity, kingdom, 
     }
 
 
-async def _run_domain_searches(dispatch, domains) -> Dict[str, List[Any]]:
-    """Use the request session sequentially and refuse a complete-success claim on errors."""
+async def _execute_selected_domains(session, dispatch, names):
+    """Finish each selected operation and recovery before reusing its session."""
+    results = []
+    for name in names:
+        try:
+            operation = dispatch[name]
+            # Existing injected dispatch mappings may supply an awaitable.
+            results.append(await (operation() if callable(operation) else operation))
+        except _SessionRecoveryError:
+            raise
+        except _DomainQueryError as exc:
+            results.append(exc)  # _safe_query already completed the rollback.
+        except asyncio.CancelledError:
+            await _rollback_search_session(session)
+            raise
+        except Exception as exc:
+            await _rollback_search_session(session)
+            results.append(exc)
+    return results
+
+
+async def _run_domain_searches(session, dispatch: dict, domains: List[str]) -> Dict[str, List[Any]]:
+    """Keep main's explicit partial failures and recover before reusing the session."""
     selected = [domain for domain in domains if domain in dispatch]
+    values = await _execute_selected_domains(session, dispatch, selected)
     results: Dict[str, List[Any]] = {}
     errors: Dict[str, dict] = {}
-    for domain in selected:
-        try:
-            results[domain] = await dispatch[domain]()
-        except Exception as exc:
-            logger.warning("%s search unavailable (%s)", domain, type(exc).__name__)
+    for domain, value in zip(selected, values):
+        if isinstance(value, Exception):
+            logger.warning("%s search unavailable (%s)", domain, type(value).__name__)
             errors[domain] = {"code": "domain_unavailable"}
+        else:
+            results[domain] = value
     if errors:
         raise HTTPException(status_code=503, detail={
             "status": "partial" if results else "unavailable",
@@ -1453,6 +1528,19 @@ def _resolve_domains(types_str: str) -> List[str]:
     return result
 
 
+def _fungip_search_context(
+    q: str, limit: int, lat: Optional[float], lng: Optional[float], radius: Optional[float],
+    toxicity: Optional[str], kingdom: Optional[str], facility_type: Optional[str],
+    since: Optional[str], until: Optional[str],
+) -> Dict[str, Any]:
+    """Cache identity for the FungiP slice; shared cache keys omit these values."""
+    return {
+        "q": q, "limit": limit, "lat": lat, "lng": lng, "radius": radius,
+        "toxicity": toxicity, "kingdom": kingdom, "facility_type": facility_type,
+        "since": since, "until": until,
+    }
+
+
 # =============================================================================
 # MAIN ENDPOINTS
 # =============================================================================
@@ -1467,13 +1555,20 @@ async def unified_search(
             "Groups: all, biological, life, earth_events, hazards, atmosphere, water, "
             "infrastructure, pollution, signals, transport, aviation, maritime, space, "
             "monitoring, military, telemetry. "
-            "Individual: taxa, species, compounds, genetics, observations, earthquakes, "
+            "Individual: taxa, species, fungip, compounds, genetics, observations, earthquakes, "
             "volcanoes, wildfires, storms, lightning, tornadoes, floods, air_quality, "
             "greenhouse_gas, weather, remote_sensing, buoys, stream_gauges, facilities, "
             "power_grid, water_systems, internet_cables, antennas, wifi_hotspots, "
             "signal_measurements, aircraft, vessels, airports, ports, spaceports, "
             "launches, satellites, solar_events, cameras, eagle_video, military_installations, "
             "devices, telemetry, research, crep_entities, fusarium_tracks, fusarium_correlations"
+        ),
+    ),
+    read_only: bool = Query(
+        False,
+        description=(
+            "Skip search-event, Supabase sync, and live-scrape persistence side effects. "
+            "The short-lived response cache remains enabled."
         ),
     ),
     limit: int = Query(20, ge=1, le=100, description="Max results per domain"),
@@ -1497,7 +1592,7 @@ async def unified_search(
     Every result carries lat/lng when available for direct CREP map rendering.
 
     Use `types=all` to search everything, or narrow with domain groups:
-    - `biological` — taxa, species, compounds, genetics, observations
+    - `biological` — taxa, species, FungiP, compounds, genetics, observations
     - `earth_events` — earthquakes, volcanoes, wildfires, storms, lightning, tornadoes, floods
     - `atmosphere` — air quality, greenhouse gases, weather, remote sensing
     - `infrastructure` — facilities, power grid, water systems, internet cables
@@ -1524,23 +1619,56 @@ async def unified_search(
     await cache.connect()
 
     cached = await cache.get_cached_search(q, cache_types, options=cache_options)
+    fungip_context = _fungip_search_context(
+        q, limit, lat, lng, radius, toxicity, kingdom, facility_type, since, until,
+    )
+
+    if cached is not None and "fungip" in domains:
+        cached_results = cached.get("results") or {}
+        cached_availability = cached.get("domain_availability") or {}
+        if (
+            "fungip" not in cached_results
+            or "fungip" not in cached_availability
+            or cached.get("fungip_search_context") != fungip_context
+        ):
+            # A partial FungiP refresh would mix result sets and filter metadata
+            # from different requests. Rebuild all domains on context mismatch.
+            cached = None
+
     if cached is not None:
-        timing_ms = int((time.time() - start_time) * 1000)
         return UnifiedSearchResponse(
             query=q,
             domains_searched=cached.get("domains_searched", []),
             results=cached.get("results", {}),
             total_count=cached.get("total_count", 0),
-            timing_ms=timing_ms,
+            timing_ms=int((time.time() - start_time) * 1000),
             filters_applied=cached.get("filters_applied", {}),
+            domain_availability=cached.get("domain_availability", {}),
         )
 
     # ── TIER 2: Local PostgreSQL (one shared session, sequential queries) ──
     dispatch = _build_dispatch(session, q, limit, lat, lng, radius, toxicity, kingdom, facility_type)
-    results = await _run_domain_searches(dispatch, domains)
-    task_names = list(results)
+    results = await _run_domain_searches(session, dispatch, domains)
+    domain_availability: Dict[str, Any] = {}
+    task_names = [name for name in domains if name in results or name == "fungip"]
     total_count = sum(len(items) for items in results.values())
     empty_domains = [name for name, items in results.items() if not items]
+
+    if "fungip" in domains:
+        try:
+            fungip_results, availability = await search_public_fungip(session, q, limit, kingdom=kingdom)
+        except asyncio.CancelledError:
+            await _rollback_search_session(session)
+            raise
+        except Exception as exc:
+            await _rollback_search_session(session)
+            logger.warning("FungiP query unavailable (%s)", type(exc).__name__)
+            fungip_results = []
+            domain_availability["fungip"] = {"status": "error", "reason": "query_failed"}
+        else:
+            domain_availability["fungip"] = availability.model_dump()
+        results["fungip"] = fungip_results
+        total_count += len(fungip_results)
 
     # ── TIER 4: Live-scrape for domains that returned 0 results ────────
     # Only scrape domains that have live scrapers configured
@@ -1548,7 +1676,7 @@ async def unified_search(
     scrape_tasks = []
     scrape_names = []
     for domain in empty_domains:
-        if domain in LIVE_SCRAPERS:
+        if domain != "fungip" and domain in LIVE_SCRAPERS:
             scrape_tasks.append(
                 asyncio.get_event_loop().run_in_executor(
                     None, LIVE_SCRAPERS[domain], q
@@ -1564,8 +1692,13 @@ async def unified_search(
             elif result:
                 results[name] = result
                 total_count += len(result)
-                # Async: store scraped data locally for future searches
-                asyncio.create_task(_async_store_scraped(session, name, result))
+                # Public Search may return live scrape results without storing them.
+                if not read_only:
+                    # The optional index helper reports its own query error even
+                    # if its rollback failed. Require recovery before any writes.
+                    if domain_availability.get("fungip", {}).get("status") == "error":
+                        await _rollback_search_session(session)
+                    await _async_store_scraped(session, name, result)
 
     timing_ms = int((time.time() - start_time) * 1000)
 
@@ -1588,29 +1721,32 @@ async def unified_search(
         "results": results,
         "total_count": total_count,
         "filters_applied": filters_applied,
+        "domain_availability": domain_availability,
+        "fungip_search_context": fungip_context if "fungip" in domains else None,
     }
 
     # ── Cache the results for future requests ──────────────────────────
     await cache.cache_search(q, cache_types, response_data, ttl=120, options=cache_options)
 
-    # ── Async: Sync to Supabase for global access ──────────────────────
-    from ..supabase_client import get_supabase
-    supa = get_supabase()
-    if supa.enabled and total_count > 0:
-        asyncio.create_task(supa.sync_search_results(q, results))
+    if not read_only:
+        # ── Async: Sync to Supabase for global access ──────────────────
+        from ..supabase_client import get_supabase
+        supa = get_supabase()
+        if supa.enabled and total_count > 0:
+            asyncio.create_task(supa.sync_search_results(q, results))
 
-    schedule_domain_event(
-        domain="search",
-        task=f"MINDEX unified-search completed: {q}",
-        context={
-            "route": "/unified-search",
-            "query": q,
-            "domains_searched": task_names,
-            "total_count": total_count,
-            "timing_ms": timing_ms,
-        },
-        preferred_agent="myca-research",
-    )
+        schedule_domain_event(
+            domain="search",
+            task=f"MINDEX unified-search completed: {q}",
+            context={
+                "route": "/unified-search",
+                "query": q,
+                "domains_searched": task_names,
+                "total_count": total_count,
+                "timing_ms": timing_ms,
+            },
+            preferred_agent="myca-research",
+        )
 
     return UnifiedSearchResponse(
         query=q,
@@ -1619,11 +1755,12 @@ async def unified_search(
         total_count=total_count,
         timing_ms=timing_ms,
         filters_applied=filters_applied,
+        domain_availability=domain_availability,
     )
 
 
 async def _async_store_scraped(session: AsyncSession, domain: str, records: List[dict]):
-    """Background task: store live-scraped data in local DB for future instant access."""
+    """Awaited request-owned storage; never share this session with a background task."""
     try:
         for record in records:
             lat = record.get("lat")
@@ -1646,7 +1783,11 @@ async def _async_store_scraped(session: AsyncSession, domain: str, records: List
                     "source": record.get("source", f"scrape_{domain}"),
                 })
         await session.commit()
+    except asyncio.CancelledError:
+        await _rollback_search_session(session)
+        raise
     except Exception as e:
+        await _rollback_search_session(session)
         logger.debug(f"Async store scraped {domain} error: {e}")
 
 
@@ -1662,6 +1803,7 @@ async def earth_search(
     kingdom: Optional[str] = Query(None),
     facility_type: Optional[str] = Query(None),
     session: AsyncSession = Depends(get_db_session),
+    read_only: bool = False,
 ):
     """
     **Earth Search with CREP Map Pipeline** — Returns both domain-keyed results
@@ -1670,6 +1812,7 @@ async def earth_search(
 
     Every entity gets a lat/lng (when available), domain tag, and entity_type
     so CREP can render pins, clusters, and layers simultaneously.
+    `read_only=true` suppresses the completion event without changing the query or response.
     """
     start_time = time.time()
 
@@ -1679,7 +1822,7 @@ async def earth_search(
 
     dispatch = _build_dispatch(session, q, limit, lat, lng, radius, toxicity, kingdom, facility_type)
 
-    results = await _run_domain_searches(dispatch, domains)
+    results = await _run_domain_searches(session, dispatch, domains)
     task_names = list(results)
     universal: List[SearchResult] = []
     total_count = 0
@@ -1717,18 +1860,19 @@ async def earth_search(
     if lat is not None and lng is not None:
         filters_applied["location"] = {"lat": lat, "lng": lng, "radius_km": radius}
 
-    schedule_domain_event(
-        domain="search",
-        task=f"MINDEX earth-search completed: {q}",
-        context={
-            "route": "/unified-search/earth",
-            "query": q,
-            "domains_searched": task_names,
-            "total_count": total_count,
-            "timing_ms": timing_ms,
-        },
-        preferred_agent="myca-research",
-    )
+    if not read_only:
+        schedule_domain_event(
+            domain="search",
+            task=f"MINDEX earth-search completed: {q}",
+            context={
+                "route": "/unified-search/earth",
+                "query": q,
+                "domains_searched": task_names,
+                "total_count": total_count,
+                "timing_ms": timing_ms,
+            },
+            preferred_agent="myca-research",
+        )
 
     return EarthSearchResponse(
         query=q,
@@ -1761,7 +1905,11 @@ async def search_taxa_by_location(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Get taxa observed near a specific location (fungi + all species)."""
-    results = await search_observations(session, "", limit, lat, lng, radius)
+    domains = await _run_domain_searches(
+        session, {"observations": lambda: search_observations(session, "", limit, lat, lng, radius)},
+        ["observations"],
+    )
+    results = domains["observations"]
     return {
         "results": results[:limit],
         "location": {"lat": lat, "lng": lng, "radius_km": radius},
@@ -1801,7 +1949,7 @@ async def search_nearby(
 
     dispatch = _build_dispatch(session, q, limit, lat, lng, radius, None, None, None)
 
-    results = await _run_domain_searches(dispatch, [d for d in domains if d in location_aware])
+    results = await _run_domain_searches(session, dispatch, [d for d in domains if d in location_aware])
     task_names = list(results)
     total_count = sum(len(items) for items in results.values())
 

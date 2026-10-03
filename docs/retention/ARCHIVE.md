@@ -33,6 +33,7 @@ authoritative receipt. Job IDs remain a MINDEX concern.
 | `archive(row)` | `bucket`, `key`, `version`, `verified=true`, `sha256`, `byte_length` | Fenced transaction records verification; never mark verified merely on upload acknowledgement |
 | `read(row, reference=None)` | Exact original bytes | Reauthorize membership and revocation; do not infer ownership from the object key |
 | `delete(row)` | Exact `bucket`, `key`, `version`, `deleted=true` | Revoke customer access first; claim/fence the purge job and record the receipt |
+| `reconcile_delete(row)` | Versionless reconciliation proof for the row-derived exact key | Worker-only recovery for a tombstone whose uploaded version was never committed to PostgreSQL; it is not the persisted-version delete path |
 
 The key is `<configured-prefix>/<tenant-uuid>/<project-uuid>/<artifact-uuid>`.
 Its immutable metadata allowlist contains only `artifact-id` and `sha256`.
@@ -78,9 +79,12 @@ Required IAM capabilities include bucket versioning/public-block/ownership/lock
 inspection; `s3:PutObject`, `s3:GetObject`, `s3:GetObjectVersion`,
 `s3:PutObjectRetention`, `s3:GetObjectRetention`, `s3:GetObjectLegalHold`; and
 the scoped KMS encrypt/decrypt/data-key permissions needed by upload/checksum
-readback. Absence checks require suitable `s3:ListBucket` permission: a 403 is
-never interpreted as a missing object. A separately scoped purge role needs
-`s3:DeleteObjectVersion`. Grant no governance bypass or bucket mutation rights.
+readback. Exact-object absence checks require suitable `s3:ListBucket` permission:
+a 403 is never interpreted as a missing object. Versionless orphan reconciliation
+also requires `s3:ListBucketVersions`, scoped by the bucket policy to the private
+artifact prefix; denied or malformed version inventory fails closed. A separately
+scoped purge role needs `s3:DeleteObjectVersion`. Grant no governance bypass or
+bucket mutation rights.
 Review actual effective IAM, bucket/access-point and KMS policies separately;
 bucket protection flags do not prove least privilege for every authenticated
 principal. S3 permissions must restrict reads/writes to the intended workers and
@@ -92,12 +96,16 @@ Customer revocation is an immediate MINDEX authorization decision. It must stop
 downloads, memory dereferencing, searches and streams even while immutable bytes
 remain retained. Do not describe revocation as physical erasure.
 
-The purge worker waits until the persisted retention deadline. The adapter then
-checks the exact version's actual deadline and legal hold, rejecting continued
-retention with `archive_retention_active` (409). It never requests governance
-bypass, creates delete markers, deletes newer versions, or shortens a lock.
-S3 compliance retention protects the version until expiry, as documented in
-[Object Lock behavior](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html).
+The purge worker waits until the persisted retention deadline. The persisted-
+version delete path checks that exact version's actual deadline and legal hold,
+rejecting continued retention with `archive_retention_active` (409). It deletes
+only that recorded version and never requests governance bypass, creates delete
+markers, or shortens a lock. Separately, versionless orphan reconciliation lists
+versions under the one canonical key prefix, filters to exact full-key matches,
+and verifies every match's metadata, retention, full bytes and digest before it
+deletes any of those exact-key versions. Prefix neighbors and other keys are not
+read or deleted. S3 compliance retention protects each version until expiry, as
+documented in [Object Lock behavior](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html).
 
 After deleting the exact version, another version-specific HEAD must prove it
 absent. Acknowledgement alone produces no deletion receipt. An ambiguous delete
@@ -133,6 +141,18 @@ The optional real boto3 Stubber test validates SDK request/response models while
 preventing network access. These are offline adapter receipts, not end-to-end
 AWS security, restore, production retention or erase qualification.
 
+The focused adapter suite also supplies AWS-shaped paginated `ListObjectVersions`
+responses with both `Versions` and `DeleteMarkers`; an installed botocore
+`Stubber` validates the modeled request and response shapes without network I/O.
+The reconciler follows both markers, deletes exact-key payload versions and marker
+versions by ID, then requires a fresh empty inventory before returning proof. A
+marker-only key is reported absent only after the marker disappears. The scripted
+fixtures do not establish actual S3 ordering, permissions, strong-consistency
+behavior, IAM/KMS/Object Lock policy or deployed recovery. The PostgreSQL dump/restore
+test restores database lease state into a separate target while reusing the same
+in-memory fake object store. Worker interruption cases simulate failure windows;
+they do not terminate and restart an OS worker process.
+
 Before a manually authorized rollout, validate real bucket protections and
 effective IAM/KMS policies; use an approved isolated bucket to exercise encrypted
 version readback, missing permissions, Object Lock rejection, legal hold and
@@ -143,3 +163,8 @@ customer erasure obligations before enabling compliance retention. No AWS calls,
 bucket provisioning, production migrations or deployments were performed by
 these tests. Reverting code does not remove already locked objects; retain the
 previous runtime and additive schema during the manual rollback window.
+
+Focused object-store follow-up on October 3, 2026: **93 passed** with
+`python -m pytest tests/test_retention_object_store.py -q`; selected-file
+`git diff --check` passed. This includes offline pagination/delete-marker tests
+and botocore Stubber model validation, not live S3 qualification.

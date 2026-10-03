@@ -24,6 +24,8 @@ _RETRYABLE = {
     "RequestTimeoutException", "InternalError", "InternalFailure", "ServiceUnavailable",
     "SlowDown", "500", "502", "503", "504",
 }
+_MAX_RECONCILIATION_VERSIONS = 100
+_MAX_RECONCILIATION_PAGES = 32
 
 
 def _error_code(exc):
@@ -276,6 +278,122 @@ class PrivateObjectStore:
             if self._head_or_missing(key, version) is not None:
                 raise RetentionError("archive_deletion_unverified")
         return {"bucket": self.config.bucket, "key": key, "version": version, "deleted": True}
+
+    def _listed_versions(self, key):
+        """Return bounded versions and delete markers for one exact key."""
+        versions, delete_markers = [], []
+        seen_versions, cursors = set(), set()
+        key_marker = version_marker = None
+        for _ in range(_MAX_RECONCILIATION_PAGES):
+            args = {**self._bucket_args(), "Prefix": key, "MaxKeys": 1000}
+            if key_marker is not None:
+                args["KeyMarker"] = key_marker
+            if version_marker is not None:
+                args["VersionIdMarker"] = version_marker
+            page = self._call("list_object_versions", **args)
+            page_versions = page.get("Versions", [])
+            page_markers = page.get("DeleteMarkers", [])
+            if (not isinstance(page_versions, list) or not isinstance(page_markers, list)
+                    or type(page.get("IsTruncated")) is not bool):
+                raise RetentionError("archive_integrity_failed")
+            for entry in page_versions:
+                if not isinstance(entry, Mapping):
+                    raise RetentionError("archive_integrity_failed")
+                if (not isinstance(entry.get("Key"), str) or not entry["Key"]
+                        or not isinstance(entry.get("VersionId"), str)
+                        or not entry["VersionId"]):
+                    raise RetentionError("archive_integrity_failed")
+                if entry.get("Key") != key:
+                    continue
+                version = self._version(entry.get("VersionId"))
+                if version in seen_versions:
+                    raise RetentionError("archive_integrity_failed")
+                seen_versions.add(version)
+                versions.append(version)
+                if len(versions) + len(delete_markers) > _MAX_RECONCILIATION_VERSIONS:
+                    raise RetentionError("archive_reconciliation_limit")
+            for marker in page_markers:
+                if not isinstance(marker, Mapping):
+                    raise RetentionError("archive_integrity_failed")
+                if (not isinstance(marker.get("Key"), str) or not marker["Key"]
+                        or not isinstance(marker.get("VersionId"), str)
+                        or not marker["VersionId"]):
+                    raise RetentionError("archive_integrity_failed")
+                if marker.get("Key") != key:
+                    continue
+                version = self._version(marker.get("VersionId"))
+                if version in seen_versions:
+                    raise RetentionError("archive_integrity_failed")
+                seen_versions.add(version)
+                delete_markers.append(version)
+                if len(versions) + len(delete_markers) > _MAX_RECONCILIATION_VERSIONS:
+                    raise RetentionError("archive_reconciliation_limit")
+            if not page.get("IsTruncated", False):
+                return versions, delete_markers
+            next_key = page.get("NextKeyMarker")
+            next_version = page.get("NextVersionIdMarker")
+            cursor = (next_key, next_version)
+            if (not isinstance(next_key, str) or not next_key or cursor in cursors
+                    or (next_version is not None
+                        and (not isinstance(next_version, str) or not next_version))):
+                raise RetentionError("archive_integrity_failed")
+            cursors.add(cursor)
+            key_marker, version_marker = next_key, next_version
+        raise RetentionError("archive_reconciliation_limit")
+
+    def reconcile_delete(self, row):
+        """Reconcile a tombstoned row whose archive version never reached Postgres.
+
+        The key is derived exclusively from canonical tenant/project/artifact UUIDs
+        in the persisted row. Versionless reconciliation lists a bounded set of
+        versions under that exact key prefix, then filters to exact-key matches;
+        it never accepts object coordinates supplied by a caller. Persisted-version
+        deletion uses the separate exact-version path and does not enumerate versions.
+        """
+        if row.get("object_version") is not None:
+            raise RetentionError("archive_integrity_failed")
+        key, digest, length, retained_until, artifact_id = self._row(row)
+        if retained_until > datetime.now(timezone.utc):
+            raise RetentionError("archive_retention_active", status=409)
+        self._policy()
+        versions, delete_markers = self._listed_versions(key)
+        if not versions and not delete_markers:
+            return {"bucket": self.config.bucket, "key": key, "version": None,
+                    "deleted": True, "reconciled": True, "absent": True,
+                    "verified": True, "sha256": digest, "byte_length": length,
+                    "versions_deleted": 0}
+
+        # Verify every exact-key version before deleting any of them. Prefix
+        # neighbors are never read or deleted, and the loop is explicitly bounded.
+        now = datetime.now(timezone.utc)
+        for version in versions:
+            existing = self._head_or_missing(key, version)
+            if existing is None:
+                raise RetentionError("archive_unavailable")
+            self._headers(existing, version, digest, length, retained_until, artifact_id)
+            self.read(row, {"bucket": self.config.bucket, "key": key, "version": version})
+            if (_utc(existing["ObjectLockRetainUntilDate"]) > now
+                    or existing.get("ObjectLockLegalHoldStatus") == "ON"):
+                raise RetentionError("archive_retention_active", status=409)
+
+        # A version-pinned DELETE permanently removes either a payload version
+        # or a delete marker. Never issue an unversioned DELETE here: that would
+        # create another marker in a version-enabled bucket. HeadObject is not a
+        # valid post-delete probe for marker versions, so verify the full inventory.
+        for version in (*versions, *delete_markers):
+            try:
+                self.client.delete_object(**self._args(key, version))
+            except Exception as exc:
+                if _error_code(exc) and _error_code(exc) not in _RETRYABLE:
+                    raise RetentionError("archive_unavailable") from None
+        remaining_versions, remaining_markers = self._listed_versions(key)
+        if remaining_versions or remaining_markers:
+            raise RetentionError("archive_deletion_unverified")
+        return {"bucket": self.config.bucket, "key": key,
+                "version": versions[-1] if versions else None,
+                "deleted": True, "reconciled": True, "absent": not versions,
+                "verified": True, "sha256": digest, "byte_length": length,
+                "versions_deleted": len(versions)}
 
 
 def create_object_store(config: RetentionConfig):

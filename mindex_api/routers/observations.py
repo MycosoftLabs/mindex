@@ -63,6 +63,7 @@ async def list_observations(
         False,
         description="When true, run an exact count. Keep false for low-latency map viewport reads.",
     ),
+    read_only: bool = False,
 ) -> ObservationListResponse:
     bbox_params = _parse_bbox(bbox)
 
@@ -152,7 +153,7 @@ async def list_observations(
         FROM obs.observation o
         LEFT JOIN core.taxon t ON t.id = o.taxon_id
         WHERE {where_sql}
-        ORDER BY o.observed_at DESC
+        ORDER BY o.observed_at DESC, o.id
         LIMIT :limit OFFSET :offset
     """
     count_query = f"""
@@ -178,20 +179,21 @@ async def list_observations(
             data["location"] = None
         observations.append(data)
 
-    schedule_domain_event(
-        domain="search",
-        task="MINDEX observations list requested",
-        context={
-            "route": "/observations",
-            "taxon_id": str(taxon_id) if taxon_id else None,
-            "start": start.isoformat() if start else None,
-            "end": end.isoformat() if end else None,
-            "total": total,
-            "limit": pagination.limit,
-            "offset": pagination.offset,
-        },
-        preferred_agent="myca-research",
-    )
+    if not read_only:
+        schedule_domain_event(
+            domain="search",
+            task="MINDEX observations list requested",
+            context={
+                "route": "/observations",
+                "taxon_id": str(taxon_id) if taxon_id else None,
+                "start": start.isoformat() if start else None,
+                "end": end.isoformat() if end else None,
+                "total": total,
+                "limit": pagination.limit,
+                "offset": pagination.offset,
+            },
+            preferred_agent="myca-research",
+        )
     return ObservationListResponse(
         data=observations,
         pagination={
