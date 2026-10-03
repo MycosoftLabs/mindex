@@ -1,0 +1,16 @@
+{
+  "qualification": "local fixture contract parsing and canonical hashing only",
+  "runtime": "3.12.10",
+  "os": "Windows-11-10.0.26200-SP0",
+  "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "logical_cpus": 24,
+  "sample_count": 32,
+  "request_bytes": 5276,
+  "cold_first_parse_ms": 1.3152998872101307,
+  "warm_iterations": 500,
+  "warm_p50_ms": 0.45779999345541,
+  "warm_p95_ms": 0.84910006262362,
+  "warm_operations_per_second": 1963.608811374445,
+  "process_peak_rss_bytes": 35831808,
+  "database_network_aws_myca_measured": false
+}

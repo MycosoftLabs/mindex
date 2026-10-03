@@ -15,6 +15,7 @@ from .middleware import (
     SecurityHeadersMiddleware,
 )
 from .routers.v1_ingest import router as v1_ingest_router
+from .routers.formspace_durable import router as formspace_durable_router
 from .routers.fungip import router as fungip_router
 from .routers.retention import router as retention_router
 from .routers import (
@@ -158,6 +159,8 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router, prefix=prefix)
     app.include_router(beta_router, prefix=prefix)
+    # Private app routes authenticate original user JWTs through shared retention.v1.
+    app.include_router(formspace_durable_router, prefix=prefix)
     # BLOCKS biobank webhooks (optional BIOBANK_WEBHOOK_TOKEN bearer)
     app.include_router(biobank_events_router, prefix=prefix)
     # MYCODAO still posts {MINDEX_API_URL}/api/biobank/events — keep that path

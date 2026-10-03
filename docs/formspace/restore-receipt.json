@@ -1,0 +1,14 @@
+{
+  "dump_sha256": "cfc83d17df419cb650fe348f18e9dd92127ca4988d8a2d9f56538587be420aa7",
+  "restore_ms": 243.7165,
+  "dump_ms": 223.2968,
+  "scope": "Schema-scoped synthetic fixture metadata/input manifests and references only; FakeS3 bytes are not a restored AWS service",
+  "dump_exit_code": 0,
+  "restore_exit_code": 0,
+  "restore_data_comparison": "pass_two_independent_restores_all_10_tables_and_16_rows_have_matching_canonical_row_hashes",
+  "previous_shared_restore_target_directly_compared": false,
+  "restore_comparison_details": "restore-comparison.json; performed in a new task-owned loopback PostgreSQL 17.11 cluster after shared server stopped",
+  "verified_artifact_version_and_hash_metadata_match": true,
+  "archived_object_bytes_present_in_dump": false,
+  "production_data_touched": false
+}

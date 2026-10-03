@@ -1,0 +1,53 @@
+{
+  "schema": "formspace.restore-comparison/v1",
+  "recorded_at": "2026-10-01",
+  "source_dump": {
+    "path": "C:/Users/Owner1/.codex/worktrees/formspace-durable/formspace-fixture.dump",
+    "sha256": "cfc83d17df419cb650fe348f18e9dd92127ca4988d8a2d9f56538587be420aa7",
+    "dump_exit_code": 0
+  },
+  "method": "Restored the same schema-scoped custom archive into two independent empty databases on a newly initialized task-owned PostgreSQL 17.11 loopback fixture, then compared every row in all ten dumped tables. Rows were converted to JSONB, sorted by row JSON, aggregated, UTF-8 encoded, and SHA-256 hashed per table.",
+  "fixture": {
+    "cluster_system_identifier": "7691908427153997876",
+    "host": "127.0.0.1",
+    "port": 55917,
+    "database_names": [
+      "brief04_dump_reference",
+      "brief04_dump_restore"
+    ],
+    "server_stopped_after_comparison": true,
+    "worktree_relative_data_path": ".formspace-restore-audit-20261001/data"
+  },
+  "result": {
+    "tables_compared": 10,
+    "rows_compared": 16,
+    "all_table_counts_and_hashes_match": true,
+    "previous_shared_restore_target_directly_compared": false,
+    "previous_shared_restore_target_reason": "The shared PostgreSQL server was stopped; it was not restarted or modified.",
+    "production_data_touched": false
+  },
+  "tables": [
+    {"name":"formspace.chart_revision","rows":1,"sha256":"ce4b97dfa8fa022517ab8c1fb31f47c09d1498368b87c45334ca8d2edeff396a"},
+    {"name":"formspace.job","rows":2,"sha256":"a899e3e00614a5f43ddd45861d29332bdf5a97c07574e0bd245c5934359b5092"},
+    {"name":"formspace.outbox","rows":2,"sha256":"24183388de31e1ddea6534492c042df4234af656ae996978d073da5b952bc29d"},
+    {"name":"retention.access_grant","rows":0,"sha256":"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"},
+    {"name":"retention.artifact","rows":1,"sha256":"c14b4ddb2ecd3dff8a56cf51b4e4d1fc2b42122d2eb1e1d0f56393cfb26bec69"},
+    {"name":"retention.job","rows":1,"sha256":"8db6a0aab9d8b34ddf0de7904ed68c4a9e4b599565d06497475b9fd614eab5d6"},
+    {"name":"retention.membership","rows":7,"sha256":"e6af667be7dbff8fde236fc3e50b795173d5d26920031a04c2179e29cc00758f"},
+    {"name":"retention.memory_reference","rows":1,"sha256":"bc72238d323a9246d9eb33cae1c537cf4465ae682a4f69454f15e6dab492b709"},
+    {"name":"retention.orphan_archive","rows":0,"sha256":"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"},
+    {"name":"retention.outbox","rows":1,"sha256":"0a25027fa30e2d00f4a9caa56906c600e0ff2e1c3d6ba1034bd2b3175b936585"}
+  ],
+  "verified_artifact_metadata": [
+    {
+      "artifact_id": "db7bfd04-53da-4787-a567-9c1d227644f4",
+      "state": "verified",
+      "object_version": "version-1",
+      "sha256": "ef8e496be51995c9396a6f3f7aa9a4ac59098db377dcaa5d6cbcc307fc2fcaf9",
+      "metadata_sha256": "d4671af0880647e3620cd3b02e6d36b340bee678aa2801f15126f9c6c05d766a",
+      "byte_length": 3665,
+      "postgres_payload_present": false
+    }
+  ],
+  "artifact_byte_readback": "Not part of this PostgreSQL dump comparison. The object version and content hash metadata match between both restored databases; archived bytes are held by the external object service and the former FakeS3 process is unavailable."
+}

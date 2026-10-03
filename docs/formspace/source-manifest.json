@@ -1,0 +1,81 @@
+{
+  "baseline": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
+  "files": {
+    "docs/formspace/README.md": {
+      "working_tree_sha256": "fbddf0a1c7235172d069fb86ac93595bc963a7e94925fc76c2061687c40951f4",
+      "git_blob_sha256": "641a103fa0d39621b40dd58788142d273677ed98"
+    },
+    "docs/formspace/benchmark-receipt.json": {
+      "working_tree_sha256": "3c9b3e4eb0e3f189e7414a58015da016940a40a9b6f87ed577b998bbbcdc439d",
+      "git_blob_sha256": "41bbcd6160d5f89ba124e8f0e44574c33133a17015b671bcb0a27b7f79e217f6"
+    },
+    "docs/formspace/benchmark.py": {
+      "working_tree_sha256": "0b11e5cfeacc474ecd108d35a94f4ed99ada1c61fc2057cfbe1e4485eb071e1f",
+      "git_blob_sha256": "0b11e5cfeacc474ecd108d35a94f4ed99ada1c61fc2057cfbe1e4485eb071e1f"
+    },
+    "migrations/20261001_formspace_durable.sql": {
+      "working_tree_sha256": "710706a35238bd4bab35f2005b2ae4454b35aba55931c0deabd33130c1aacce5",
+      "git_blob_sha256": "710706a35238bd4bab35f2005b2ae4454b35aba55931c0deabd33130c1aacce5"
+    },
+    "mindex_api/formspace/__init__.py": {
+      "working_tree_sha256": "94de7c9099ec0faa6849c1c9a652833dd4bffed8423a951b98d326e503066085",
+      "git_blob_sha256": "94de7c9099ec0faa6849c1c9a652833dd4bffed8423a951b98d326e503066085"
+    },
+    "mindex_api/formspace/contracts.py": {
+      "working_tree_sha256": "a9a127338ca7be111bb58c4992fff04e003cdcd1b93034891cedb6a45ff78d3d",
+      "git_blob_sha256": "a9a127338ca7be111bb58c4992fff04e003cdcd1b93034891cedb6a45ff78d3d"
+    },
+    "mindex_api/formspace/repository.py": {
+      "working_tree_sha256": "f09e90f211e1f0c205a9c2b5f72f2eed4d5b6708b2a0c749ab344f5f4051a1a3",
+      "git_blob_sha256": "f09e90f211e1f0c205a9c2b5f72f2eed4d5b6708b2a0c749ab344f5f4051a1a3"
+    },
+    "mindex_api/formspace/service.py": {
+      "working_tree_sha256": "5b99ceb51e62d1761a06e23838c1b168d67c88aa2b55379afd8dbe84dc2707e4",
+      "git_blob_sha256": "5b99ceb51e62d1761a06e23838c1b168d67c88aa2b55379afd8dbe84dc2707e4"
+    },
+    "mindex_api/main.py": {
+      "working_tree_sha256": "73686db7cd64095da25b3636411083a08cb044e0e5aebcaf8287672d0111ff1e",
+      "git_blob_sha256": "73686db7cd64095da25b3636411083a08cb044e0e5aebcaf8287672d0111ff1e"
+    },
+    "mindex_api/routers/formspace_durable.py": {
+      "working_tree_sha256": "7e3dc1afb24108f8eb631b0b75fc3a8ca41ed5b346aa657b2f701600f1ab1d5b",
+      "git_blob_sha256": "7e3dc1afb24108f8eb631b0b75fc3a8ca41ed5b346aa657b2f701600f1ab1d5b"
+    },
+    "pyproject.toml": {
+      "working_tree_sha256": "7809c76120acd59bb0729bac6c753dba25bf36a88b3987baa5f7705a122bba04",
+      "git_blob_sha256": "7809c76120acd59bb0729bac6c753dba25bf36a88b3987baa5f7705a122bba04"
+    },
+    "tests/fixtures/formspace/chain-code-manifest.json": {
+      "working_tree_sha256": "fe0d998c29b35f8d39e07cf1bc8370f20a632211571ae79de0439d7b4d1b25eb",
+      "git_blob_sha256": "fe0d998c29b35f8d39e07cf1bc8370f20a632211571ae79de0439d7b4d1b25eb"
+    },
+    "tests/fixtures/formspace/chain-fixture-metadata.json": {
+      "working_tree_sha256": "deaaa94e6e97a2f6cdb645428ce4bd42a874ab9a95710f59082b715763ddb812",
+      "git_blob_sha256": "deaaa94e6e97a2f6cdb645428ce4bd42a874ab9a95710f59082b715763ddb812"
+    },
+    "tests/fixtures/formspace/chain-request.json": {
+      "working_tree_sha256": "9b85c76e8a4505f84734ed3e4d6d5322713c660d0134d75cdf365f5b9033c871",
+      "git_blob_sha256": "9b85c76e8a4505f84734ed3e4d6d5322713c660d0134d75cdf365f5b9033c871"
+    },
+    "tests/fixtures/formspace/chain-result.json": {
+      "working_tree_sha256": "ef8e496be51995c9396a6f3f7aa9a4ac59098db377dcaa5d6cbcc307fc2fcaf9",
+      "git_blob_sha256": "ef8e496be51995c9396a6f3f7aa9a4ac59098db377dcaa5d6cbcc307fc2fcaf9"
+    },
+    "tests/test_formspace_durable.py": {
+      "working_tree_sha256": "f0cc3b3135ffea7544c49c287fe9a29005c302ce96f9191d69e868dca35fbf80",
+      "git_blob_sha256": "09a799992f0cfbd5183490e718311657579c1a154fee749974cebdbfe2124854"
+    },
+    "tests/test_formspace_durable_postgres.py": {
+      "working_tree_sha256": "3cae76eafbc15cb2edbb46178c820d632361b875a0194a25252b8158a7012bcc",
+      "git_blob_sha256": "3cae76eafbc15cb2edbb46178c820d632361b875a0194a25252b8158a7012bcc"
+    },
+    "tests/test_formspace_durable_api_postgres.py": {
+      "working_tree_sha256": "9213e9c88eb58a720e0426755fe15ee9a4c635962d9d16d502fbeb43ee2c216d",
+      "git_blob_sha256": "5e24d60ffa3c5eed631aba0875636168d7460ec9acf0460b30d75d4cf8a9e6ff"
+    },
+    "scripts/formspace-chart-qualification.ps1": {
+      "working_tree_sha256": "e8c729de890b5b4d32a2ddf908385b4db0c6f07a5a463e453f4f3bcb86402277",
+      "git_blob_sha256": "05416ef6f37d389dda66158c53ab76df34fa4b92"
+    }
+  }
+}
