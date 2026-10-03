@@ -16,7 +16,7 @@ MINDEX_DIR = "/home/mycosoft/mindex"
 
 if not VM_PASS:
     print("ERROR: VM_PASSWORD environment variable not set")
-    print("Set it with: $env:VM_PASSWORD = 'Mycosoft2024!'")
+    print("Set it with: $env:VM_PASSWORD = '<your VM password>'")
     print("Or check your VM password file")
     sys.exit(1)
 
