@@ -195,6 +195,9 @@ coordinator-granted `MYCOSOFT_RESOURCE_SLOT_CONFIRMED=true` and
 `retention_fixture_formspacechart_20261001` database, runs the signed-JWT API and
 worker test, stops that task-owned server, and preserves its data/log. It does not
 reuse the earlier restore-audit directory or shared/sibling database.
+The worker checkout is the recovered managed Website worktree at
+`C:\Users\Owner1\.codex\worktrees\formspace-recovered-oct03\website`, pinned to
+`codex/formspace-durable-experiments` at `b90a9d2299a610413c83360d59257c1f23348566`.
 
 The test refuses remote addresses, query overrides and existing app schemas,
 never uses inherited app `DATABASE_URL`, and never drops data. It applies the
