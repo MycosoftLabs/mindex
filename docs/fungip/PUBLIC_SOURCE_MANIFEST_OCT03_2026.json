@@ -1,0 +1,265 @@
+{
+  "schema_version": 1,
+  "purpose": "Selected public source handoff; not a repository backup or runtime acceptance record",
+  "public_base_commit": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
+  "source_code_test_commit": "b78e1fb59b21fd2b02c808e32dc68dfaf4be4150",
+  "source_tree": "b86e5c250448a6cf4d75f43f76b3169eb9f19b2c",
+  "local_feature_reference": "a54b2a4ad1b5286d5014987a6fd3993a9e0dd3d0",
+  "documentation_successor": true,
+  "hash_semantics": "SHA-256 of raw file bytes in the prepared checkout; Git text normalization may differ",
+  "manifest_self_excluded": true,
+  "file_count": 49,
+  "total_bytes": 664195,
+  "files": [
+    {
+      "path": "docs/fungip/PUBLIC_INTEGRATION_HANDOFF_OCT03_2026.md",
+      "bytes": 9963,
+      "sha256": "3ec8c7083d44eb865dc07d6c88a15bfedee5a0f6ca60a4a0751b32a767d81d61"
+    },
+    {
+      "path": "migrations/fungip_001_catalog.sql",
+      "bytes": 8580,
+      "sha256": "761cf97f70a357648b826c92e9d5b139bb93195dc818eed3a6b46730d37f8fb5"
+    },
+    {
+      "path": "migrations/fungip_002_first40_launches.sql",
+      "bytes": 8587,
+      "sha256": "fc36efdb63c7975b6b55606cc39102a5b2c0a1616ba668c7141800e4ae457708"
+    },
+    {
+      "path": "mindex_api/contracts/v1/ancestry_index.py",
+      "bytes": 5136,
+      "sha256": "cbf1c9c0b31eba3cad7538f3b0296d9559557f7d35291e00cc508bc76d5d5671"
+    },
+    {
+      "path": "mindex_api/main.py",
+      "bytes": 14935,
+      "sha256": "05546e079196b8cbb32dd8691e8b36477bec4f2619c6b28d87e441e66bf6d762"
+    },
+    {
+      "path": "mindex_api/routers/earth.py",
+      "bytes": 58187,
+      "sha256": "4fb9d9e44cc1bfdb42883f4b37123a4adb24e678f146487145a69853b3e7d517"
+    },
+    {
+      "path": "mindex_api/routers/fungip.py",
+      "bytes": 6265,
+      "sha256": "ef530c9c4537b0f6aadaa542a0e31b46824c922888488add2c9bc4f38ce6c893"
+    },
+    {
+      "path": "mindex_api/routers/genetics.py",
+      "bytes": 22237,
+      "sha256": "558f4e719da480da3dbc0e03fb3dee3088c12ae9de7aa70e26056c2bc381e48c"
+    },
+    {
+      "path": "mindex_api/routers/observations.py",
+      "bytes": 17759,
+      "sha256": "3d4e6b949435b07eb594b51e1ede7927aa21f924ec668a5cbe73a182e40a218c"
+    },
+    {
+      "path": "mindex_api/routers/rag_retrieve.py",
+      "bytes": 4751,
+      "sha256": "c9200d32859473b1005610d7e0a90254ac9ed451f72e9a7cd94d98686badafb6"
+    },
+    {
+      "path": "mindex_api/routers/taxon.py",
+      "bytes": 30601,
+      "sha256": "6538f21087e07c59dcfa6715184a1d15282ad7c3a7fae9504897de2d07edc7c7"
+    },
+    {
+      "path": "mindex_api/routers/unified_search.py",
+      "bytes": 89746,
+      "sha256": "c476ae58c2b492ade08d07032c3a2838f5664de2a798f9fd221e48272f7cc0d8"
+    },
+    {
+      "path": "mindex_api/schemas/taxon.py",
+      "bytes": 1841,
+      "sha256": "b29378357f9df609f31f2d5119025c9f79ac9b1921a2e538e60be9d89af20d3d"
+    },
+    {
+      "path": "mindex_api/services/ancestry_public_members.py",
+      "bytes": 18427,
+      "sha256": "862526fd70c02d6cee161eb55d95a6dfce87f4ac8b226139dd339418a1b95861"
+    },
+    {
+      "path": "mindex_etl/fungip/__init__.py",
+      "bytes": 83,
+      "sha256": "2b4b51a52b500a8adb65854838e9044c152bfef0d52ef8047337d6c41c56c07d"
+    },
+    {
+      "path": "mindex_etl/fungip/catalog.py",
+      "bytes": 13651,
+      "sha256": "2504f25b41a3ce157faf7b721eb6ac695131668ba67a907477f656bfa35a2dcf"
+    },
+    {
+      "path": "mindex_etl/fungip/detail.py",
+      "bytes": 3046,
+      "sha256": "a1ccd6a1a4bc06a46f72f537662c795d183a6fd6d41b9cd95c3e4a1e054423c6"
+    },
+    {
+      "path": "mindex_etl/fungip/drafts.py",
+      "bytes": 2753,
+      "sha256": "3fab958897eb1e1197fed95d3d26e6ed53e0112831d296744daaf823c009c5eb"
+    },
+    {
+      "path": "mindex_etl/fungip/first40.py",
+      "bytes": 35350,
+      "sha256": "3fb64cd915426b946ca0038d0a4eb7ff0f17abfee822c0ae228cff94e82078ff"
+    },
+    {
+      "path": "mindex_etl/fungip/first40_detail.py",
+      "bytes": 5357,
+      "sha256": "a3b6b6ace3ad0de71b7275e05ad2a75d778d6b21316fd23de4764298dc3716a5"
+    },
+    {
+      "path": "mindex_etl/fungip/first40_importer.py",
+      "bytes": 11300,
+      "sha256": "b655243f41dc4b6de73b1cbfb7c7beb3dc9a3d8d0f7f2576acce759b13eb3cdb"
+    },
+    {
+      "path": "mindex_etl/fungip/genetic_references.py",
+      "bytes": 17962,
+      "sha256": "ac921cb2ed0c344580d05ca4707e2a651b4784ad1ba7fa3dd849aa769864237b"
+    },
+    {
+      "path": "mindex_etl/fungip/importer.py",
+      "bytes": 8912,
+      "sha256": "6aebf734260f8f95f8785b858dddce9445dd6946ed30bd096a049289dada9f7e"
+    },
+    {
+      "path": "mindex_etl/fungip/ledger.py",
+      "bytes": 11023,
+      "sha256": "cc3cd43136d7c7c8441a3d5bc54f293fd5a01ce0a5463da8c3c42636406b158e"
+    },
+    {
+      "path": "mindex_etl/fungip/metadata.py",
+      "bytes": 3382,
+      "sha256": "83afa1a6f8f92832c94886e54f30a0c7aea6f2c5a014fbad1485de4308dd9907"
+    },
+    {
+      "path": "mindex_etl/fungip/receipts.py",
+      "bytes": 15998,
+      "sha256": "544d9ffd201be23944addd6eb754144ea071891f2ac1305bcb976456dcbce249"
+    },
+    {
+      "path": "mindex_etl/fungip/stage.py",
+      "bytes": 2802,
+      "sha256": "e3d708bfc221d541a8644f61a43f72796e7c77edfe331cfef8290ca77cabb381"
+    },
+    {
+      "path": "tests/fungip_local_inputs.py",
+      "bytes": 569,
+      "sha256": "7b537df213eb9ac763b6cdd9de3cb96a6fa44f29bfbb9eb6cfd98a4ac6e5109e"
+    },
+    {
+      "path": "tests/test_ancestry_fungip_enrichment.py",
+      "bytes": 12033,
+      "sha256": "67397ff7108d198fcba285e230ea2a5129f1b201b9361add6aa9df0647f94f06"
+    },
+    {
+      "path": "tests/test_ancestry_fungip_index.py",
+      "bytes": 10323,
+      "sha256": "f7ee4d07a0d9c95d71f50e4e21cc9b05b1b5ee485861b0fa2ed3c2bc6eba51b1"
+    },
+    {
+      "path": "tests/test_batch5_search_contract.py",
+      "bytes": 10934,
+      "sha256": "64cad2d4a550b628b8646126b837e43f1b76855c1393052ccef30b62f3250b05"
+    },
+    {
+      "path": "tests/test_earth_search_read_only.py",
+      "bytes": 5176,
+      "sha256": "1cf5b7313b27dc08019e282e0d1f1a03f66e859cd23d6a5a7236edba20383151"
+    },
+    {
+      "path": "tests/test_earth_species_projection.py",
+      "bytes": 7839,
+      "sha256": "0dd2ed9fb8bef68ab1606c28bb9fc51a19ac3028dfc7823531dfb39bf8a2f624"
+    },
+    {
+      "path": "tests/test_fungip_accepted_usage.py",
+      "bytes": 10362,
+      "sha256": "bb0eae74e221eed5147b09300e47f6c915670e628d68f48df81a4d21d6cb7ea1"
+    },
+    {
+      "path": "tests/test_fungip_availability.py",
+      "bytes": 5251,
+      "sha256": "798b544da89cffad97bd16fc356cf9ba3b6562d7fd01c36c946eae9f6eb348e8"
+    },
+    {
+      "path": "tests/test_fungip_catalog.py",
+      "bytes": 5482,
+      "sha256": "fcacfb140bdbbcc90d194b0c8a041645238e4a1d248c4c27793580c1272efbe4"
+    },
+    {
+      "path": "tests/test_fungip_first40.py",
+      "bytes": 44624,
+      "sha256": "71154649a8a9a62eda8d3183a10de133ce1c8636223e8f1374fd58752b60c962"
+    },
+    {
+      "path": "tests/test_fungip_first40_importer.py",
+      "bytes": 18067,
+      "sha256": "8ea35014a74d7a18bd13f47998eb23a5abb22a4a24ba8344cc5743820515b428"
+    },
+    {
+      "path": "tests/test_fungip_genetic_references.py",
+      "bytes": 16905,
+      "sha256": "81420bd9db07cb4b45b5ca724d14bcdf3c077cf5c1e61b93d70a4412613166a3"
+    },
+    {
+      "path": "tests/test_fungip_importer.py",
+      "bytes": 5918,
+      "sha256": "1c9df251fdbdc9f1b43c2b8c7e420b5019bc3e79fc5f0a66c475513ac16b806f"
+    },
+    {
+      "path": "tests/test_fungip_real_snapshot_projection.py",
+      "bytes": 14776,
+      "sha256": "14d0fa291716adae7279c39d4b8731ddc5ef886d76d6f4ae41fd63364048384f"
+    },
+    {
+      "path": "tests/test_fungip_receipts.py",
+      "bytes": 13909,
+      "sha256": "bd092c6250458d1232a4fc7f579767058343ebe38bbbe78ae8f0a9ca0f25749a"
+    },
+    {
+      "path": "tests/test_fungip_taxon_detail.py",
+      "bytes": 6759,
+      "sha256": "73220f21c7f2dd37ae755796b607488921f254f30dfb73251326d53da97634e2"
+    },
+    {
+      "path": "tests/test_species_scientific_reads.py",
+      "bytes": 5126,
+      "sha256": "b4adce6e1d06ad7dc2346e29068a51363ed99468a0ac806249c469bef0d6f524"
+    },
+    {
+      "path": "tests/test_taxon_read_only.py",
+      "bytes": 5097,
+      "sha256": "80a0b22a5e377e85c37e7b2b830e46872ccd72389b31dec4098f42bc577d7771"
+    },
+    {
+      "path": "tests/test_unified_search_biological_schema.py",
+      "bytes": 10229,
+      "sha256": "0f315dfdcbe6fbf415026aa9777a6534f66a6babb7667cbd86e8ac66d2b3adb3"
+    },
+    {
+      "path": "tests/test_unified_search_fungip_index.py",
+      "bytes": 12555,
+      "sha256": "5b8864f2c37e7a6422ed8dd79d26b9bf8b2387450253982abb503ead586d7ac0"
+    },
+    {
+      "path": "tests/test_unified_search_read_only.py",
+      "bytes": 2754,
+      "sha256": "e321c2ba48de4feea60234a745f5eb1ef15b62608c3df8aaf6029a2dec254ac1"
+    },
+    {
+      "path": "tests/test_unified_search_session_contract.py",
+      "bytes": 10873,
+      "sha256": "bed2f63dc0fb8db757e301dd998c2e2cf5e5170d8d3382ab56459d2f07d0c189"
+    }
+  ],
+  "limits": [
+    "No captured datasets, environment files, dependency tree or application outputs included",
+    "No database, provider, full Next build, authentication or production acceptance claimed",
+    "The historical local feature branch is not a parent of this publication branch"
+  ]
+}

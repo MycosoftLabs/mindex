@@ -53,6 +53,30 @@ An unset input causes an explicit captured-data skip. A configured missing, malf
 
 Relevant input users are `test_fungip_catalog.py`, `test_fungip_accepted_usage.py`, `test_fungip_real_snapshot_projection.py` and `test_fungip_genetic_references.py`. The ordinary API and ETL entrypoints accept their data through their documented row or CLI arguments; removing the internal document artifacts does not break application imports.
 
+### Reproduce the selected offline suites
+
+From the repository root, in PowerShell with the repository's test dependencies already available:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
+$env:PYTHONDONTWRITEBYTECODE = '1'
+$featureTests = @(git diff --name-only --diff-filter=A 42b876fcfca2e86b0365e8fe8afab628d6a94705 b78e1fb59b21fd2b02c808e32dc68dfaf4be4150 -- tests | Where-Object { $_ -match '^tests/test_.*\.py$' })
+if ($LASTEXITCODE -ne 0 -or $featureTests.Count -ne 20) { throw 'Expected the 20 pinned feature test files' }
+python -B -m pytest -o addopts='' -p pytest_asyncio.plugin -p no:cacheprovider -q --tb=short @featureTests tests/test_batch5_search_contract.py tests/test_batch9_bbox_worldview_contract.py tests/test_worldview_search_contract.py
+if ($LASTEXITCODE -ne 0) { throw 'Selected offline qualification failed' }
+```
+
+With the four input variables unset, captured-data cases skip explicitly. To reproduce the captured-data run, the operator must first set each variable in the table to its separately retained exact input; do not substitute generated data. The command does not apply migrations or import into a database. A passing run does not establish database, provider, authenticated browser or deployment acceptance.
+
+The final affected/default-input check used the same environment and these explicit suites:
+
+```powershell
+python -B -m pytest -o addopts='' -p pytest_asyncio.plugin -p no:cacheprovider -q --tb=short tests/test_fungip_catalog.py tests/test_fungip_accepted_usage.py tests/test_fungip_real_snapshot_projection.py tests/test_fungip_genetic_references.py tests/test_unified_search_session_contract.py tests/test_unified_search_fungip_index.py tests/test_batch5_search_contract.py tests/test_unified_search_biological_schema.py tests/test_earth_search_read_only.py tests/test_unified_search_read_only.py
+if ($LASTEXITCODE -ne 0) { throw 'Affected offline qualification failed' }
+```
+
+[The source manifest](PUBLIC_SOURCE_MANIFEST_OCT03_2026.json) binds the 49 selected postimage files by repository-relative path, raw byte size and SHA-256. It excludes itself to avoid recursive hashing. Its source checkpoint is the code/test commit; this handoff and manifest are a subsequent documentation-only change. Line-ending conversion in a different checkout can change raw-byte hashes without changing Git's normalized text blob.
+
 ## Verification performed
 
 - 378 selected offline cases passed with the four named, privately supplied captured inputs. The run included all 20 newly added feature test files plus current-main Search, bounding-box/Worldview and Worldview Search contract suites. It exercised actual source code against synthetic sessions/transports and retained source data; it did not execute SQL against a server.
