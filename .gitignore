@@ -21,3 +21,5 @@ dist/
 # Test output
 test_output.txt
 pytest_out*.txt
+# Local credentials (never commit)
+.credentials.local

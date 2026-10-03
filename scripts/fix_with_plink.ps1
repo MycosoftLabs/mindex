@@ -2,7 +2,7 @@
 # Fix MINDEX using plink (PuTTY) with password
 
 param(
-    [string]$Password = "Mycosoft2024!"
+    [string]$Password = $env:VM_PASSWORD
 )
 
 $VM_HOST = "192.168.0.189"
