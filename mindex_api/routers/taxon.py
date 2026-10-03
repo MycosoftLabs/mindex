@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import time
+from collections import OrderedDict
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -420,12 +424,177 @@ async def _list_taxa_query(
         LIMIT :limit OFFSET :offset
         """
     )
-    count_stmt = text(f"SELECT count(*) FROM {from_clause} WHERE {where_sql}")
     result = await db.execute(stmt, params)
-    count_result = await db.execute(count_stmt, params)
-    total = int(count_result.scalar_one() or 0)
     rows = [_normalize_taxon_row(dict(row)) for row in result.mappings().all()]
+    total = await _cached_count(db, from_clause=from_clause, where_sql=where_sql, params=params)
     return rows, total
+
+
+# Bounded TTL cache for list totals and stats: counts over millions of rows are re-used
+# across pages; a short TTL keeps totals honest while bulk ingestion is running.
+_COUNT_CACHE_TTL_SECONDS = 300
+_COUNT_CACHE_MAX_ENTRIES = 1024
+_count_cache: "OrderedDict[str, tuple[float, Any]]" = OrderedDict()
+
+
+def _cache_get(key: str) -> Any:
+    hit = _count_cache.get(key)
+    if hit is None or time.monotonic() - hit[0] > _COUNT_CACHE_TTL_SECONDS:
+        _count_cache.pop(key, None)
+        return None
+    _count_cache.move_to_end(key)
+    return hit[1]
+
+
+def _cache_put(key: str, value: Any) -> None:
+    _count_cache[key] = (time.monotonic(), value)
+    _count_cache.move_to_end(key)
+    while len(_count_cache) > _COUNT_CACHE_MAX_ENTRIES:
+        _count_cache.popitem(last=False)
+
+
+async def _cached_count(db: AsyncSession, *, from_clause: str, where_sql: str, params: dict[str, Any]) -> int:
+    filters = {k: v for k, v in params.items() if k not in ("limit", "offset")}
+    key = json.dumps([from_clause, where_sql, filters], sort_keys=True, default=str)
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    count_result = await db.execute(text(f"SELECT count(*) FROM {from_clause} WHERE {where_sql}"), filters)
+    total = int(count_result.scalar_one() or 0)
+    _cache_put(key, total)
+    return total
+
+
+# Sources abbreviate ranks differently (MycoBank: "sp.", "gen.", ...). A rank filter matches every
+# spelling of the same rank so species totals include all sources.
+_RANK_ALIASES: dict[str, tuple[str, ...]] = {
+    "species": ("species", "sp."),
+    "genus": ("genus", "gen."),
+    "family": ("family", "fam."),
+    "subspecies": ("subspecies", "subsp."),
+    "variety": ("variety", "var."),
+    "form": ("form", "f."),
+    "section": ("section", "sect."),
+    "subgenus": ("subgenus", "subgen."),
+    "order": ("order", "ord."),
+    "class": ("class", "cl."),
+    "phylum": ("phylum", "div.", "phyl."),
+}
+
+
+def _rank_variants(rank: str) -> list[str]:
+    normalized = rank.strip().lower()
+    for canonical, variants in _RANK_ALIASES.items():
+        if normalized in variants:
+            return list(variants)
+    return [rank.strip()]
+
+
+def _like_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+_PAGE_COUNT_COLUMNS = """
+            (SELECT COUNT(*)::bigint FROM obs.observation o WHERE o.taxon_id = page.id) AS obs_count,
+            (SELECT COUNT(*)::bigint FROM media.image i WHERE i.taxon_id = page.id) AS image_count,
+            (SELECT COUNT(*)::bigint FROM media.video v WHERE v.taxon_id = page.id) AS video_count,
+            (SELECT COUNT(*)::bigint FROM media.audio a WHERE a.taxon_id = page.id) AS audio_count,
+            (SELECT COUNT(*)::bigint FROM bio.genome g WHERE g.taxon_id = page.id) AS genome_count,
+            (SELECT COUNT(*)::bigint FROM bio.taxon_compound tc WHERE tc.taxon_id = page.id) AS compound_link_count,
+            (SELECT COUNT(*)::bigint FROM bio.taxon_interaction ti
+             WHERE ti.source_taxon_id = page.id OR ti.target_taxon_id = page.id) AS interaction_count,
+            (SELECT COUNT(*)::bigint FROM bio.publication_taxon pt WHERE pt.taxon_id = page.id) AS publication_count,
+            (SELECT COUNT(*)::bigint FROM bio.taxon_characteristic c WHERE c.taxon_id = page.id) AS characteristic_count
+"""
+
+_METADATA_OBS_EXPR = (
+    "CASE WHEN (metadata->>'observations_count') ~ '^[0-9]+$' "
+    "THEN (metadata->>'observations_count')::bigint ELSE 0 END"
+)
+
+
+async def _list_taxa_core_page(
+    db: AsyncSession,
+    *,
+    where_sql: str,
+    params: dict[str, Any],
+    by_popularity: bool,
+    order_normalized: str,
+) -> tuple[list[dict[str, Any]], int]:
+    """Filter, sort and page on core.taxon first; per-taxon counts only for the returned page."""
+    order_expr = _METADATA_OBS_EXPR if by_popularity else "canonical_name"
+    stmt = text(
+        f"""
+        SELECT page.id, page.canonical_name, page.rank, page.common_name, page.author, page.description,
+               page.source, page.metadata, page.kingdom, page.lineage, page.lineage_ids, page.external_ids,
+               page.created_at, page.updated_at,
+               {_PAGE_COUNT_COLUMNS}
+        FROM (
+            SELECT id, canonical_name, rank, common_name, COALESCE(author, authority) AS author,
+                   description, source, metadata, kingdom,
+                   lineage, lineage_ids, external_ids, created_at, updated_at,
+                   {order_expr} AS sort_key
+            FROM core.taxon
+            WHERE {where_sql}
+            ORDER BY {order_expr} {order_normalized}, canonical_name ASC, id ASC
+            LIMIT :limit OFFSET :offset
+        ) page
+        ORDER BY page.sort_key {order_normalized}, page.canonical_name ASC, page.id ASC
+        """
+    )
+    result = await db.execute(stmt, params)
+    rows = [_normalize_taxon_row(dict(row)) for row in result.mappings().all()]
+    total = await _cached_count(db, from_clause="core.taxon", where_sql=where_sql, params=params)
+    return rows, total
+
+
+@router.get("/stats")
+async def taxa_stats(db: AsyncSession = Depends(get_db_session)) -> dict[str, Any]:
+    """Real stored species totals by kingdom and source (cached briefly; ingestion may be running)."""
+    cached = _cache_get("taxa_stats")
+    if cached is not None:
+        return cached
+    species_ranks = list(_RANK_ALIASES["species"])
+    try:
+        kingdom_rows = (await db.execute(
+            text(
+                "SELECT COALESCE(kingdom, 'Undesignated') AS kingdom, count(*)::bigint AS species "
+                "FROM core.taxon WHERE rank = ANY(:ranks) GROUP BY 1 ORDER BY 2 DESC"
+            ),
+            {"ranks": species_ranks},
+        )).mappings().all()
+        primary_rows = (await db.execute(
+            text(
+                "SELECT COALESCE(source, 'unknown') AS source, count(*)::bigint AS species "
+                "FROM core.taxon WHERE rank = ANY(:ranks) GROUP BY 1 ORDER BY 2 DESC"
+            ),
+            {"ranks": species_ranks},
+        )).mappings().all()
+        linked_rows = (await db.execute(
+            text(
+                "SELECT x.source, count(DISTINCT x.taxon_id)::bigint AS species "
+                "FROM core.taxon_external_id x JOIN core.taxon t ON t.id = x.taxon_id "
+                "WHERE t.rank = ANY(:ranks) GROUP BY 1 ORDER BY 2 DESC"
+            ),
+            {"ranks": species_ranks},
+        )).mappings().all()
+        taxa_total = int((await db.execute(text("SELECT count(*) FROM core.taxon"))).scalar_one() or 0)
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Taxon stats unavailable.")
+    by_kingdom = [{"kingdom": r["kingdom"], "species": int(r["species"])} for r in kingdom_rows]
+    payload = {
+        "species_total": sum(row["species"] for row in by_kingdom),
+        "taxa_total": taxa_total,
+        "species_ranks": species_ranks,
+        "by_kingdom": by_kingdom,
+        "by_primary_source": [{"source": r["source"], "species": int(r["species"])} for r in primary_rows],
+        "by_linked_source": [{"source": r["source"], "species": int(r["species"])} for r in linked_rows],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cache_ttl_seconds": _COUNT_CACHE_TTL_SECONDS,
+    }
+    _cache_put("taxa_stats", payload)
+    return payload
 
 
 @router.get("", response_model=TaxonListResponse)
@@ -434,7 +603,7 @@ async def list_taxa(
     db: AsyncSession = Depends(get_db_session),
     ids: Optional[str] = Query(None, description="Comma-separated taxon UUIDs for batch lookup (e.g., ?ids=uuid1,uuid2)."),
     q: Optional[str] = Query(None, description="Free-text search across canonical/common names."),
-    rank: Optional[str] = Query(None, description="Exact rank filter."),
+    rank: Optional[str] = Query(None, description="Rank filter; abbreviations match (species also matches 'sp.')."),
     source: Optional[str] = Query(None, description="Exact source filter (e.g., inat, gbif, mycobank)."),
     prefix: Optional[str] = Query(None, description="Prefix match on canonical_name (e.g., 'A' for A*)."),
     kingdom: Optional[str] = Query(
@@ -458,20 +627,19 @@ async def list_taxa(
         "offset": pagination.offset,
     }
 
-    if q:
-        q_pattern = f"%{q}%"
+    if q and q.strip():
+        q_pattern = f"%{_like_escape(q.strip())}%"
         where_clauses.append("(canonical_name ILIKE :q_pattern OR common_name ILIKE :q_pattern)")
         params["q_pattern"] = q_pattern
-    if rank:
-        where_clauses.append("rank = :rank")
-        params["rank"] = rank
+    if rank and rank.strip():
+        where_clauses.append("rank = ANY(:rank_variants)")
+        params["rank_variants"] = _rank_variants(rank)
     if source:
         where_clauses.append("source = :source")
         params["source"] = source
-    if prefix:
-        prefix_pattern = f"{prefix}%"
-        where_clauses.append("canonical_name ILIKE :prefix_pattern")
-        params["prefix_pattern"] = prefix_pattern
+    if prefix and prefix.strip():
+        where_clauses.append("lower(canonical_name) LIKE :prefix_pattern")
+        params["prefix_pattern"] = f"{_like_escape(prefix.strip().lower())}%"
     if ids:
         id_list = [x.strip() for x in ids.split(",") if x.strip()]
         if id_list:
@@ -579,25 +747,35 @@ async def list_taxa(
 
     rows: list[dict[str, Any]] = []
     total = 0
-    for from_clause in ("bio.taxon_full", rich_fallback_from, minimal_fallback_from):
-        try:
-            rows, total = await _list_taxa_query(
-                db,
-                from_clause=from_clause,
-                where_sql=where_sql,
-                params=params,
-                order_expr=order_expr if from_clause == "bio.taxon_full" else fallback_order,
-                order_normalized=order_normalized,
-            )
-            break
-        except Exception:
-            await db.rollback()
-            continue
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Taxonomy list unavailable (core.taxon query failed).",
+    try:
+        rows, total = await _list_taxa_core_page(
+            db,
+            where_sql=where_sql,
+            params=params,
+            by_popularity=order_by_normalized != "canonical_name",
+            order_normalized=order_normalized,
         )
+    except Exception:
+        await db.rollback()
+        for from_clause in ("bio.taxon_full", rich_fallback_from, minimal_fallback_from):
+            try:
+                rows, total = await _list_taxa_query(
+                    db,
+                    from_clause=from_clause,
+                    where_sql=where_sql,
+                    params=params,
+                    order_expr=order_expr if from_clause == "bio.taxon_full" else fallback_order,
+                    order_normalized=order_normalized,
+                )
+                break
+            except Exception:
+                await db.rollback()
+                continue
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Taxonomy list unavailable (core.taxon query failed).",
+            )
 
     taxon_uuids = []
     for row in rows:
