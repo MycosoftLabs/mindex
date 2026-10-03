@@ -212,12 +212,19 @@ cluster, so it covers initdb, PostgreSQL, pytest, Python API processes, and Type
 workers together. The bound is a hard configured ceiling, not a measured peak-RSS
 result. The test plan uses one pytest process, one loopback PostgreSQL 17.11 server
 (`max_connections=12`, `shared_buffers=64MB`, `work_mem=4MB`), and at most one
-TypeScript worker at a time (`NODE_OPTIONS=--max-old-space-size=384`). Each worker
-subprocess has a 30-second test timeout, the post-commit child has a 15-second
-timeout, and the outer pytest process has a 240-second hard timeout that terminates
-only its own process tree before task-owned PostgreSQL cleanup. The API test binds
-its ephemeral HTTP socket to `127.0.0.1`; PostgreSQL listens only on `127.0.0.1`.
-This is a configured resource envelope, not a measured peak-RSS result; the
+TypeScript worker at a time (`NODE_OPTIONS=--max-old-space-size=384`). The outer
+supervisor launches the runner suspended into the capped job before it can start
+children, and its single 240-second deadline includes dependency preflight, fixture
+initialization, PostgreSQL startup, tests, and cleanup. It begins bounded teardown
+at 230 seconds and reaps the task job within the remaining ten seconds. PostgreSQL
+stop failure is fatal; fallback termination verifies the PID against the exact
+task-owned PostgreSQL executable. Pytest stdout and stderr stream into files with
+a combined hard limit of 4 MiB; bytes beyond the limit are discarded and the
+pytest process tree is terminated. Before imports or child launches, the runner
+clears ambient environment variables and restores only the OS/runtime allowlist
+plus explicit resource-slot markers and test variables. The API test binds its
+ephemeral HTTP socket to `127.0.0.1`; PostgreSQL listens only on `127.0.0.1`.
+This is an enforced resource ceiling, not a measured peak-RSS result; the
 coordinator still needs to allocate and measure the slot before execution.
 
 The test refuses remote addresses, query overrides and existing app schemas,
@@ -253,6 +260,31 @@ Required before actual end-to-end qualification:
 - Verify actual AWS KMS/Object Lock/exact-version readback through brief 09,
   production restore durability for the admitted chart/dataset PostgreSQL records, MYCA
   indexing receipt/readback, and NAS exact replica proof if required.
+
+## Draft PR dependency and merge order
+
+FormSpace MINDEX PR #21 is based on the common ancestor `42b876fc` and includes
+shared-retention source that predates open PR #20 (`9f46f161`,
+`codex/retention-s3-delete-markers-review-oct03`). Keep PR #21 draft and do not
+merge it before PR #20. The shared verifier files `mindex_api/retention/identity.py`
+and `mindex_api/routers/retention.py` are byte-identical between those heads, but
+the retained-object cleanup implementation is not. PR #20 adds migrations
+`20261002_private_orphan_reconciliation.sql` and
+`20261003_backfill_preupgrade_orphan_reconciliation.sql`; bounded exact-key
+version/delete-marker reconciliation for versionless archives; outbox recovery
+for the crash-after-upload-before-reference gap; fenced deletion proofs; and
+restore/backfill tests. The FormSpace branch lacks those migrations, removes that
+reconciliation path, queues purge only when an object version is already stored,
+and drops the associated tests. Landing PR #21 as-is after PR #20 could therefore
+replace the newer crash-gap recovery behavior with its older snapshot.
+
+Required order: merge PR #20 first, then restack FormSpace commits on its merged
+head while preserving the newer retention implementation and migrations. Regenerate
+the source manifest and rerun the focused retention reconciliation/backfill tests
+plus the FormSpace signed-JWT/API/worker test before marking PR #21 ready. The
+current runtime source bindings remain the fixed worker hashes below and the exact
+Website source branch/head validated by the qualification runner. The source-only
+PR is reviewable now; deployed/full-app qualification remains separate.
 
 ## Migration, cancellation, and manual release handoff
 

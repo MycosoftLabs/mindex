@@ -1,11 +1,294 @@
 [CmdletBinding()]
 param(
     [switch]$Run,
-    [switch]$TestSourceGuard
+    [switch]$TestSourceGuard,
+    [switch]$TestProcessSupervisor,
+    [switch]$InternalRun
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Remove ambient application/deployment credentials before any dependency imports
+# or child process starts. Runtime-specific values are added explicitly below.
+$qualificationEnvironmentAllowlist = @(
+    'PATH','SystemRoot','WINDIR','SystemDrive','TEMP','TMP','USERPROFILE','HOMEDRIVE','HOMEPATH','APPDATA','LOCALAPPDATA',
+    'ComSpec','PATHEXT','PSModulePath','PROCESSOR_ARCHITECTURE','PROCESSOR_LEVEL',
+    'PROCESSOR_REVISION','NUMBER_OF_PROCESSORS','MYCOSOFT_RESOURCE_SLOT_CONFIRMED',
+    'MYCOSOFT_RESOURCE_SLOT_ID','FORMSPACE_QUALIFICATION_DEADLINE_UTC',
+    'RETENTION_TEST_ALLOW_DISPOSABLE','RETENTION_TEST_DSN','FORMSPACE_WEBSITE_CHECKOUT',
+    'FORMSPACE_TSX_CLI','NODE_OPTIONS'
+)
+$qualificationEnvironment = [Environment]::GetEnvironmentVariables('Process')
+foreach ($environmentName in @($qualificationEnvironment.Keys)) {
+    if ($environmentName -notin $qualificationEnvironmentAllowlist) {
+        [Environment]::SetEnvironmentVariable([string]$environmentName, $null, 'Process')
+    }
+}
+$qualificationInvocationStart = [DateTimeOffset]::UtcNow
+
+if (-not ('FormSpaceQualificationJob' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+public sealed class FormSpaceCaptureResult {
+    public int ExitCode; public bool TimedOut; public bool OutputLimitExceeded; public bool Reaped;
+}
+public static class FormSpaceQualificationJob {
+    [StructLayout(LayoutKind.Sequential)] struct BASIC_LIMITS {
+        public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+        public uint LimitFlags; public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+        public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass, SchedulingClass;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct IO_COUNTERS {
+        public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount;
+        public ulong ReadTransferCount, WriteTransferCount, OtherTransferCount;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct EXTENDED_LIMITS {
+        public BASIC_LIMITS BasicLimitInformation; public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] struct STARTUPINFO {
+        public uint cb; public string lpReserved, lpDesktop, lpTitle;
+        public uint dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+        public ushort wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct PROCESS_INFORMATION {
+        public IntPtr hProcess, hThread; public uint dwProcessId, dwThreadId;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct BASIC_PROCESS_ID_LIST {
+        public uint NumberOfAssignedProcesses, NumberOfProcessIdsInList; public UIntPtr FirstProcessId;
+    }
+    sealed class CAPTURE_STATE { public long Total; public volatile bool Exceeded; }
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref EXTENDED_LIMITS info, uint length);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint length, out uint returned);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool CreateProcess(string app, StringBuilder command, IntPtr procAttr, IntPtr threadAttr, bool inherit, uint flags, IntPtr env, string cwd, ref STARTUPINFO startup, out PROCESS_INFORMATION info);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateProcess(IntPtr process, uint exitCode);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+    const uint PROCESS_TERMINATE=0x0001, SYNCHRONIZE=0x00100000, CREATE_SUSPENDED=0x00000004, CREATE_NO_WINDOW=0x08000000;
+    public static IntPtr CreateBoundedJob(ulong memoryBytes, uint maxProcesses) {
+        return CreateBoundedJob(memoryBytes,maxProcesses,true);
+    }
+    public static IntPtr CreateBoundedJob(ulong memoryBytes, uint maxProcesses, bool killOnClose) {
+        IntPtr job = CreateJobObject(IntPtr.Zero, null);
+        if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        EXTENDED_LIMITS limits = new EXTENDED_LIMITS();
+        limits.BasicLimitInformation.LimitFlags = 0x00000200 | 0x00000008 | (killOnClose ? 0x00002000u : 0u);
+        limits.BasicLimitInformation.ActiveProcessLimit = maxProcesses; limits.JobMemoryLimit=(UIntPtr)memoryBytes;
+        if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(EXTENDED_LIMITS)))) {
+            int error=Marshal.GetLastWin32Error(); CloseHandle(job); throw new Win32Exception(error);
+        }
+        return job;
+    }
+    public static void AssignCurrentProcess(IntPtr job) {
+        uint pid=(uint)Process.GetCurrentProcess().Id; IntPtr proc=OpenProcess(0x0001|0x0100,false,pid);
+        if (proc==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try { if (!AssignProcessToJobObject(job,proc)) throw new Win32Exception(Marshal.GetLastWin32Error()); }
+        finally { CloseHandle(proc); }
+    }
+    public static IntPtr StartSuspendedInJob(IntPtr job, string executable, string arguments, string cwd, out uint pid) {
+        STARTUPINFO si=new STARTUPINFO(); si.cb=(uint)Marshal.SizeOf(typeof(STARTUPINFO));
+        PROCESS_INFORMATION pi; StringBuilder command=new StringBuilder("\""+executable+"\" "+arguments);
+        if (!CreateProcess(executable,command,IntPtr.Zero,IntPtr.Zero,true,CREATE_SUSPENDED|CREATE_NO_WINDOW,IntPtr.Zero,cwd,ref si,out pi))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        try {
+            bool alreadyInJob;
+            if (!IsProcessInJob(pi.hProcess,job,out alreadyInJob)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (!alreadyInJob && !AssignProcessToJobObject(job,pi.hProcess)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            uint resumed=ResumeThread(pi.hThread); if (resumed==0xFFFFFFFF) throw new Win32Exception(Marshal.GetLastWin32Error());
+            pid=pi.dwProcessId; return pi.hProcess;
+        } catch { TerminateProcess(pi.hProcess, 1); WaitForSingleObject(pi.hProcess, 3000); CloseHandle(pi.hProcess); throw; }
+        finally { CloseHandle(pi.hThread); }
+    }
+    public static uint Wait(IntPtr process, uint ms) { return WaitForSingleObject(process,ms); }
+    public static uint ExitCode(IntPtr process) { uint code; if(!GetExitCodeProcess(process,out code)) throw new Win32Exception(Marshal.GetLastWin32Error()); return code; }
+    public static uint CurrentPid() { return (uint)Process.GetCurrentProcess().Id; }
+    public static uint[] JobPids(IntPtr job) {
+        int cap=16, offset=8; IntPtr buffer=Marshal.AllocHGlobal(offset+cap*IntPtr.Size);
+        try {
+            uint returned;
+            if (!QueryInformationJobObject(job,3,buffer,(uint)(offset+cap*IntPtr.Size),out returned)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            BASIC_PROCESS_ID_LIST list=(BASIC_PROCESS_ID_LIST)Marshal.PtrToStructure(buffer,typeof(BASIC_PROCESS_ID_LIST));
+            if (list.NumberOfProcessIdsInList>cap) throw new InvalidOperationException("Job process list exceeded its configured capacity.");
+            uint[] pids=new uint[list.NumberOfProcessIdsInList];
+            for(int i=0;i<pids.Length;i++) pids[i]=(uint)Marshal.ReadIntPtr(buffer,offset+i*IntPtr.Size).ToInt64();
+            return pids;
+        } finally { Marshal.FreeHGlobal(buffer); }
+    }
+    public static void TerminateJobMembersExcept(IntPtr job, uint keepPid) {
+        foreach(uint pid in JobPids(job)) {
+            if(pid==keepPid) continue;
+            IntPtr proc=OpenProcess(PROCESS_TERMINATE|SYNCHRONIZE,false,pid);
+            if(proc==IntPtr.Zero) continue;
+            try { if(!TerminateProcess(proc,137) && Marshal.GetLastWin32Error()!=5) throw new Win32Exception(Marshal.GetLastWin32Error()); }
+            finally { CloseHandle(proc); }
+        }
+    }
+    static void CopyBounded(Stream input, string path, CAPTURE_STATE state, long byteLimit) {
+        byte[] buffer=new byte[8192];
+        using(FileStream output=new FileStream(path,FileMode.Create,FileAccess.Write,FileShare.Read)) {
+            int count;
+            while((count=input.Read(buffer,0,buffer.Length))>0) {
+                long previous=Interlocked.Add(ref state.Total,count)-count;
+                int allowed=(int)Math.Max(0,Math.Min(count,byteLimit-previous));
+                if(allowed>0) output.Write(buffer,0,allowed);
+                if(allowed<count) state.Exceeded=true;
+            }
+            output.Flush(true);
+        }
+    }
+    static bool KillProcessTree(Process process) {
+        Process killer=null;
+        try {
+            ProcessStartInfo psi=new ProcessStartInfo(); psi.FileName=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"taskkill.exe");
+            psi.Arguments="/PID "+process.Id+" /T /F"; psi.CreateNoWindow=true; psi.UseShellExecute=false;
+            killer=Process.Start(psi);
+            if(killer!=null && !killer.WaitForExit(3000)) { try{killer.Kill();}catch{}; killer.WaitForExit(1000); }
+        } catch {}
+        try {
+            if(!process.WaitForExit(3000)) { process.Kill(); if(!process.WaitForExit(3000)) return false; }
+            return true;
+        } catch { return false; }
+    }
+    public static FormSpaceCaptureResult RunBoundedCapture(string executable, string arguments, string cwd, string stdoutPath, string stderrPath, int timeoutMs, long byteLimit) {
+        FormSpaceCaptureResult result=new FormSpaceCaptureResult(); result.Reaped=true;
+        ProcessStartInfo psi=new ProcessStartInfo(); psi.FileName=executable; psi.Arguments=arguments; psi.WorkingDirectory=cwd;
+        psi.UseShellExecute=false; psi.CreateNoWindow=true; psi.RedirectStandardOutput=true; psi.RedirectStandardError=true;
+        using(Process process=new Process()) {
+            process.StartInfo=psi; if(!process.Start()) throw new InvalidOperationException("Could not start bounded pytest process.");
+            CAPTURE_STATE state=new CAPTURE_STATE();
+            Task stdout=Task.Run(()=>CopyBounded(process.StandardOutput.BaseStream,stdoutPath,state,byteLimit));
+            Task stderr=Task.Run(()=>CopyBounded(process.StandardError.BaseStream,stderrPath,state,byteLimit));
+            Stopwatch timer=Stopwatch.StartNew();
+            while(true) {
+                if(state.Exceeded) { result.OutputLimitExceeded=true; break; }
+                int remaining=timeoutMs-(int)timer.ElapsedMilliseconds;
+                if(remaining<=0) { result.TimedOut=true; break; }
+                if(process.WaitForExit(Math.Min(50,remaining))) break;
+            }
+            if(result.OutputLimitExceeded || result.TimedOut) result.Reaped=KillProcessTree(process);
+            else { result.ExitCode=process.ExitCode; }
+            try { if(!Task.WaitAll(new Task[]{stdout,stderr},3000)) result.Reaped=false; }
+            catch { result.Reaped=false; }
+            if((result.OutputLimitExceeded || result.TimedOut) && !result.Reaped) return result;
+            if(!result.OutputLimitExceeded && !result.TimedOut) result.ExitCode=process.ExitCode;
+        }
+        return result;
+    }
+    public static void CloseHandleSafe(IntPtr handle) { if(handle!=IntPtr.Zero) CloseHandle(handle); }
+}
+'@
+}
+
+function Test-QualificationProcessSupervisor {
+    $hostExe = (Get-Process -Id $PID).Path
+    $cwd = [IO.Path]::GetDirectoryName($hostExe)
+    $job = [FormSpaceQualificationJob]::CreateBoundedJob(256MB, 4)
+    $ok = $false
+    try {
+        [uint32]$dummyPid = 0
+        $dummy = [FormSpaceQualificationJob]::StartSuspendedInJob($job, $hostExe, '-NoProfile -Command "Start-Sleep -Milliseconds 250"', $cwd, [ref]$dummyPid)
+        if ([FormSpaceQualificationJob]::Wait($dummy, 5000) -ne 0) { throw 'Dummy supervised child did not exit within five seconds.' }
+        if ([FormSpaceQualificationJob]::ExitCode($dummy) -ne 0) { throw 'Dummy supervised child returned a nonzero exit code.' }
+        [FormSpaceQualificationJob]::CloseHandleSafe($dummy)
+
+        $timed = [FormSpaceQualificationJob]::CreateBoundedJob(256MB, 4)
+        try {
+            [uint32]$timedPid = 0
+            $slow = [FormSpaceQualificationJob]::StartSuspendedInJob($timed, $hostExe, '-NoProfile -Command "Start-Sleep -Seconds 30"', $cwd, [ref]$timedPid)
+            if ([FormSpaceQualificationJob]::Wait($slow, 100) -eq 0) { throw 'Timeout control child unexpectedly exited before its deadline.' }
+            [FormSpaceQualificationJob]::TerminateJobMembersExcept($timed, [FormSpaceQualificationJob]::CurrentPid())
+            if ([FormSpaceQualificationJob]::Wait($slow, 5000) -ne 0) { throw 'Timed-out dummy child was not reaped within five seconds.' }
+            [FormSpaceQualificationJob]::CloseHandleSafe($slow)
+        } finally { [FormSpaceQualificationJob]::CloseHandleSafe($timed) }
+        $ok = $true
+    } finally { [FormSpaceQualificationJob]::CloseHandleSafe($job) }
+    if (-not $ok) { throw 'Process supervisor controls failed.' }
+    Write-Output 'Process supervisor controls passed: suspended assignment, hard-job setup, natural exit, timeout termination, and bounded reap.'
+
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $captureScratch = [IO.Path]::GetFullPath((Join-Path $tempRoot ('formspace-capture-guard-' + [Guid]::NewGuid().ToString('N'))))
+    if (-not $captureScratch.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -or (Test-Path -LiteralPath $captureScratch)) {
+        throw 'Refusing an invalid or pre-existing capture-guard test path.'
+    }
+    New-Item -ItemType Directory -Path $captureScratch | Out-Null
+    try {
+        $captureA = Join-Path $captureScratch 'stdout.bin'
+        $captureB = Join-Path $captureScratch 'stderr.bin'
+        [IO.File]::WriteAllBytes($captureA, [byte[]](1..32))
+        [IO.File]::WriteAllBytes($captureB, [byte[]](1..32))
+        if ((Get-CapturedOutputBytes @($captureA, $captureB)) -ne 64) { throw 'Combined output byte counter mismeasured a within-limit capture.' }
+        [IO.File]::AppendAllText($captureB, 'x')
+        if ((Get-CapturedOutputBytes @($captureA, $captureB)) -le 64) { throw 'Combined output byte counter accepted an over-limit capture.' }
+        $boundedOut = Join-Path $captureScratch 'bounded.stdout'
+        $boundedErr = Join-Path $captureScratch 'bounded.stderr'
+        $bounded = [FormSpaceQualificationJob]::RunBoundedCapture($hostExe,
+            '-NoProfile -Command "[Console]::Write(''x'' * 4096); Start-Sleep -Seconds 30"',
+            $cwd, $boundedOut, $boundedErr, 5000, 64)
+        if (-not $bounded.OutputLimitExceeded -or -not $bounded.Reaped) { throw 'Bounded capture control did not stop and reap an over-limit dummy process.' }
+        if ((Get-CapturedOutputBytes @($boundedOut, $boundedErr)) -gt 64) { throw 'Bounded capture control wrote more bytes than its hard cap.' }
+    } finally {
+        if ((Test-Path -LiteralPath $captureScratch) -and $captureScratch.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            Remove-Item -LiteralPath $captureScratch -Recurse -Force
+        }
+    }
+    $selfJob = [FormSpaceQualificationJob]::CreateBoundedJob(1152MB, 12, $false)
+    try { [FormSpaceQualificationJob]::AssignCurrentProcess($selfJob) }
+    finally { [FormSpaceQualificationJob]::CloseHandleSafe($selfJob) }
+    Write-Output 'Capture guard passed: combined stdout/stderr bytes measured and over-limit content detected.'
+}
+
+if ($Run -and -not $InternalRun) {
+    if ($env:MYCOSOFT_RESOURCE_SLOT_CONFIRMED -ne 'true' -or [string]::IsNullOrWhiteSpace($env:MYCOSOFT_RESOURCE_SLOT_ID)) {
+        throw 'Refusing runtime startup without the coordinator-granted slot marker and slot ID.'
+    }
+    $deadlineUnix = $qualificationInvocationStart.AddSeconds(240).ToUnixTimeSeconds()
+    $env:FORMSPACE_QUALIFICATION_DEADLINE_UTC = [string]$deadlineUnix
+    $outerJob = [FormSpaceQualificationJob]::CreateBoundedJob(1152MB, 12)
+    try { [FormSpaceQualificationJob]::AssignCurrentProcess($outerJob) }
+    catch { throw 'Windows Job Object could not attach the supervisor; refusing runtime startup.' }
+    $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    $hostExe = (Get-Process -Id $PID).Path
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Run -InternalRun'
+    if ($TestSourceGuard) { $arguments += ' -TestSourceGuard' }
+    if ($TestProcessSupervisor) { $arguments += ' -TestProcessSupervisor' }
+    [uint32]$runnerPid = 0
+    $runner = [FormSpaceQualificationJob]::StartSuspendedInJob($outerJob, $hostExe, $arguments, $repoRoot, [ref]$runnerPid)
+    $hardDeadlineMs = [int64]$deadlineUnix * 1000
+    $runnerWaitMs = [int][Math]::Max(0, [Math]::Min(230000, $hardDeadlineMs - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - 10000))
+    $waitResult = [FormSpaceQualificationJob]::Wait($runner, [uint32]$runnerWaitMs)
+    if ($waitResult -ne 0) {
+        Write-Warning 'The bounded setup/test phase expired; terminating only this runner Job Object process tree.'
+        [FormSpaceQualificationJob]::TerminateJobMembersExcept($outerJob, [FormSpaceQualificationJob]::CurrentPid())
+        if ([FormSpaceQualificationJob]::Wait($runner, 10000) -ne 0) {
+            Write-Warning 'The runner process handle did not signal within the ten-second reap bound; closing the runner job will kill remaining task-owned processes.'
+        }
+        [FormSpaceQualificationJob]::CloseHandleSafe($runner)
+        exit 124
+    }
+    $runnerExit = [FormSpaceQualificationJob]::ExitCode($runner)
+    [FormSpaceQualificationJob]::CloseHandleSafe($runner)
+    $leftovers = @([FormSpaceQualificationJob]::JobPids($outerJob) | Where-Object { $_ -ne [FormSpaceQualificationJob]::CurrentPid() })
+    if ($leftovers.Count -gt 0) {
+        [FormSpaceQualificationJob]::TerminateJobMembersExcept($outerJob, [FormSpaceQualificationJob]::CurrentPid())
+        if ($runnerExit -eq 0) { $runnerExit = 1 }
+        Write-Warning 'Stopped leftover processes that remained in this qualification Job Object after runner exit.'
+    }
+    exit [int]$runnerExit
+}
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $repoPrefix = $repoRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -33,54 +316,68 @@ $websiteWorkerSourcePins = @{
 }
 $pytestTimeoutSeconds = 240
 $nodeHeapLimitMiB = 384
-$jobMemoryLimitMiB = 1152
+$qualificationDeadlineUnix = if ($env:FORMSPACE_QUALIFICATION_DEADLINE_UTC) { [long]$env:FORMSPACE_QUALIFICATION_DEADLINE_UTC } else { $null }
+$captureLimitBytes = 4MB
+$cleanupReserveSeconds = 15
 
-if (-not ('FormSpaceQualificationJob' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class FormSpaceQualificationJob {
-    [StructLayout(LayoutKind.Sequential)] struct BASIC_LIMITS {
-        public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
-        public uint LimitFlags; public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
-        public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass, SchedulingClass;
+function Get-RemainingQualificationMilliseconds([switch]$AllowZero) {
+    if ($null -eq $qualificationDeadlineUnix) { return 240000 }
+    $remaining = [int64]$qualificationDeadlineUnix * 1000 - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    if ($remaining -le 0 -and -not $AllowZero) { throw 'The total 240-second qualification deadline expired.' }
+    return [int][Math]::Max(0, [Math]::Min([int]::MaxValue, $remaining))
+}
+
+function Get-CapturedOutputBytes([string[]]$Paths) {
+    [int64]$total = 0
+    foreach ($path in $Paths) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) { $total += (Get-Item -LiteralPath $path).Length }
     }
-    [StructLayout(LayoutKind.Sequential)] struct IO_COUNTERS {
-        public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount;
-        public ulong ReadTransferCount, WriteTransferCount, OtherTransferCount;
-    }
-    [StructLayout(LayoutKind.Sequential)] struct EXTENDED_LIMITS {
-        public BASIC_LIMITS BasicLimitInformation; public IO_COUNTERS IoInfo;
-        public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
-    }
-    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
-    [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref EXTENDED_LIMITS info, uint length);
-    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
-    [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
-    [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
-    public static IntPtr CreateBoundedJob(ulong memoryBytes, uint maxProcesses) {
-        IntPtr job = CreateJobObject(IntPtr.Zero, null);
-        if (job == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-        EXTENDED_LIMITS limits = new EXTENDED_LIMITS();
-        limits.BasicLimitInformation.LimitFlags = 0x00000200 | 0x00002000 | 0x00000008;
-        limits.BasicLimitInformation.ActiveProcessLimit = maxProcesses;
-        limits.JobMemoryLimit = (UIntPtr)memoryBytes;
-        if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(EXTENDED_LIMITS)))) {
-            int error = Marshal.GetLastWin32Error(); CloseHandle(job); throw new System.ComponentModel.Win32Exception(error);
+    return $total
+}
+
+function Stop-TaskOwnedProcessTree([Diagnostics.Process]$Process, [int]$ReapMilliseconds = 3000) {
+    if ($null -eq $Process) { return $true }
+    try { $Process.Refresh(); if ($Process.HasExited) { return $true } } catch { return $true }
+    $killer = $null
+    try {
+        $killer = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\taskkill.exe') `
+            -ArgumentList @('/PID', [string]$Process.Id, '/T', '/F') -PassThru -WindowStyle Hidden
+        if (-not $killer.WaitForExit(3000)) {
+            try { $killer.Kill() } catch { }
+            [void]$killer.WaitForExit(1000)
         }
-        return job;
-    }
-    public static void AssignCurrentProcess(IntPtr job) {
-        uint pid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
-        IntPtr process = OpenProcess(0x0100 | 0x0200, false, pid);
-        if (process == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-        try { if (!AssignProcessToJobObject(job, process)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()); }
-        finally { CloseHandle(process); }
-    }
-    public static void CloseJob(IntPtr job) { if (job != IntPtr.Zero) CloseHandle(job); }
+    } catch { Write-Warning "Bounded taskkill attempt failed for owned PID $($Process.Id): $($_.Exception.Message)" }
+    try {
+        if (-not $Process.WaitForExit($ReapMilliseconds)) {
+            $Process.Kill()
+            if (-not $Process.WaitForExit($ReapMilliseconds)) { return $false }
+        }
+    } catch { return $false }
+    return $true
 }
-'@
+
+function Stop-TaskOwnedPostgres {
+    $pidFile = Join-Path $dataDir 'postmaster.pid'
+    if (-not (Test-Path -LiteralPath $pidFile -PathType Leaf)) { return $true }
+    $pidText = (Get-Content -LiteralPath $pidFile -TotalCount 1).Trim()
+    [int]$postgresPid = 0
+    if (-not [int]::TryParse($pidText, [ref]$postgresPid) -or $postgresPid -le 0) {
+        throw "Refusing to stop PostgreSQL with an invalid task-owned postmaster PID file: $pidFile"
+    }
+    $process = Get-Process -Id $postgresPid -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return $true }
+    $actualPath = [IO.Path]::GetFullPath($process.Path)
+    $expectedPath = [IO.Path]::GetFullPath($postgres)
+    if (-not $actualPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to kill PID $postgresPid because its executable is not the pinned task PostgreSQL binary."
+    }
+    if (-not (Stop-TaskOwnedProcessTree -Process $process -ReapMilliseconds 3000)) {
+        throw "Task-owned PostgreSQL process tree rooted at PID $postgresPid could not be reaped within the bounded cleanup window."
+    }
+    return $true
 }
+
+$jobMemoryLimitMiB = 1152
 
 function Assert-WebsiteWorkerSourcePins([string]$Root) {
     foreach ($relativePath in $websiteWorkerSourcePins.Keys) {
@@ -162,7 +459,8 @@ if ($LASTEXITCODE -ne 0 -or $pgVersion -notmatch 'PostgreSQL\) 17\.11$') {
 }
 
 $jobProbe = [FormSpaceQualificationJob]::CreateBoundedJob([UInt64]$jobMemoryLimitMiB * 1MB, 12)
-[FormSpaceQualificationJob]::CloseJob($jobProbe)
+[FormSpaceQualificationJob]::CloseHandleSafe($jobProbe)
+if ($TestProcessSupervisor) { Test-QualificationProcessSupervisor }
 
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $listener.Start()
@@ -175,16 +473,14 @@ Write-Output "Preflight passed: $($pythonVersions.Trim())"
 Write-Output "Website source: branch $websiteBranch at $websiteHead; reviewed worker closure: $requiredWebsiteSourceCommit"
 Write-Output "PostgreSQL: $pgVersion; Node: $nodeVersion; tsx: $tsxVersion; proposed loopback port: $port"
 Write-Output "New fixture only: $dataDir; database: $dbName"
-Write-Output "Bounded run limits: Windows Job Object caps the complete runner/pytest/PostgreSQL/worker process tree at $jobMemoryLimitMiB MiB committed job memory and 12 active processes; PostgreSQL max_connections=12/shared_buffers=64MB/work_mem=4MB; one TS worker at a time (Node heap $nodeHeapLimitMiB MiB); pytest timeout $pytestTimeoutSeconds seconds; per-worker timeout 30 seconds."
+Write-Output "Bounded run limits: Windows Job Object caps the supervisor and complete setup/test/cleanup process tree at $jobMemoryLimitMiB MiB committed job memory and 12 active processes; total wall-clock deadline $pytestTimeoutSeconds seconds including preflight, fixture setup, tests, and cleanup; PostgreSQL max_connections=12/shared_buffers=64MB/work_mem=4MB; Node heap $nodeHeapLimitMiB MiB; 30-second worker and 15-second post-commit child timeouts; captured pytest stdout+stderr limit $captureLimitBytes bytes."
 Write-Output 'This preflight did not create a directory, database, or service.'
 
 if (-not $Run) { return }
 if ($env:MYCOSOFT_RESOURCE_SLOT_CONFIRMED -ne 'true' -or [string]::IsNullOrWhiteSpace($env:MYCOSOFT_RESOURCE_SLOT_ID)) {
     throw 'Refusing runtime startup without the coordinator-granted slot marker and slot ID.'
 }
-$runtimeJob = [FormSpaceQualificationJob]::CreateBoundedJob([UInt64]$jobMemoryLimitMiB * 1MB, 12)
-try { [FormSpaceQualificationJob]::AssignCurrentProcess($runtimeJob) }
-catch { [FormSpaceQualificationJob]::CloseJob($runtimeJob); throw 'Windows Job Object could not attach the runner; refusing runtime startup.' }
+if ($null -eq $qualificationDeadlineUnix) { throw 'The supervisor did not provide a total qualification deadline.' }
 if (Test-Path -LiteralPath $taskRoot) {
     throw "Refusing to reuse an existing fixture path; preserve it and choose a new task-owned directory: $taskRoot"
 }
@@ -196,14 +492,17 @@ $serverStarted = $false
 $exitCode = 0
 try {
     New-Item -ItemType Directory -Path $taskRoot | Out-Null
+    [void](Get-RemainingQualificationMilliseconds)
     & $initdb -D $dataDir -U postgres --auth-local=trust --auth-host=trust --encoding=UTF8 --locale=C --no-instructions
     if ($LASTEXITCODE -ne 0) { throw "initdb failed with exit code $LASTEXITCODE" }
 
     $serverOptions = "-h 127.0.0.1 -p $port -c listen_addresses=127.0.0.1 -c max_connections=12 -c shared_buffers=64MB -c work_mem=4MB"
+    $serverWaitSeconds = [Math]::Max(1, [int][Math]::Floor((Get-RemainingQualificationMilliseconds) / 1000) - $cleanupReserveSeconds)
     $serverStarted = $true
-    & $pgCtl -D $dataDir -l $logFile -w -o $serverOptions start
+    & $pgCtl -D $dataDir -l $logFile -w -t $serverWaitSeconds -o $serverOptions start
     if ($LASTEXITCODE -ne 0) { throw "pg_ctl start failed with exit code $LASTEXITCODE" }
 
+    [void](Get-RemainingQualificationMilliseconds)
     & $createdb --host=127.0.0.1 --port=$port --username=postgres $dbName
     if ($LASTEXITCODE -ne 0) { throw "createdb failed with exit code $LASTEXITCODE" }
 
@@ -216,15 +515,13 @@ try {
     try {
         $stdoutLog = Join-Path $taskRoot 'pytest.stdout.log'
         $stderrLog = Join-Path $taskRoot 'pytest.stderr.log'
-        $testProcess = Start-Process -FilePath $python -ArgumentList @('-m', 'pytest', '-q', 'tests/test_formspace_durable_api_postgres.py') `
-            -WorkingDirectory $repoRoot -PassThru -NoNewWindow -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
-        if (-not $testProcess.WaitForExit($pytestTimeoutSeconds * 1000)) {
-            & "$env:SystemRoot\System32\taskkill.exe" /PID $testProcess.Id /T /F | Out-Null
-            if ($LASTEXITCODE -ne 0) { Write-Warning 'Timed out pytest process tree could not be fully terminated.' }
-            $testProcess.WaitForExit()
-            throw "Signed-JWT/API/worker test exceeded $pytestTimeoutSeconds seconds; only its pytest process tree was terminated."
-        }
-        $exitCode = $testProcess.ExitCode
+        $testBudgetMs = [Math]::Max(1, (Get-RemainingQualificationMilliseconds) - ($cleanupReserveSeconds * 1000))
+        $testResult = [FormSpaceQualificationJob]::RunBoundedCapture($python, '-m pytest -q tests/test_formspace_durable_api_postgres.py',
+            $repoRoot, $stdoutLog, $stderrLog, [int]$testBudgetMs, [int64]$captureLimitBytes)
+        if (-not $testResult.Reaped) { throw 'Owned pytest process tree or its output pumps did not reap within the bounded three-second window.' }
+        if ($testResult.OutputLimitExceeded) { throw "Pytest output exceeded the combined $captureLimitBytes-byte capture limit; its owned process tree was terminated." }
+        if ($testResult.TimedOut) { throw 'Signed-JWT/API/worker test exhausted its remaining total-deadline budget; its owned process tree was terminated and reaped.' }
+        $exitCode = $testResult.ExitCode
         if (Test-Path -LiteralPath $stdoutLog) { Get-Content -LiteralPath $stdoutLog }
         if (Test-Path -LiteralPath $stderrLog) { Get-Content -LiteralPath $stderrLog }
     }
@@ -232,8 +529,23 @@ try {
 }
 finally {
     if ($serverStarted) {
-        & $pgCtl -D $dataDir -m fast -w stop
-        if ($LASTEXITCODE -ne 0) { Write-Warning 'The task-owned PostgreSQL stop command failed; inspect only this fixture log and PID.' }
+        $remainingCleanupMs = Get-RemainingQualificationMilliseconds -AllowZero
+        $stopped = $false
+        if ($remainingCleanupMs -gt 0) {
+            $stopSeconds = [Math]::Max(1, [int][Math]::Floor($remainingCleanupMs / 1000))
+            & $pgCtl -D $dataDir -m fast -w -t $stopSeconds stop
+            $stopped = ($LASTEXITCODE -eq 0)
+        }
+        if (-not $stopped) { $stopped = Stop-TaskOwnedPostgres }
+        if (-not $stopped) { throw 'Task-owned PostgreSQL cleanup did not complete successfully.' }
+        $pidFile = Join-Path $dataDir 'postmaster.pid'
+        if (Test-Path -LiteralPath $pidFile) {
+            $pidText = (Get-Content -LiteralPath $pidFile -TotalCount 1).Trim()
+            [int]$remainingPid = 0
+            if ([int]::TryParse($pidText, [ref]$remainingPid) -and (Get-Process -Id $remainingPid -ErrorAction SilentlyContinue)) {
+                throw "Task-owned PostgreSQL PID $remainingPid remains alive after cleanup."
+            }
+        }
     }
     foreach ($name in $envNames) { [Environment]::SetEnvironmentVariable($name, $previousEnv[$name], 'Process') }
     if (Test-Path -LiteralPath $logFile) { Write-Output "Preserved task-owned PostgreSQL log: $logFile" }
