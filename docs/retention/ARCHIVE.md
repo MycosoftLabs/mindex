@@ -141,15 +141,17 @@ The optional real boto3 Stubber test validates SDK request/response models while
 preventing network access. These are offline adapter receipts, not end-to-end
 AWS security, restore, production retention or erase qualification.
 
-The fake does not model paginated version listings or delete markers. Its
-multi-version reconciliation test removes both exact-key versions; it does not
-directly exercise deleting the newest version and then observing an older version
-become latest. The PostgreSQL dump/restore recovery test restores database lease
-state into a separate target while reusing the same in-memory fake object store.
-The worker interruption cases simulate the database/object-store failure windows;
-they do not terminate and restart an OS worker process. These limits leave actual
-S3 version-ordering, pagination, IAM/KMS/Object Lock behavior and deployed
-recovery qualification open.
+The focused adapter suite also supplies AWS-shaped paginated `ListObjectVersions`
+responses with both `Versions` and `DeleteMarkers`; an installed botocore
+`Stubber` validates the modeled request and response shapes without network I/O.
+The reconciler follows both markers, deletes exact-key payload versions and marker
+versions by ID, then requires a fresh empty inventory before returning proof. A
+marker-only key is reported absent only after the marker disappears. The scripted
+fixtures do not establish actual S3 ordering, permissions, strong-consistency
+behavior, IAM/KMS/Object Lock policy or deployed recovery. The PostgreSQL dump/restore
+test restores database lease state into a separate target while reusing the same
+in-memory fake object store. Worker interruption cases simulate failure windows;
+they do not terminate and restart an OS worker process.
 
 Before a manually authorized rollout, validate real bucket protections and
 effective IAM/KMS policies; use an approved isolated bucket to exercise encrypted
@@ -161,3 +163,8 @@ customer erasure obligations before enabling compliance retention. No AWS calls,
 bucket provisioning, production migrations or deployments were performed by
 these tests. Reverting code does not remove already locked objects; retain the
 previous runtime and additive schema during the manual rollback window.
+
+Focused object-store follow-up on October 3, 2026: **93 passed** with
+`python -m pytest tests/test_retention_object_store.py -q`; selected-file
+`git diff --check` passed. This includes offline pagination/delete-marker tests
+and botocore Stubber model validation, not live S3 qualification.

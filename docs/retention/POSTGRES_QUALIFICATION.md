@@ -66,12 +66,14 @@ The suite establishes:
 These are stateful local fixtures, not full process or S3 emulation. The worker
 interruption cases leave completion steps uncalled; they do not kill and restart
 an OS worker. The restore test restores database lease rows into a separate
-database target while retaining the same in-memory fake object store. The fake
-does not model paginated version listings or delete markers; multi-version cleanup
-removes both matching versions but does not directly assert that deleting a
-newest version promotes an older version to latest. Real bucket IAM, KMS,
-Object Lock, listing permissions, version ordering, and deployed recovery remain
-unqualified.
+database target while retaining the same in-memory fake object store. That
+PostgreSQL integration fake still does not model paginated listings or delete
+markers. The focused object-store suite now separately exercises representative
+paginated `ListObjectVersions` contracts, exact-key delete-marker removal,
+incomplete/repeated cursors, and post-delete absence checks; botocore `Stubber`
+validates the modeled SDK response/request shapes with no network. These tests
+still do not establish real bucket IAM, KMS, Object Lock, listing permissions,
+S3 ordering/consistency or deployed recovery.
 
 ## Runtime and reproducible commands
 
