@@ -188,7 +188,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/formspace-chart-qual
 
 Preflight validates the Brief 09 Python/PyJWT packages, PostgreSQL 17.11, Node/tsx,
 worktree branches/commits, scoped clean code paths, and a proposed unused loopback
-port. It creates no files or services. `-Run` refuses to start unless the
+port. Website doc-only successor commits are accepted only when they descend from
+the reviewed worker source and the hashes for `scripts/formspace-worker.ts`,
+`lib/formspace/durable-worker.ts`, `lib/formspace/durable-domain.ts`, and
+`lib/formspace/native-ssm.ts` match the fixed reviewed pins. This keeps executable
+worker code bound while allowing the custody/handoff docs to advance. The optional
+`-TestSourceGuard` copies this closure to a unique temporary directory, confirms a
+matching copy passes, flips one byte in the worker entry, confirms the guard rejects
+it, and removes only that temporary copy. `-Run` refuses to start unless the
 coordinator-granted `MYCOSOFT_RESOURCE_SLOT_CONFIRMED=true` and
 `MYCOSOFT_RESOURCE_SLOT_ID` are present. With a grant, it creates only the new
 `.formspace-chart-revision-qualification-20261001/data` cluster and
@@ -198,6 +205,15 @@ reuse the earlier restore-audit directory or shared/sibling database.
 The worker checkout is the recovered managed Website worktree at
 `C:\Users\Owner1\.codex\worktrees\formspace-recovered-oct03\website`, pinned to
 `codex/formspace-durable-experiments` at `b90a9d2299a610413c83360d59257c1f23348566`.
+The bounded test plan uses one pytest process, one loopback PostgreSQL 17.11 server
+(`max_connections=12`, `shared_buffers=64MB`, `work_mem=4MB`), and at most one
+TypeScript worker at a time (`NODE_OPTIONS=--max-old-space-size=384`). Each worker
+subprocess has a 30-second test timeout, the post-commit child has a 15-second
+timeout, and the outer pytest process has a 240-second hard timeout that terminates
+only its own process tree before task-owned PostgreSQL cleanup. The API test binds
+its ephemeral HTTP socket to `127.0.0.1`; PostgreSQL listens only on `127.0.0.1`.
+This is a configured resource envelope, not a measured peak-RSS result; the
+coordinator still needs to allocate and measure the slot before execution.
 
 The test refuses remote addresses, query overrides and existing app schemas,
 never uses inherited app `DATABASE_URL`, and never drops data. It applies the
