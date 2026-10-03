@@ -1,12 +1,13 @@
 """Captured FungiP references only; no provider imports or implicit connection.
 
-Draft destination: mindex_etl/fungip/genetic_references.py. Default CLI is offline.
+Default CLI is offline; a portable apply requires an explicit hash-bound target.
 """
 from __future__ import annotations
 
 import argparse
 import copy
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 import ipaddress
 import json
 import os
@@ -23,6 +24,7 @@ CATALOG_SHA = "b33d08f061d8cbd1cfdda0ca0ace6b174ada2d3cfba84f3e04b1980f5bf82a9a"
 PREFLIGHT_SHA = "6f25ccf1757155ce891832b5e6ccde608ea95a01f51d613deb42370a409e13d8"
 PROJECTION_SHA = "9d0a68c14ef3e79fb234b72a0fec8cbd4619d40e26db20af8dee853dcd571dc2"
 TARGET = {"host": "127.0.0.1", "port": "5547", "dbname": "fungip_native_20261002"}
+TARGET_SCHEMA = "fungip.import_target.v1"
 SCHEMA = "fungip.captured_reference.v1"
 MAX_RECORDS = 300
 SEMANTIC_FIELDS = (
@@ -143,19 +145,124 @@ def load_projection(package, preflight):
     return projection
 
 
-def validate_target(parameters):
+def _target_port(value):
+    require(type(value) is int and 1 <= value <= 65535, "target_manifest_port")
+
+
+def _target_host(value):
+    require(isinstance(value, str) and value == value.strip() and value, "target_manifest_host")
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        require(not re.fullmatch(r"[0-9.]+", value), "target_manifest_host")
+        require(len(value) <= 253 and all(
+            re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+            for label in value.split(".")), "target_manifest_host")
+    else:
+        require(not address.is_unspecified and not address.is_multicast and "%" not in value,
+                "target_manifest_host")
+
+
+def _target_manifest(raw):
+    def unique_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, "target_manifest_duplicate_key")
+            result[key] = value
+        return result
+
+    try:
+        manifest = json.loads(raw, object_pairs_hook=unique_keys)
+    except (ValueError, TypeError, UnicodeError):
+        raise Rejected("target_manifest_invalid") from None
+    require(isinstance(manifest, dict) and set(manifest) == {"schema", "connection", "server"}
+            and manifest["schema"] == TARGET_SCHEMA, "target_manifest_shape")
+    connection, server = manifest["connection"], manifest["server"]
+    require(isinstance(connection, dict) and set(connection) == {"host", "port", "dbname"},
+            "target_manifest_connection")
+    require(isinstance(server, dict) and set(server) == {"addresses", "port", "dbname"},
+            "target_manifest_server")
+    _target_host(connection["host"])
+    _target_port(connection["port"])
+    _target_port(server["port"])
+    database = connection["dbname"]
+    require(isinstance(database, str) and 0 < len(database.encode("utf-8")) <= 63
+            and all(ord(char) >= 32 and ord(char) != 127 for char in database)
+            and server["dbname"] == database, "target_manifest_database")
+    addresses = server["addresses"]
+    require(isinstance(addresses, list) and 1 <= len(addresses) <= 8, "target_manifest_addresses")
+    normalized = []
+    for value in addresses:
+        try:
+            require(isinstance(value, str) and "%" not in value, "target_manifest_addresses")
+            address = ipaddress.ip_address(value)
+        except (ValueError, TypeError):
+            raise Rejected("target_manifest_addresses") from None
+        require(not address.is_unspecified and not address.is_multicast, "target_manifest_addresses")
+        normalized.append(str(address))
+    require(len(set(normalized)) == len(normalized), "target_manifest_addresses")
+    return manifest
+
+
+@dataclass(frozen=True)
+class TargetBinding:
+    """Operator-supplied exact bytes; no discovery or infrastructure identity claim."""
+    raw: bytes = field(repr=False)
+    sha256: str
+
+    def __post_init__(self):
+        require(isinstance(self.raw, bytes) and len(self.raw) <= 16384, "target_manifest_size")
+        require(isinstance(self.sha256, str) and re.fullmatch(r"[0-9a-f]{64}", self.sha256)
+                and digest(self.raw) == self.sha256, "target_manifest_hash")
+        _target_manifest(self.raw)
+
+    @property
+    def manifest(self):
+        return _target_manifest(self.raw)
+
+
+def load_target_binding(path, expected_sha256):
+    with Path(path).open("rb") as source:
+        raw = source.read(16385)
+    return TargetBinding(raw, expected_sha256)
+
+
+def _bound_target(binding):
+    require(binding is None or isinstance(binding, TargetBinding), "target_binding_required")
+    return binding.manifest if binding is not None else None
+
+
+def validate_target(parameters, target_binding=None):
+    manifest = _bound_target(target_binding)
     allowed = {"host", "port", "dbname", "user", "password", "sslmode", "connect_timeout", "application_name"}
+    if manifest is not None:
+        allowed.add("sslrootcert")
     require(set(parameters) <= allowed, "connection_option_not_allowed")
-    require(all(str(parameters.get(k, "")) == v for k, v in TARGET.items()), "wrong_database_target")
+    expected = manifest["connection"] if manifest is not None else TARGET
+    require(all(str(parameters.get(k, "")) == str(v) for k, v in expected.items()), "wrong_database_target")
+    if manifest is not None:
+        require(parameters.get("sslmode") == "verify-full", "portable_target_requires_verify_full")
 
 
-def validate_connected_target(target):
+def validate_connected_target(target, target_binding=None):
+    manifest = _bound_target(target_binding)
+    expected = manifest["server"] if manifest is not None else {
+        "addresses": [TARGET["host"]], "dbname": TARGET["dbname"], "port": int(TARGET["port"]),
+    }
     try:
         address = ipaddress.ip_interface(target["address"]).ip
     except (ValueError, TypeError, KeyError):
         raise Rejected("connected_target_differs") from None
-    require(target["db"] == TARGET["dbname"] and target["port"] == 5547 and
-            address == ipaddress.ip_address(TARGET["host"]), "connected_target_differs")
+    require(target.get("db") == expected["dbname"] and type(target.get("port")) is int
+            and target["port"] == expected["port"]
+            and address in {ipaddress.ip_address(value) for value in expected["addresses"]},
+            "connected_target_differs")
+
+
+def target_receipt(binding):
+    _bound_target(binding)
+    return {"mode": "operator_bound" if binding is not None else "private_qualification",
+            "manifest_sha256": binding.sha256 if binding is not None else None}
 
 
 @contextmanager
@@ -211,9 +318,13 @@ def validate_source(proposed, stored, candidates):
             record["accepted_name"] == proposed["organism"], "canonical_classification_not_qualified")
 
 
-def import_projection(conn, projection, *, deadline_seconds=120):
-    """Only the sole native owner may call this; all changes share one transaction."""
-    validate_target({"host": conn.info.host, "port": str(conn.info.port), "dbname": conn.info.dbname})
+def import_projection(conn, projection, *, deadline_seconds=120, target_binding=None):
+    """Explicit owner apply only; all changes share one transaction."""
+    parameters = {"host": conn.info.host, "port": str(conn.info.port), "dbname": conn.info.dbname}
+    if _bound_target(target_binding) is not None:
+        parameters["sslmode"] = conn.info.get_parameters().get("sslmode")
+        require(conn.pgconn.ssl_in_use is True, "portable_target_requires_tls")
+    validate_target(parameters, target_binding)
     require(digest(canonical(projection).encode("utf-8")) == PROJECTION_SHA, "projection_content_changed")
     rows = projection["rows"]
     require(projection["schema"] == SCHEMA and projection["catalog_sha256"] == CATALOG_SHA and
@@ -236,7 +347,7 @@ def import_projection(conn, projection, *, deadline_seconds=120):
         execute("SET LOCAL search_path = pg_catalog")
         execute("SELECT pg_advisory_xact_lock(hashtext('fungip.captured_reference.import'))")
         target = execute("SELECT current_database() AS db, inet_server_addr()::text AS address, inet_server_port() AS port").fetchone()
-        validate_connected_target(target)
+        validate_connected_target(target, target_binding)
         ids = [r["metadata"]["fungip_capture"]["species_id"] for r in rows]
         sources = execute("SELECT * FROM fungip.species WHERE species_id = ANY(%s) ORDER BY species_id FOR SHARE", (ids,)).fetchall()
         require(len(sources) == MAX_RECORDS and {s["species_id"] for s in sources} == set(ids), "stored_species_set")
@@ -277,7 +388,8 @@ def import_projection(conn, projection, *, deadline_seconds=120):
                 unchanged += 1
     return {"status": "committed", "schema": SCHEMA, "catalog_sha256": CATALOG_SHA,
             "preflight_sha256": PREFLIGHT_SHA, "inserted": inserted, "unchanged": unchanged,
-            "updated": 0, "references": MAX_RECORDS, "canonical_linked": 246, "canonical_pending": 54}
+            "updated": 0, "references": MAX_RECORDS, "canonical_linked": 246, "canonical_pending": 54,
+            "target_binding": target_receipt(target_binding), "connected_target_verified": True}
 
 
 def main(argv=None):
@@ -286,23 +398,35 @@ def main(argv=None):
     parser.add_argument("--preflight", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--target-manifest", type=Path)
+    parser.add_argument("--target-sha256")
     args = parser.parse_args(argv)
     # Reserve a new receipt before any connection; never overwrite an earlier result.
     with args.output.open("x", encoding="utf-8") as output:
         report = None
+        target_binding = None
         try:
+            require(bool(args.target_manifest) == bool(args.target_sha256), "target_manifest_pair_required")
+            if args.target_manifest:
+                target_binding = load_target_binding(args.target_manifest, args.target_sha256)
             projection = load_projection(args.package, args.preflight)
             if not args.apply:
-                report = {"status": "offline_projection", **projection}
+                report = {"status": "offline_projection", **projection,
+                          "target_binding": target_receipt(target_binding), "connected_target_verified": False}
             else:
                 import psycopg
                 from psycopg.conninfo import conninfo_to_dict
                 from psycopg.rows import dict_row
                 parameters = conninfo_to_dict(os.environ.get("FUNGIP_IMPORT_DSN", ""))
-                validate_target(parameters)
+                validate_target(parameters, target_binding)
+                if target_binding is not None:
+                    require(not any(os.environ.get(name) for name in (
+                        "PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS",
+                        "PGLOADBALANCEHOSTS", "PGTARGETSESSIONATTRS",
+                    )), "ambient_connection_override")
                 parameters.update(connect_timeout=3, application_name="fungip_captured_reference")
                 with psycopg.connect(**parameters, autocommit=True, row_factory=dict_row) as conn:
-                    report = import_projection(conn, projection)
+                    report = import_projection(conn, projection, target_binding=target_binding)
         except CommitUnknown:
             report = {"status": "commit_outcome_unknown", "inserted": None, "updated": None,
                       "retry_requires_readback": True}
@@ -313,6 +437,11 @@ def main(argv=None):
                 report["connection_cleanup_failed"] = True
             else:
                 report = {"status": "rejected", "reason": "operation_failed", "inserted": 0, "updated": 0}
+        report.setdefault("target_binding", (
+            {"mode": "operator_binding_unvalidated", "manifest_sha256": None}
+            if target_binding is None and (args.target_manifest or args.target_sha256)
+            else target_receipt(target_binding)
+        ))
         try:
             json.dump(report, output, ensure_ascii=False, indent=2)
             output.flush()

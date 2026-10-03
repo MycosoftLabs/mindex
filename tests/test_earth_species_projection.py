@@ -179,3 +179,43 @@ def test_other_layer_query_and_parameters_are_not_changed_by_species_filter(rout
     sql, params = session.calls[0]
     assert "FROM transport.aircraft" in sql
     assert "kingdom" not in sql and "kingdom" not in params
+
+
+@pytest.mark.parametrize("layer", ["species", "sightings"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_species_map_http_distinguishes_query_failure_from_empty(route, layer, failed, caplog):
+    from fastapi import FastAPI
+    import httpx
+
+    class BoundarySession(Session):
+        async def execute(self, statement, params):
+            if failed:
+                raise RuntimeError("sensitive-fixture-host: missing observation table")
+            return await super().execute(statement, params)
+
+    app = FastAPI()
+    session = BoundarySession()
+
+    async def db():
+        yield session
+
+    app.dependency_overrides[route.get_db_session] = db
+    app.include_router(route.router)
+
+    async def request():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            return await client.get("/earth/map/bbox", params=dict(
+                layer=layer, lat_min=37.43, lat_max=37.45,
+                lng_min=-122.17, lng_max=-122.16, kingdom="Fungi", limit=25,
+            ))
+
+    response = asyncio.run(request())
+    assert response.status_code == (503 if failed else 200)
+    if failed:
+        assert response.json() == {"detail": "Species map data unavailable"}
+    else:
+        assert response.json()["entities"] == []
+        assert response.json()["total"] == 0
+        assert response.json()["layer"] == layer
+    assert "sensitive-fixture-host" not in response.text
+    assert "sensitive-fixture-host" not in caplog.text

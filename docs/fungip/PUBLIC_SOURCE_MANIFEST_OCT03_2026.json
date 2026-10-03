@@ -2,19 +2,26 @@
   "schema_version": 1,
   "purpose": "Selected public source handoff; not a repository backup or runtime acceptance record",
   "public_base_commit": "42b876fcfca2e86b0365e8fe8afab628d6a94705",
-  "source_code_test_commit": "284ae4b50fd206d6376491e65e22d29eab6f4cb2",
-  "source_tree": "4098031d10c467d2f3a85f72f32bc96460309924",
   "local_feature_reference": "a54b2a4ad1b5286d5014987a6fd3993a9e0dd3d0",
-  "documentation_successor": true,
   "hash_semantics": "SHA-256 of raw file bytes in the prepared checkout; Git text normalization may differ",
   "manifest_self_excluded": true,
-  "file_count": 50,
-  "total_bytes": 676520,
+  "file_count": 53,
+  "total_bytes": 705905,
   "files": [
     {
+      "path": "docs/fungip/EARTH_MAP_READ_FAILURE_OCT03_2026.md",
+      "bytes": 1286,
+      "sha256": "9c7d1cdee516424c6bc26a5d431c7ec13ff50996f3678cedf1838dfd1cc07d09"
+    },
+    {
+      "path": "docs/fungip/GENETICS_TARGET_HANDOFF_OCT03_2026.md",
+      "bytes": 5735,
+      "sha256": "d2d03239a19c7954e6fe795882da990c67fd30a5eef2f3c39487a0af8c3ae59d"
+    },
+    {
       "path": "docs/fungip/PUBLIC_INTEGRATION_HANDOFF_OCT03_2026.md",
-      "bytes": 12573,
-      "sha256": "e84688f8b25f87f16ad5913aa88e35b03be6c98cbfc88efefabedf710049af08"
+      "bytes": 14383,
+      "sha256": "0c2ded65d0acdbd8ff9642802b1a450968ad6d286749a2347e6bd1054032946a"
     },
     {
       "path": "migrations/fungip_001_catalog.sql",
@@ -38,8 +45,8 @@
     },
     {
       "path": "mindex_api/routers/earth.py",
-      "bytes": 58187,
-      "sha256": "4fb9d9e44cc1bfdb42883f4b37123a4adb24e678f146487145a69853b3e7d517"
+      "bytes": 58651,
+      "sha256": "6a117a3edf01fe7a96c96906263b9ae9ec446fafd8bfe6d52a2f5ed3f37761ab"
     },
     {
       "path": "mindex_api/routers/fungip.py",
@@ -118,8 +125,8 @@
     },
     {
       "path": "mindex_etl/fungip/genetic_references.py",
-      "bytes": 17962,
-      "sha256": "ac921cb2ed0c344580d05ca4707e2a651b4784ad1ba7fa3dd849aa769864237b"
+      "bytes": 24108,
+      "sha256": "23573cd156cd951b9f2fe3110305997c167bbdf8634d7ae123053f960f61c743"
     },
     {
       "path": "mindex_etl/fungip/importer.py",
@@ -178,8 +185,8 @@
     },
     {
       "path": "tests/test_earth_species_projection.py",
-      "bytes": 7839,
-      "sha256": "0dd2ed9fb8bef68ab1606c28bb9fc51a19ac3028dfc7823531dfb39bf8a2f624"
+      "bytes": 9359,
+      "sha256": "82262ffd096c8acd69e03cf684bdacae18b0f7b4ad9727a64af6c8188916aec6"
     },
     {
       "path": "tests/test_fungip_accepted_usage.py",
@@ -205,6 +212,11 @@
       "path": "tests/test_fungip_first40_importer.py",
       "bytes": 18067,
       "sha256": "8ea35014a74d7a18bd13f47998eb23a5abb22a4a24ba8344cc5743820515b428"
+    },
+    {
+      "path": "tests/test_fungip_genetic_reference_targets.py",
+      "bytes": 12424,
+      "sha256": "e48783133de888e5f19ce985b9006413e48e3a6a4566c9beb45490425eea4fb5"
     },
     {
       "path": "tests/test_fungip_genetic_references.py",
@@ -266,5 +278,9 @@
     "No captured datasets, environment files, dependency tree or application outputs included",
     "No database, provider, full Next build, authentication or production acceptance claimed",
     "The historical local feature branch is not a parent of this publication branch"
-  ]
+  ],
+  "snapshot_base_commit": "e1a01f71633a29ddf4076f770b85e17c34e1633c",
+  "snapshot_base_tree": "ca1549d0d27c87e1c024d89f300a73c87d9b726a",
+  "snapshot_kind": "reviewed_combined_source_test_documentation_successor",
+  "postimage_commit_binding": "The Git commit containing this manifest binds the selected postimages; no recursive commit/file self-hash is embedded."
 }

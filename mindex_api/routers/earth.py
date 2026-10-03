@@ -660,7 +660,16 @@ async def map_bbox_query(
         params["offset"] = offset
     if layer in {"species", "sightings"}:
         params["kingdom"] = species_kingdom
-    rows = await _safe_query(session, sql, params, f"map_{layer}")
+        try:
+            result = await session.execute(text(sql), params)
+            rows = result.fetchall()
+        except Exception:
+            # A failed spatial query is not evidence that no observations exist.
+            # Do not expose driver exception text or connection details.
+            logger.warning("Species map query unavailable")
+            raise HTTPException(status_code=503, detail="Species map data unavailable") from None
+    else:
+        rows = await _safe_query(session, sql, params, f"map_{layer}")
 
     entities = []
     for r in rows:

@@ -5,7 +5,8 @@ Prepared 2026-10-03. This branch is a source integration for operator review, no
 ## Source relationship
 
 - Public base: `42b876fcfca2e86b0365e8fe8afab628d6a94705`.
-- Integrated source/test checkpoint including the by-location correction and CI fixture repair: `284ae4b50fd206d6376491e65e22d29eab6f4cb2`.
+- Previously published integrated checkpoint: `e1a01f71633a29ddf4076f770b85e17c34e1633c`.
+- The commit containing this handoff adds the independently reviewed portable genetics target binding and species-map error correction. Its selected file bytes are bound in the accompanying manifest; it needs its own CI and runtime qualification.
 - Local feature checkpoint: `a54b2a4ad1b5286d5014987a6fd3993a9e0dd3d0`.
 - Feature comparison base: `687d3d9074e1af6a17c92b9c6b4b6887373b0c00`.
 - Selected source, migrations and tests were applied as an aggregate three-way diff. The original local commit history and internal artifacts are not parents of this publication branch.
@@ -19,7 +20,7 @@ Ancestry detail can return stored genetics with an exact canonical taxon filter 
 
 Biological Search uses the declared canonical, observation, compound and sequence tables. Database operations are sequential on the request session. Failed transactions recover before reuse; a recovery failure stops further queries.
 
-The captured-reference importer keeps the full captured DNA reference and its original metadata. It does not claim that a reference is an entire genome or a complete ITS span. It accepts only the pinned qualification inputs and its explicit isolated local target. It is not a general production importer and was not run against a database during this integration.
+The captured-reference importer keeps the full captured DNA reference and its original metadata. It does not claim that a reference is an entire genome or a complete ITS span. It accepts only the pinned qualification inputs. With no target options, apply remains restricted to the original private qualification target. The independently reviewed optional target manifest/hash enables an operator to select a different exact connection and server identity, with verified TLS required. This is a portable source tool, not demonstrated native TLS, AWS or production qualification; it was not run against a database during this integration. See [the target handoff](GENETICS_TARGET_HANDOFF_OCT03_2026.md) for exact conditions and commands.
 
 ## Deliberate differences from the local checkpoint
 
@@ -61,8 +62,8 @@ From the repository root, in PowerShell with the repository's test dependencies 
 ```powershell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
 $env:PYTHONDONTWRITEBYTECODE = '1'
-$featureTests = @(git diff --name-only --diff-filter=A 42b876fcfca2e86b0365e8fe8afab628d6a94705 284ae4b50fd206d6376491e65e22d29eab6f4cb2 -- tests | Where-Object { $_ -match '^tests/test_.*\.py$' })
-if ($LASTEXITCODE -ne 0 -or $featureTests.Count -ne 20) { throw 'Expected the 20 pinned feature test files' }
+$featureTests = @(git diff --name-only --diff-filter=A 42b876fcfca2e86b0365e8fe8afab628d6a94705 HEAD -- tests | Where-Object { $_ -match '^tests/test_.*\.py$' })
+if ($LASTEXITCODE -ne 0 -or $featureTests.Count -ne 21) { throw 'Expected the 21 feature test files for this handoff revision' }
 python -B -m pytest -o addopts='' -p pytest_asyncio.plugin -p no:cacheprovider -q --tb=short @featureTests tests/test_batch5_search_contract.py tests/test_batch9_bbox_worldview_contract.py tests/test_worldview_search_contract.py
 if ($LASTEXITCODE -ne 0) { throw 'Selected offline qualification failed' }
 ```
@@ -76,7 +77,7 @@ python -B -m pytest -o addopts='' -p pytest_asyncio.plugin -p no:cacheprovider -
 if ($LASTEXITCODE -ne 0) { throw 'Affected offline qualification failed' }
 ```
 
-[The source manifest](PUBLIC_SOURCE_MANIFEST_OCT03_2026.json) binds the 50 selected postimage files by repository-relative path, raw byte size and SHA-256. It excludes itself to avoid recursive hashing. Its source checkpoint is the code/test commit; this handoff and manifest are a subsequent documentation-only change. Line-ending conversion in a different checkout can change raw-byte hashes without changing Git's normalized text blob.
+[The source manifest](PUBLIC_SOURCE_MANIFEST_OCT03_2026.json) binds the 53 selected postimage files by repository-relative path, raw byte size and SHA-256. It excludes itself to avoid recursive hashing. It records the prior snapshot base; the containing Git commit binds this combined source/test/documentation successor. It deliberately does not embed its own commit ID or its own file hash. Line-ending conversion in a different checkout can change raw-byte hashes without changing Git's normalized text blob.
 
 ### Reproduce the CI unit scope without database smoke tests
 
@@ -89,7 +90,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Offline CI test-directory scope failed' }
 
 This exclusion applies only to the local command; the workflow and SQL smoke tests are unchanged. The local interpreter was Python 3.12; the GitHub workflow selects Python 3.11. A remote rerun is required to establish that environment's result.
 
-## Verification performed
+## Current successor evidence
+
+- Portable target binding: **76 focused tests passed**, including the unchanged original captured-reference cases, using the retained exact source data and synthetic transactions only. With captured inputs unset, **46 passed and 30 explicitly skipped**. No database/TLS/DNS connection or AWS action occurred.
+- Species/sightings viewport error correction: the root owner reports **15/15 actual-handler and synthetic-DB checks passed**, following a saved **13-pass/2-fail** predecessor. Query failures now return sanitized HTTP 503 while genuinely empty data remains HTTP 200. Other map domains and SQL projections remain unchanged. See [the Earth handoff](EARTH_MAP_READ_FAILURE_OCT03_2026.md).
+- These are distinct focused scopes. The earlier 642-case CI-scope result below and the subsequently reported GitHub result apply to the predecessor `e1a01f7`, not this successor. Fresh GitHub CI and separate native/PostGIS, full-Next, authenticated and deployment qualification remain necessary.
+
+## Historical verification performed
 
 - 378 selected offline cases passed with the four named, privately supplied captured inputs. The run included all 20 newly added feature test files plus current-main Search, bounding-box/Worldview and Worldview Search contract suites. It exercised actual source code against synthetic sessions/transports and retained source data; it did not execute SQL against a server.
 - After the encoding-only correction and removal of a redundant cancellation recovery branch, the affected portable Search/Earth/cache checks and optional-data subset passed: 79 passed, 92 explicitly skipped with no captured inputs configured. The 72 Search/Earth/current-main checks within that subset passed.
@@ -99,4 +106,4 @@ This exclusion applies only to the local command; the workflow and SQL smoke tes
 - After that fixture repair, 34 focused route/enrichment/read-only/detail cases passed. The complete local test-directory scope excluding only `tests/test_sql_smoke.py` passed **642 cases with 92 explicit captured-data skips** and 90 warnings in 28.02 seconds. The excluded two SQL cases were not run or counted as passes. Deprecation and existing duplicate OpenAPI operation-ID warnings remain. Remote CI, Docker/image build and runtime qualification are separate.
 - Existing Pydantic and datetime deprecation warnings remain. This is not a full repository, application build, provider, authenticated browser or native database qualification.
 
-Operator review must confirm schema/migrations against the intended existing database, use the separately retained data and receipts, and qualify the exact integrated revision. No migrations, catalog imports, genetics imports, API reloads, provider calls, publication, deployment or rollback were performed by this preparation. Production integration remains with the designated operator.
+Operator review must confirm schema/migrations against the intended existing database, use the separately retained data and receipts, and qualify the exact integrated revision. This successor qualification did not perform migrations, catalog imports, genetics imports, API reloads, provider calls, deployment or rollback. Source commit/branch publication is a code handoff action; it does not apply data or deploy services. The earlier source checkpoint was already published. Production integration remains with the designated operator.
