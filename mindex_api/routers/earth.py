@@ -42,22 +42,52 @@ def _bbox_spatial_filter(column: str = "location") -> str:
     )"""
 
 
+_SPECIES_KINGDOMS = (
+    "Fungi", "Plantae", "Animalia", "Bacteria", "Archaea",
+    "Protista", "Viruses", "Undesignated",
+)
+
+
 _SPECIES_OBSERVATION_MAP_SQL = f"""
     SELECT o.id::text, COALESCE(t.kingdom, 'Undesignated') as entity_type, 'species' as domain,
-           t.canonical_name || COALESCE(' (' || t.common_name || ')', '') as name,
+           COALESCE(NULLIF(t.canonical_name, ''), NULLIF(o.metadata->>'taxon_name', ''),
+                    'Unidentified observation')
+               || COALESCE(' (' || NULLIF(COALESCE(t.common_name,
+                    o.metadata->>'taxon_common_name'), '') || ')', '') as name,
            ST_Y(o.location::geometry) as lat, ST_X(o.location::geometry) as lng,
            o.observed_at::text as occurred_at, o.source,
            jsonb_build_object(
-               'kingdom', t.kingdom,
+               'observation_id', o.id::text,
+               'kingdom', COALESCE(t.kingdom, 'Undesignated'),
                'taxon_id', t.id::text,
+               'canonical_taxon_uuid', t.id::text,
+               'canonical_name', t.canonical_name,
+               'scientific_name', COALESCE(NULLIF(t.canonical_name, ''),
+                                           NULLIF(o.metadata->>'taxon_name', '')),
+               'common_name', COALESCE(t.common_name, o.metadata->>'taxon_common_name'),
+               'rank', t.rank,
+               'source_id', o.source_id,
+               'external_id', o.source_id,
+               'source_url', o.metadata->>'uri',
+               'observer', o.observer,
+               'notes', o.notes,
+               'accuracy_m', o.accuracy_m,
+               'media', o.media,
                'quality_grade', o.metadata->>'quality_grade',
-               'inat_id', o.metadata->>'inat_id'
+               'inat_id', o.metadata->>'inat_id',
+               'taxon_inat_id', COALESCE(
+                   (SELECT e.external_id FROM core.taxon_external_id e
+                    WHERE e.taxon_id = t.id AND e.source IN ('inat', 'inaturalist')
+                    ORDER BY CASE e.source WHEN 'inat' THEN 0 ELSE 1 END, e.external_id LIMIT 1),
+                   o.metadata->>'taxon_inat_id')
            ) as properties
     FROM obs.observation o
     LEFT JOIN core.taxon t ON t.id = o.taxon_id
     WHERE o.location IS NOT NULL
       AND {_bbox_spatial_filter("o.location")}
-    ORDER BY o.observed_at DESC LIMIT :limit
+      AND (CAST(:kingdom AS text) IS NULL
+           OR lower(COALESCE(t.kingdom, 'Undesignated')) = lower(CAST(:kingdom AS text)))
+    ORDER BY o.observed_at DESC, o.id LIMIT :limit
 """
 
 class MapEntity(BaseModel):
@@ -207,6 +237,7 @@ async def map_bbox_query(
     lng_max: Optional[float] = Query(None),
     limit: int = Query(500, ge=1, le=50000),
     offset: int = Query(0, ge=0, le=1_000_000, description="Pagination for eagle_video_sources (and layers that support OFFSET)"),
+    kingdom: Optional[str] = Query(None, description="Optional kingdom filter for species/sightings"),
     session: AsyncSession = Depends(get_db_session),
 ):
     """
@@ -221,6 +252,15 @@ async def map_bbox_query(
 
     For a single camera by id, use: `?layer=eagle_video_sources&id=<source_id>` (no bbox).
     """
+    species_kingdom = None
+    if layer in {"species", "sightings"} and kingdom is not None:
+        species_kingdom = next(
+            (value for value in _SPECIES_KINGDOMS if value.lower() == kingdom.strip().lower()),
+            None,
+        )
+        if species_kingdom is None:
+            raise HTTPException(status_code=422, detail="Unsupported species kingdom")
+
     id_s = (id or "").strip()
     if id_s:
         if layer == "eagle_video_sources":
@@ -618,6 +658,8 @@ async def map_bbox_query(
     }
     if layer == "eagle_video_sources":
         params["offset"] = offset
+    if layer in {"species", "sightings"}:
+        params["kingdom"] = species_kingdom
     rows = await _safe_query(session, sql, params, f"map_{layer}")
 
     entities = []

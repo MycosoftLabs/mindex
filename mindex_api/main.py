@@ -15,6 +15,7 @@ from .middleware import (
     SecurityHeadersMiddleware,
 )
 from .routers.v1_ingest import router as v1_ingest_router
+from .routers.fungip import router as fungip_router
 from .routers import (
     a2a_agent_router,
     beta_router,
@@ -237,6 +238,7 @@ def create_app() -> FastAPI:
     # These keep the old /api/mindex/... paths working during the migration window
     # so MAS, CREP, and device consumers don't break.
     app.include_router(taxon_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(fungip_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(telemetry_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(devices_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(meshtastic_internal_router, prefix=prefix, dependencies=internal_deps)

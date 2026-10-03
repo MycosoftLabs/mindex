@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -28,6 +29,7 @@ class GeneticSequenceResponse(BaseModel):
     """Response model for a genetic sequence."""
     id: int
     accession: str
+    taxon_id: Optional[UUID] = None
     species_name: Optional[str] = None
     gene: Optional[str] = None
     region: Optional[str] = None
@@ -115,6 +117,7 @@ async def list_genetic_sequences(
     gene: Optional[str] = Query(None, description="Filter by gene (e.g., ITS, LSU, RPB1)"),
     source: Optional[str] = Query(None, description="Filter by source (e.g., genbank, ncbi)"),
     species: Optional[str] = Query(None, description="Filter by species name"),
+    taxon_id: Optional[UUID] = Query(None, description="Filter by exact linked MINDEX taxon UUID"),
     kingdom: Optional[str] = Query(
         None,
         description="Filter by resolved taxon kingdom (requires taxon_id linkage). Omit for all.",
@@ -132,13 +135,9 @@ async def list_genetic_sequences(
     - **min_length/max_length**: Filter by sequence length range
     """
     if not await _genetic_sequence_table_exists(db):
-        return GeneticSequenceListResponse(
-            data=[],
-            pagination={
-                "limit": pagination.limit,
-                "offset": pagination.offset,
-                "total": 0,
-            },
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Genetic sequences are not available in this environment",
         )
 
     # Build dynamic WHERE clause
@@ -167,6 +166,10 @@ async def list_genetic_sequences(
         species_pattern = f"%{species}%"
         where_clauses.append("gs.species_name ILIKE :species")
         params["species"] = species_pattern
+
+    if taxon_id:
+        where_clauses.append("gs.taxon_id = :taxon_id")
+        params["taxon_id"] = str(taxon_id)
     
     if min_length:
         where_clauses.append("gs.sequence_length >= :min_length")
@@ -195,6 +198,7 @@ async def list_genetic_sequences(
         SELECT
             gs.id,
             gs.accession,
+            gs.taxon_id,
             gs.species_name,
             gs.gene,
             gs.region,
@@ -221,6 +225,7 @@ async def list_genetic_sequences(
         GeneticSequenceResponse(
             id=row["id"],
             accession=row["accession"],
+            taxon_id=row["taxon_id"],
             species_name=row["species_name"],
             gene=row["gene"],
             region=row["region"],
