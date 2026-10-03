@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .auth import require_internal_token
+from .ledger.legacy_gate import require_legacy_routes_enabled
 from .middleware import (
     MeteringMiddleware,
     OutputSanitizerMiddleware,
@@ -15,6 +16,7 @@ from .middleware import (
     SecurityHeadersMiddleware,
 )
 from .routers.v1_ingest import router as v1_ingest_router
+from .routers.provenance import router as provenance_router
 from .routers.formspace_durable import router as formspace_durable_router
 from .routers.fungip import router as fungip_router
 from .routers.retention import router as retention_router
@@ -158,6 +160,8 @@ def create_app() -> FastAPI:
     app.include_router(retention_router, prefix=prefix)
 
     app.include_router(health_router, prefix=prefix)
+    # Provenance adds no duplicate auth; every request delegates to retention.v1.
+    app.include_router(provenance_router, prefix=prefix)
     app.include_router(beta_router, prefix=prefix)
     # Private app routes authenticate original user JWTs through shared retention.v1.
     app.include_router(formspace_durable_router, prefix=prefix)
@@ -172,6 +176,7 @@ def create_app() -> FastAPI:
     # =========================================================================
     internal_prefix = settings.internal_prefix
     internal_deps = [Depends(require_internal_token)]
+    legacy_ledger_deps = [*internal_deps, Depends(require_legacy_routes_enabled)]
 
     # Device & telemetry routers
     app.include_router(mycobrain_router, prefix=internal_prefix, dependencies=internal_deps)
@@ -194,7 +199,7 @@ def create_app() -> FastAPI:
     app.include_router(investigation_router, prefix=internal_prefix, dependencies=internal_deps)
     app.include_router(images_router, prefix=internal_prefix, dependencies=internal_deps)
     app.include_router(knowledge_router, prefix=internal_prefix, dependencies=internal_deps)
-    app.include_router(ip_assets_router, prefix=internal_prefix, dependencies=internal_deps)
+    app.include_router(ip_assets_router, prefix=internal_prefix, dependencies=legacy_ledger_deps)
 
     # Agent-to-agent delegation (MAS → MINDEX)
     app.include_router(a2a_agent_router, prefix=internal_prefix, dependencies=internal_deps)
@@ -251,7 +256,7 @@ def create_app() -> FastAPI:
     app.include_router(meshtastic_internal_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(mycobrain_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(observations_router, prefix=prefix, dependencies=internal_deps)
-    app.include_router(ip_assets_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(ip_assets_router, prefix=prefix, dependencies=legacy_ledger_deps)
     app.include_router(stats_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(wifisense_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(drone_router, prefix=prefix, dependencies=internal_deps)
@@ -281,14 +286,14 @@ def create_app() -> FastAPI:
     app.include_router(phylogeny_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(all_life_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(genomes_router, prefix=prefix, dependencies=internal_deps)
-    app.include_router(ledger_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(ledger_router, prefix=prefix, dependencies=legacy_ledger_deps)
     app.include_router(mwave_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(network_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(devices_inventory_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(fungal_overlays_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(civic_unified_router, prefix=prefix, dependencies=internal_deps)
-    app.include_router(integrity_router, prefix=prefix, dependencies=internal_deps)
-    app.include_router(integrity_verify_router, prefix=prefix, dependencies=internal_deps)
+    app.include_router(integrity_router, prefix=prefix, dependencies=legacy_ledger_deps)
+    app.include_router(integrity_verify_router, prefix=prefix, dependencies=legacy_ledger_deps)
     app.include_router(handoff_jun03_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(library_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(sine_acoustic_router, prefix=prefix, dependencies=internal_deps)
