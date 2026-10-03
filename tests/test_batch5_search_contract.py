@@ -119,6 +119,10 @@ class FixtureSession:
         rows = [] if domain in self.empty else [{"id": "fixture-" + domain, "name": domain}]
         return SimpleNamespace(fetchall=lambda: rows)
 
+    async def rollback(self):
+        # The savepoint double already released its active state.
+        assert not self.active
+
 
 @pytest.fixture
 def domain_fixture(offline_search, monkeypatch):
@@ -134,6 +138,8 @@ def domain_fixture(offline_search, monkeypatch):
         return create
 
     for domain in search.ALL_DOMAINS:
+        if domain == "fungip":
+            continue  # Optional index has its own availability contract and service.
         monkeypatch.setattr(search, "search_" + domain, domain_function(domain))
 
     def scrape(query):

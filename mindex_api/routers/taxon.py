@@ -8,7 +8,22 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session, pagination_params, require_api_key, PaginationParams
+from ..contracts.v1.ancestry_index import (
+    FungiPIndexCounts,
+    FungiPIndexMember,
+    FungiPIndexPagination,
+    FungiPLaunchAssociation,
+    FungiPLaunchIndexState,
+    FungiPTaxonIndexResponse,
+    FungiPTaxonIndexRow,
+)
 from ..contracts.v1.taxon import TaxonListResponse, TaxonResponse
+from ..services.ancestry_public_members import (
+    load_public_fungip_members,
+    load_validated_first40_associations,
+    merge_source_values,
+    project_fungip_identity,
+)
 
 router = APIRouter(
     prefix="/taxa",
@@ -52,6 +67,339 @@ def _normalize_taxon_row(row: dict[str, Any]) -> dict[str, Any]:
     if d.get("author") is None and d.get("authority") is not None:
         d["author"] = d.get("authority")
     return d
+
+
+_FUNGIP_REQUIRED_PAGE_EVIDENCE = (
+    "name_checked", "taxonomy_checked", "dna_checked", "download_checked", "attribution_checked",
+)
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _json_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _fungip_taxon_index_row(
+    raw: dict[str, Any], first40_launch: Optional[dict[str, Any]] = None,
+    launch_association_state: Optional[str] = None,
+) -> FungiPTaxonIndexRow:
+    row = dict(raw)
+    record = _json_object(row.get("record"))
+    taxonomy = _json_object(record.get("taxonomy"))
+    dna = _json_object(record.get("dna"))
+    image_errors = any("image" in str(error).lower() for error in _json_list(row.get("validation_errors")))
+    image = record.get("image") if row.get("image_valid") and not image_errors else None
+    identity_state, identity_reason, canonical_uuid = project_fungip_identity(row)
+    evidence = _json_object(row.get("page_evidence"))
+    page_is_current = (
+        identity_state == "linked"
+        and row.get("page_taxon_id") is not None
+        and str(row.get("page_taxon_id")) == canonical_uuid
+        and row.get("page_record_sha256") == row.get("record_sha256")
+        and all(evidence.get(key) is True for key in _FUNGIP_REQUIRED_PAGE_EVIDENCE)
+    )
+    token_confirmed = bool(row.get("token_confirmed"))
+    association = FungiPLaunchAssociation(**first40_launch) if first40_launch is not None else None
+    accepted_name = str(row.get("accepted_name") or "")
+    source_common_name = record.get("common_name")
+
+    member = FungiPIndexMember(
+        species_id=str(row["species_id"]),
+        mindex_uuid=canonical_uuid,
+        canonical_taxon_uuid=canonical_uuid,
+        accepted_name=accepted_name,
+        common_name=(row.get("canonical_common_name") if identity_state == "linked" else source_common_name),
+        fungal_group=record.get("group"),
+        ticker=record.get("ticker"),
+        accession_version=dna.get("accession_version"),
+        reference_dna_available=bool(row.get("sequence_valid")),
+        complete_its_available=bool(row.get("sequence_valid") and row.get("verified_its_sequence")),
+        token_confirmed=token_confirmed,
+        feature_label=(
+            "Confirmed token receipt; biological claims not chain-validated"
+            if token_confirmed else "Research collection member"
+        ),
+        missing_data_flags=[str(value) for value in _json_list(row.get("missing_data_flags"))],
+        image=image,
+        resolution_status=str(row.get("resolution_status") or "unresolved"),
+        identity_state=identity_state,
+        identity_reason=identity_reason,
+        canonical_url=row.get("page_canonical_url") if page_is_current else None,
+        record_sha256=str(row.get("record_sha256") or ""),
+        catalog_sha256=str(row.get("catalog_sha256") or ""),
+        validation_errors=_json_list(row.get("validation_errors")),
+        source_identifiers=[item for item in _json_list(row.get("external_ids")) if isinstance(item, dict)],
+        candidate_taxon_uuids=[UUID(str(value)) for value in _json_list(row.get("candidate_taxon_ids"))],
+        taxonomy=taxonomy,
+        requested_name=(str(record["requested_name"]) if record.get("requested_name") is not None else None),
+        synonyms=merge_source_values(
+            record.get("synonyms"), association.synonyms if association is not None else None,
+        ),
+        catalog_review_flags=merge_source_values(
+            record.get("catalog_review_flags"),
+            association.catalog_review_flags if association is not None else None,
+        ),
+        first40_launch=association,
+        chain_receipt_status="confirmed" if token_confirmed else "not_confirmed",
+        launch_association_state=(
+            launch_association_state or ("source_verified" if association is not None else "unavailable")
+        ),
+    )
+    return FungiPTaxonIndexRow(
+        id=canonical_uuid,
+        canonical_name=row.get("canonical_name") if identity_state == "linked" else None,
+        common_name=member.common_name,
+        rank="species",
+        kingdom="Fungi",
+        obs_count=(int(row["obs_count"]) if identity_state == "linked" and row.get("obs_count") is not None else None),
+        metadata=_json_object(row.get("canonical_metadata")) if identity_state == "linked" else {},
+        fungip=member,
+    )
+
+
+_FUNGIP_INDEX_CTE = """
+WITH indexed AS (
+    SELECT
+        s.species_id, s.taxon_id AS stored_taxon_id, s.accepted_name, s.record,
+        s.external_ids, s.verified_its_sequence, s.image_valid, s.sequence_valid,
+        s.missing_data_flags, s.validation_errors, s.record_sha256, s.catalog_sha256,
+        s.resolution_status,
+        COALESCE(matches.candidate_count, 0)::int AS candidate_count,
+        matches.candidate_taxon_id,
+        matches.candidate_taxon_ids,
+        t.id AS canonical_taxon_id, t.canonical_name, t.common_name AS canonical_common_name,
+        t.rank AS canonical_rank, t.kingdom AS canonical_kingdom,
+        t.metadata AS canonical_metadata,
+        CASE
+            WHEN s.resolution_status IN ('identity_conflict', 'source_conflict', 'duplicate_canonical')
+              OR COALESCE(matches.candidate_count, 0) > 1
+              OR (s.resolution_status = 'resolved' AND COALESCE(matches.candidate_count, 0) = 1
+                  AND s.taxon_id IS NOT NULL
+                  AND s.taxon_id <> matches.candidate_taxon_id)
+              OR (s.resolution_status = 'resolved' AND s.taxon_id IS NULL)
+              OR (s.resolution_status = 'resolved' AND s.taxon_id IS NOT NULL
+                  AND matches.candidate_taxon_id = s.taxon_id AND t.id IS NULL) THEN 'ambiguous'
+            WHEN s.resolution_status = 'resolved' AND s.taxon_id IS NOT NULL
+              AND COALESCE(matches.candidate_count, 0) = 1
+              AND matches.candidate_taxon_id = s.taxon_id AND LOWER(t.rank) = 'species'
+              AND COALESCE(LOWER(t.kingdom), '') = 'fungi'
+              AND t.canonical_name = s.record->>'accepted_name'
+              AND s.accepted_name = s.record->>'accepted_name' THEN 'linked'
+            WHEN s.resolution_status = 'resolved' AND COALESCE(matches.candidate_count, 0) = 1
+              AND (LOWER(t.rank) IS DISTINCT FROM 'species' OR COALESCE(LOWER(t.kingdom), '') <> 'fungi'
+                   OR t.canonical_name IS DISTINCT FROM s.record->>'accepted_name'
+                   OR s.accepted_name IS DISTINCT FROM s.record->>'accepted_name') THEN 'ambiguous'
+            ELSE 'unresolved'
+        END AS identity_state,
+        page.taxon_id AS page_taxon_id, page.canonical_url AS page_canonical_url,
+        page.record_sha256 AS page_record_sha256, page.evidence AS page_evidence,
+        (SELECT COUNT(*)::int FROM obs.observation o WHERE o.taxon_id = t.id) AS obs_count,
+        EXISTS (
+            SELECT 1 FROM fungip.token_attempt attempt
+            WHERE attempt.species_id = s.species_id
+              AND attempt.status = 'confirmed'
+              AND attempt.network = 'solana-mainnet-beta'
+        ) AS token_confirmed
+    FROM fungip.species s
+    LEFT JOIN LATERAL (
+        SELECT COUNT(DISTINCT external_id.taxon_id)::int AS candidate_count,
+               (ARRAY_AGG(DISTINCT external_id.taxon_id))[1] AS candidate_taxon_id,
+               ARRAY_AGG(DISTINCT external_id.taxon_id) AS candidate_taxon_ids
+        FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(s.external_ids) = 'array' THEN s.external_ids ELSE '[]'::jsonb END
+        ) AS source_identifier(value)
+        JOIN core.taxon_external_id external_id
+          ON external_id.source = source_identifier.value->>'source'
+         AND external_id.external_id = source_identifier.value->>'external_id'
+    ) matches ON TRUE
+    LEFT JOIN core.taxon t ON t.id = matches.candidate_taxon_id
+    LEFT JOIN fungip.page_verification page
+      ON page.species_id = s.species_id AND page.taxon_id = matches.candidate_taxon_id
+)
+"""
+
+
+def _fungip_where(has_query: bool, has_prefix: bool, has_first40_search: bool) -> str:
+    predicates = []
+    if has_query:
+        query_options = [
+            "indexed.species_id ILIKE :query_pattern",
+            "indexed.accepted_name ILIKE :query_pattern",
+            "indexed.record->>'requested_name' ILIKE :query_pattern",
+            "indexed.record->>'common_name' ILIKE :query_pattern",
+            "indexed.record->>'ticker' ILIKE :query_pattern",
+            "indexed.record->'dna'->>'accession_version' ILIKE :query_pattern",
+            "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE "
+            "WHEN jsonb_typeof(indexed.record->'synonyms')='array' "
+            "THEN indexed.record->'synonyms' ELSE '[]'::jsonb END) AS synonym(value) "
+            "WHERE synonym.value ILIKE :query_pattern)",
+        ]
+        if has_first40_search:
+            query_options.append("indexed.species_id = ANY(:first40_search_ids)")
+        predicates.append("(" + " OR ".join(query_options) + ")")
+    if has_prefix:
+        predicates.append("indexed.accepted_name ILIKE :prefix_pattern")
+    return " AND ".join(predicates) if predicates else "TRUE"
+
+
+@router.get("/collections/fungip", response_model=FungiPTaxonIndexResponse)
+async def list_fungip_taxon_index(
+    q: Optional[str] = Query(None, max_length=512, description="Search FungiP ID, names, ticker, DNA accession, and qualified launch values."),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(300, ge=1, le=500),
+    kingdom: Optional[str] = Query(None),
+    rank: Optional[str] = Query(None),
+    prefix: Optional[str] = Query(None, max_length=200),
+    order_by: str = Query("canonical_name"),
+    order: str = Query("asc"),
+    db: AsyncSession = Depends(get_db_session),
+) -> FungiPTaxonIndexResponse:
+    """Read the source collection with exact, optional links to core.taxon UUIDs."""
+    normalized_query = (q or "").strip()
+    query_pattern = f"%{normalized_query}%" if normalized_query else None
+    normalized_kingdom = (kingdom or "").strip().lower()
+    kingdom_filter = None if normalized_kingdom in {"", "all", "any"} else normalized_kingdom
+    normalized_rank = (rank or "").strip().lower()
+    rank_filter = None if normalized_rank in {"", "all", "any"} else normalized_rank
+    normalized_prefix = (prefix or "").strip()
+    prefix_pattern = f"{normalized_prefix}%" if normalized_prefix else None
+    order_by_normalized = (order_by or "").strip().lower()
+    order_normalized = (order or "").strip().lower()
+    if order_by_normalized not in {"canonical_name", "observations_count", "obs_count"}:
+        raise HTTPException(status_code=400, detail="Invalid order_by for FungiP collection.")
+    if order_normalized not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail="Invalid order for FungiP collection.")
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+    if query_pattern is not None:
+        params["query_pattern"] = query_pattern
+    if prefix_pattern is not None:
+        params["prefix_pattern"] = prefix_pattern
+
+    try:
+        tables = (await db.execute(text("""
+            SELECT to_regclass('fungip.species') AS species_table,
+                   to_regclass('fungip.first40_launch_association') AS launch_table,
+                   to_regclass('fungip.first40_source_batch') AS batch_table
+        """))).mappings().one()
+        if tables["species_table"] is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="FungiP collection index unavailable; no fallback source is configured.",
+            )
+        launch_index_available = tables["launch_table"] is not None and tables["batch_table"] is not None
+        valid_launches: dict[str, dict[str, Any]] = {}
+        invalid_launch_ids: set[str] = set()
+        if launch_index_available:
+            valid_launches, invalid_launch_ids = await load_validated_first40_associations(db)
+        first40_search_ids = []
+        if query_pattern is not None:
+            needle = normalized_query.casefold()
+            first40_search_ids = [
+                species_id for species_id, launch in valid_launches.items()
+                if any(
+                    needle in str(value).casefold()
+                    for value in [launch.get("mint_address"), launch.get("launch_tx"), *launch.get("synonyms", [])]
+                    if value is not None
+                )
+            ]
+        if first40_search_ids:
+            params["first40_search_ids"] = first40_search_ids
+        where_sql = (
+            "FALSE" if kingdom_filter not in {None, "fungi"} or rank_filter not in {None, "species"}
+            else _fungip_where(query_pattern is not None, prefix_pattern is not None, bool(first40_search_ids))
+        )
+        if order_by_normalized == "canonical_name":
+            order_expression = "COALESCE(indexed.canonical_name, indexed.accepted_name)"
+        else:
+            order_expression = "indexed.obs_count"
+
+        count_result = await db.execute(text(f"""
+            {_FUNGIP_INDEX_CTE}
+            SELECT COUNT(*)::int AS total,
+                   COUNT(*) FILTER (WHERE identity_state = 'linked')::int AS linked,
+                   COUNT(*) FILTER (WHERE identity_state = 'unresolved')::int AS unresolved,
+                   COUNT(*) FILTER (WHERE identity_state = 'ambiguous')::int AS ambiguous
+            FROM indexed
+            WHERE {where_sql}
+        """), params)
+        totals = dict(count_result.mappings().one())
+
+        page_result = await db.execute(text(f"""
+            {_FUNGIP_INDEX_CTE}
+            SELECT indexed.*
+            FROM indexed
+            WHERE {where_sql}
+            ORDER BY {order_expression} {order_normalized.upper()} NULLS LAST, indexed.species_id ASC
+            LIMIT :limit OFFSET :offset
+        """), params)
+        page_rows = [dict(row) for row in page_result.mappings().all()]
+        species_ids = [row["species_id"] for row in page_rows]
+        for row in page_rows:
+            species_id = str(row["species_id"])
+            if species_id in valid_launches:
+                row["launch_association_state"] = "source_verified"
+            elif species_id in invalid_launch_ids:
+                row["launch_association_state"] = "invalid_binding"
+            else:
+                row["launch_association_state"] = "not_associated" if launch_index_available else "unavailable"
+
+        launch_stats: Optional[dict[str, Any]] = None
+        launch_by_species: dict[str, dict[str, Any]] = {
+            species_id: valid_launches[species_id]
+            for species_id in species_ids if species_id in valid_launches
+        }
+        if launch_index_available:
+            launch_stats_result = await db.execute(text("""
+                SELECT COUNT(*)::int AS associations,
+                       (SELECT COUNT(DISTINCT superseded_mint)::int
+                        FROM fungip.first40_launch_association association
+                        CROSS JOIN LATERAL unnest(association.superseded_mints) AS superseded(superseded_mint)
+                       ) AS exclusions
+                FROM fungip.first40_launch_association
+            """))
+            launch_stats = dict(launch_stats_result.mappings().one())
+        data = [
+            _fungip_taxon_index_row(
+                row,
+                launch_by_species.get(str(row["species_id"])),
+                str(row.get("launch_association_state") or "unavailable"),
+            )
+            for row in page_rows
+        ]
+        launch_state = FungiPLaunchIndexState(
+            state="available" if launch_index_available else "unavailable",
+            verification_basis=(
+                "user_supplied_and_attached_verification" if launch_index_available else None
+            ),
+            new_chain_verified=False,
+        )
+        return FungiPTaxonIndexResponse(
+            collection="FungiP 300",
+            data=data,
+            pagination=FungiPIndexPagination(
+                limit=limit, offset=offset, total=int(totals.get("total") or 0),
+            ),
+            counts=FungiPIndexCounts(
+                listed=int(totals.get("total") or 0),
+                linked=int(totals.get("linked") or 0),
+                unresolved=int(totals.get("unresolved") or 0),
+                ambiguous=int(totals.get("ambiguous") or 0),
+                launch_associations=(int(launch_stats["associations"]) if launch_stats is not None else None),
+                superseded_exclusions=(int(launch_stats["exclusions"]) if launch_stats is not None else None),
+            ),
+            launch_index=launch_state,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="FungiP collection index unavailable; no fallback source is configured.",
+        ) from exc
 
 
 async def _list_taxa_query(
@@ -251,6 +599,16 @@ async def list_taxa(
             detail="Taxonomy list unavailable (core.taxon query failed).",
         )
 
+    taxon_uuids = []
+    for row in rows:
+        try:
+            taxon_uuids.append(UUID(str(row["id"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    public_members, fungip_index = await load_public_fungip_members(db, taxon_uuids)
+    for row in rows:
+        row["fungip"] = public_members.get(str(row.get("id")))
+
     return TaxonListResponse(
         data=rows,
         pagination={
@@ -258,6 +616,7 @@ async def list_taxa(
             "offset": pagination.offset,
             "total": total,
         },
+        fungip_index=fungip_index,
     )
 
 
@@ -287,6 +646,7 @@ async def get_taxon(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
     _api_key: Optional[str] = Depends(require_api_key),
+    read_only: bool = False,
 ) -> TaxonResponse:
     stmt = text(
         """
@@ -330,7 +690,10 @@ async def get_taxon(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Taxon not found")
     data = dict(row)
     data["traits"] = data.get("traits") or []
-    # Queue incomplete taxa for ancestry_sync to prioritize enrichment
-    if data.get("rank") == "species":
+    public_members, fungip_index = await load_public_fungip_members(db, [taxon_id])
+    data["fungip"] = public_members.get(str(data["id"]))
+    data["fungip_index"] = fungip_index
+    # Read-only detail still includes optional FungiP data, but schedules no enrichment.
+    if not read_only and data.get("rank") == "species":
         background_tasks.add_task(_queue_incomplete_taxon, str(taxon_id), data)
     return TaxonResponse(**data)
