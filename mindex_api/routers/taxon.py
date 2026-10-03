@@ -81,6 +81,10 @@ _EFFECTIVE_KINGDOM_SQL = (
     f"THEN COALESCE({_METADATA_KINGDOM_SQL}, kingdom) ELSE kingdom END"
 )
 
+# Duplicate rows folded into a surviving taxon keep their data and carry metadata.merged_into;
+# lists and counts skip them, while direct id lookups still return them.
+_ACTIVE_TAXON_SQL = "NOT (COALESCE(metadata, '{}'::jsonb) ? 'merged_into')"
+
 
 def _csv_values(raw: Optional[str]) -> list[str]:
     values = [v.strip() for v in (raw or "").split(",") if v.strip()]
@@ -598,14 +602,14 @@ async def taxa_stats(db: AsyncSession = Depends(get_db_session)) -> dict[str, An
         kingdom_rows = (await db.execute(
             text(
                 "SELECT COALESCE(kingdom, 'Undesignated') AS kingdom, count(*)::bigint AS species "
-                "FROM core.taxon WHERE rank = ANY(:ranks) GROUP BY 1 ORDER BY 2 DESC"
+                f"FROM core.taxon WHERE rank = ANY(:ranks) AND {_ACTIVE_TAXON_SQL} GROUP BY 1 ORDER BY 2 DESC"
             ),
             {"ranks": species_ranks},
         )).mappings().all()
         primary_rows = (await db.execute(
             text(
                 "SELECT COALESCE(source, 'unknown') AS source, count(*)::bigint AS species "
-                "FROM core.taxon WHERE rank = ANY(:ranks) GROUP BY 1 ORDER BY 2 DESC"
+                f"FROM core.taxon WHERE rank = ANY(:ranks) AND {_ACTIVE_TAXON_SQL} GROUP BY 1 ORDER BY 2 DESC"
             ),
             {"ranks": species_ranks},
         )).mappings().all()
@@ -613,7 +617,8 @@ async def taxa_stats(db: AsyncSession = Depends(get_db_session)) -> dict[str, An
             text(
                 "SELECT x.source, count(DISTINCT x.taxon_id)::bigint AS species "
                 "FROM core.taxon_external_id x JOIN core.taxon t ON t.id = x.taxon_id "
-                "WHERE t.rank = ANY(:ranks) GROUP BY 1 ORDER BY 2 DESC"
+                "WHERE t.rank = ANY(:ranks) AND NOT (COALESCE(t.metadata, '{}'::jsonb) ? 'merged_into') "
+                "GROUP BY 1 ORDER BY 2 DESC"
             ),
             {"ranks": species_ranks},
         )).mappings().all()
@@ -651,9 +656,9 @@ async def taxa_kingdom_counts(
     if cached is not None:
         return cached
     params: dict[str, Any] = {}
-    where_sql = "TRUE"
+    where_sql = _ACTIVE_TAXON_SQL
     if variants:
-        where_sql = "rank = ANY(:rank_variants)"
+        where_sql = f"rank = ANY(:rank_variants) AND {_ACTIVE_TAXON_SQL}"
         params["rank_variants"] = variants
     try:
         rows = (await db.execute(
@@ -725,11 +730,12 @@ async def list_taxa(
     if prefix and prefix.strip():
         where_clauses.append("lower(canonical_name) LIKE :prefix_pattern")
         params["prefix_pattern"] = f"{_like_escape(prefix.strip().lower())}%"
-    if ids:
-        id_list = [x.strip() for x in ids.split(",") if x.strip()]
-        if id_list:
-            where_clauses.append("id = ANY(CAST(STRING_TO_ARRAY(:ids_csv, ',') AS uuid[]))")
-            params["ids_csv"] = ",".join(id_list)
+    id_list = [x.strip() for x in ids.split(",") if x.strip()] if ids else []
+    if id_list:
+        where_clauses.append("id = ANY(CAST(STRING_TO_ARRAY(:ids_csv, ',') AS uuid[]))")
+        params["ids_csv"] = ",".join(id_list)
+    else:
+        where_clauses.append(_ACTIVE_TAXON_SQL)
     kingdoms = _csv_values(kingdom)
     if kingdoms:
         where_clauses.append(_kingdom_filter_sql(kingdoms, params))
