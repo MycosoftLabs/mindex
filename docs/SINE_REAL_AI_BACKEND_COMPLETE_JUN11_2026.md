@@ -1,3 +1,5 @@
+> Superseded Oct 3, 2026: no local/on-prem GPU (Legions 241/249, node 190) exists anymore; all GPU workloads run on AWS. See `CODE/docs/NO_LOCAL_GPU_ALL_GPU_ON_AWS_OCT03_2026.md`.
+
 # SINE Real-AI Backend — Complete (June 11, 2026)
 
 **Date:** June 11, 2026
