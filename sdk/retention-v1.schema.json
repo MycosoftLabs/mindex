@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mycosoft:mindex:retention:v1",
+  "title": "MINDEX private retention v1",
+  "$defs": {
+    "ArtifactReceipt": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "artifact_id",
+        "job_id",
+        "task_id",
+        "tenant_id",
+        "project_id",
+        "kind",
+        "classification",
+        "sha256",
+        "byte_length",
+        "media_type",
+        "state",
+        "source_event_at",
+        "received_at",
+        "available_at",
+        "retention_until",
+        "durability",
+        "archive_verified",
+        "learned"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": "retention.v1"
+        },
+        "artifact_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "job_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "task_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "dataset",
+            "chart",
+            "artifact"
+          ]
+        },
+        "classification": {
+          "const": "private"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "archiving",
+            "verified",
+            "quarantined",
+            "cancelled",
+            "deleted"
+          ]
+        },
+        "source_event_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "received_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "available_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "retention_until": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "durability": {
+          "const": "postgres_committed"
+        },
+        "archive_verified": {
+          "type": "boolean"
+        },
+        "learned": {
+          "const": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "verified"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "archive_verified": {
+                "const": true
+              },
+              "available_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "archive_verified": {
+                "const": false
+              },
+              "available_at": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Principal": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "issuer",
+        "subject",
+        "tenant_id",
+        "project_id"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": "retention.v1"
+        },
+        "issuer": {
+          "type": "string",
+          "format": "uri"
+        },
+        "subject": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "project_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "MemoryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "summary"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    }
+  },
+  "$ref": "#/$defs/ArtifactReceipt"
+}
