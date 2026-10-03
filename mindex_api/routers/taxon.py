@@ -62,6 +62,45 @@ _TAXON_LIST_COLUMNS = """
 """
 
 
+# GBIF/iNat imports were stored with kingdom 'Undesignated'; their real kingdom lives in
+# metadata (GBIF `kingdom`, iNat `iconic_taxon_name`). Resolve it at read time so the kingdom
+# filter and counts cover every kingdom without rewriting core.taxon.
+_UNDESIGNATED_KINGDOMS_SQL = "(kingdom IS NULL OR kingdom IN ('', 'Undesignated'))"
+_INAT_ANIMAL_ICONIC_SQL = (
+    "('Animalia', 'Insecta', 'Aves', 'Mammalia', 'Reptilia', 'Amphibia', "
+    "'Actinopterygii', 'Mollusca', 'Arachnida')"
+)
+_METADATA_KINGDOM_SQL = (
+    "CASE "
+    "WHEN NULLIF(metadata->>'kingdom', '') IS NOT NULL THEN metadata->>'kingdom' "
+    f"WHEN metadata->>'iconic_taxon_name' IN {_INAT_ANIMAL_ICONIC_SQL} THEN 'Animalia' "
+    "ELSE NULLIF(metadata->>'iconic_taxon_name', '') END"
+)
+_EFFECTIVE_KINGDOM_SQL = (
+    f"CASE WHEN {_UNDESIGNATED_KINGDOMS_SQL} "
+    f"THEN COALESCE({_METADATA_KINGDOM_SQL}, kingdom) ELSE kingdom END"
+)
+
+
+def _csv_values(raw: Optional[str]) -> list[str]:
+    values = [v.strip() for v in (raw or "").split(",") if v.strip()]
+    return [] if any(v.lower() in ("all", "any") for v in values) else values
+
+
+def _kingdom_filter_sql(kingdoms: list[str], params: dict[str, Any]) -> str:
+    keys = []
+    for i, value in enumerate(kingdoms):
+        params[f"kingdom_{i}"] = value
+        keys.append(f":kingdom_{i}")
+    in_list = ", ".join(keys)
+    if any(k.lower() == "undesignated" for k in kingdoms):
+        return f"({_EFFECTIVE_KINGDOM_SQL}) IN ({in_list})"
+    return (
+        f"(kingdom IN ({in_list}) OR ({_UNDESIGNATED_KINGDOMS_SQL} "
+        f"AND ({_METADATA_KINGDOM_SQL}) IN ({in_list})))"
+    )
+
+
 def _normalize_taxon_row(row: dict[str, Any]) -> dict[str, Any]:
     d = dict(row)
     if d.get("metadata") is None:
@@ -531,7 +570,7 @@ async def _list_taxa_core_page(
                {_PAGE_COUNT_COLUMNS}
         FROM (
             SELECT id, canonical_name, rank, common_name, COALESCE(author, authority) AS author,
-                   description, source, metadata, kingdom,
+                   description, source, metadata, {_EFFECTIVE_KINGDOM_SQL} AS kingdom,
                    lineage, lineage_ids, external_ids, created_at, updated_at,
                    {order_expr} AS sort_key
             FROM core.taxon
@@ -597,6 +636,48 @@ async def taxa_stats(db: AsyncSession = Depends(get_db_session)) -> dict[str, An
     return payload
 
 
+@router.get("/kingdom-counts")
+async def taxa_kingdom_counts(
+    rank: Optional[str] = Query(
+        None, description="Optional rank filter; comma-separated, abbreviations match (species also matches 'sp.')."
+    ),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Live per-kingdom taxon counts with GBIF/iNat 'Undesignated' rows resolved to their real kingdom."""
+    ranks = _csv_values(rank)
+    variants = list(dict.fromkeys(v for value in ranks for v in _rank_variants(value)))
+    cache_key = "kingdom_counts:" + (",".join(variants) or "*")
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    params: dict[str, Any] = {}
+    where_sql = "TRUE"
+    if variants:
+        where_sql = "rank = ANY(:rank_variants)"
+        params["rank_variants"] = variants
+    try:
+        rows = (await db.execute(
+            text(
+                f"SELECT COALESCE({_EFFECTIVE_KINGDOM_SQL}, 'Undesignated') AS kingdom, count(*)::bigint AS taxon_count "
+                f"FROM core.taxon WHERE {where_sql} GROUP BY 1 ORDER BY 2 DESC"
+            ),
+            params,
+        )).mappings().all()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Kingdom counts unavailable.")
+    kingdoms = [{"kingdom": r["kingdom"], "taxon_count": int(r["taxon_count"])} for r in rows]
+    payload = {
+        "kingdoms": kingdoms,
+        "total": sum(k["taxon_count"] for k in kingdoms),
+        "rank": variants or None,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cache_ttl_seconds": _COUNT_CACHE_TTL_SECONDS,
+    }
+    _cache_put(cache_key, payload)
+    return payload
+
+
 @router.get("", response_model=TaxonListResponse)
 async def list_taxa(
     pagination: PaginationParams = Depends(pagination_params),
@@ -608,7 +689,10 @@ async def list_taxa(
     prefix: Optional[str] = Query(None, description="Prefix match on canonical_name (e.g., 'A' for A*)."),
     kingdom: Optional[str] = Query(
         None,
-        description="Filter by high-level kingdom (Fungi, Plantae, Animalia, ...). Omit for all kingdoms.",
+        description=(
+            "Filter by kingdom (Fungi, Plantae, Animalia, ...); comma-separated for several. "
+            "GBIF/iNat rows stored as 'Undesignated' match their metadata kingdom. Omit for all kingdoms."
+        ),
     ),
     lineage_contains: Optional[str] = Query(
         None,
@@ -631,9 +715,10 @@ async def list_taxa(
         q_pattern = f"%{_like_escape(q.strip())}%"
         where_clauses.append("(canonical_name ILIKE :q_pattern OR common_name ILIKE :q_pattern)")
         params["q_pattern"] = q_pattern
-    if rank and rank.strip():
+    rank_variants = list(dict.fromkeys(v for value in _csv_values(rank) for v in _rank_variants(value)))
+    if rank_variants:
         where_clauses.append("rank = ANY(:rank_variants)")
-        params["rank_variants"] = _rank_variants(rank)
+        params["rank_variants"] = rank_variants
     if source:
         where_clauses.append("source = :source")
         params["source"] = source
@@ -645,9 +730,9 @@ async def list_taxa(
         if id_list:
             where_clauses.append("id = ANY(CAST(STRING_TO_ARRAY(:ids_csv, ',') AS uuid[]))")
             params["ids_csv"] = ",".join(id_list)
-    if kingdom and kingdom.strip().lower() not in ("all", "any", ""):
-        where_clauses.append("kingdom = :kingdom")
-        params["kingdom"] = kingdom.strip()
+    kingdoms = _csv_values(kingdom)
+    if kingdoms:
+        where_clauses.append(_kingdom_filter_sql(kingdoms, params))
     if lineage_contains and lineage_contains.strip():
         where_clauses.append(
             "EXISTS (SELECT 1 FROM unnest(COALESCE(lineage, ARRAY[]::text[])) x "
