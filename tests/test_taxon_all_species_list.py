@@ -245,6 +245,30 @@ async def test_missing_optional_fungip_photo_source_is_explicitly_partial():
 
 
 @pytest.mark.asyncio
+async def test_has_images_bounds_scan_with_indexed_candidate_superset():
+    db = Session(Result(scalar="fungip.species"), Result(rows=[row()]), Result(scalar=1))
+    await call_list(db, filter="has_images")
+    page_sql, count_sql = db.calls[1][0], db.calls[2][0]
+    candidates = (
+        "t.id IN (SELECT c.id FROM core.taxon c WHERE c.metadata ?| array['default_photo', 'photos'] "
+        "UNION SELECT source.taxon_id FROM fungip.species source "
+        "WHERE source.image_valid IS TRUE AND source.taxon_id IS NOT NULL)"
+    )
+    for sql in (page_sql, count_sql):
+        assert candidates in sql
+        assert "t.metadata->'default_photo'->>'medium_url'" in sql
+        assert "source.image_valid IS TRUE" in sql
+
+
+@pytest.mark.asyncio
+async def test_has_images_candidate_superset_omits_absent_fungip_source():
+    db = Session(Result(scalar=None), Result(rows=[row()]), Result(scalar=1))
+    await call_list(db, filter="has_images")
+    assert "c.metadata ?| array['default_photo', 'photos']" in db.calls[1][0]
+    assert "UNION" not in db.calls[1][0]
+
+
+@pytest.mark.asyncio
 async def test_family_sort_without_optional_source_still_uses_family_field():
     db = Session(Result(scalar=None), Result(rows=[row()]), Result(scalar=1))
     response = await call_list(db, order_by="family")
