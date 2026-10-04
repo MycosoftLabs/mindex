@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
+import json
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -26,6 +28,13 @@ NOW = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
 COMMIT = "a60f2f309c438f375313f8c843877dc9881aaf7b"
 SEQUENCE = "acgt\nACGT "
 SEQUENCE_HASH = hashlib.sha256(SEQUENCE.encode("utf-8")).hexdigest()
+UNIPROT_FIXTURE = json.loads(
+    (Path(__file__).parent / "fixtures" / "uniprot_p00549_capture.json").read_text(encoding="utf-8-sig")
+)
+UNIPROT_CAPTURE = UNIPROT_FIXTURE["source_record"]
+assert UNIPROT_FIXTURE["capture_source_sha256"] == "4c92140529b0da623ba26d5143fc89a1802fd40511222529b788ab7a43e4ae4d"
+UNIPROT_SEQUENCE = UNIPROT_CAPTURE["sequence"]["value"]
+UNIPROT_SEQUENCE_HASH = hashlib.sha256(UNIPROT_SEQUENCE.encode("utf-8")).hexdigest()
 
 
 def sequence_row(**changes):
@@ -58,6 +67,9 @@ def test_exact_stored_genbank_its_identity_uses_real_row_and_taxon_types():
     assert record["provider"] == "genbank"
     assert record["accession"] == "PZ955173"
     assert record["version"] == "PZ955173.1"
+    assert record["version_state"] == "exact"
+    assert record["version_namespace"] == "ncbi.accession_version"
+    assert record["version_evidence"]["shape"] == "accession_plus_version"
     assert record["molecule"] == "dna"
     assert record["sequence_sha256"] == SEQUENCE_HASH
     assert record["sequence_hash_scope"] == "exact_stored_sequence_utf8_bytes"
@@ -125,6 +137,8 @@ def test_unversioned_accession_equality_does_not_claim_an_exact_version():
     assert record["accession"] == record["version"] == "P00549"
     assert record["resource"] == "uniprot"
     assert record["eligible_for_exact_identity_join"] is False
+    assert record["version_state"] == "version_unversioned"
+    assert record["version_namespace"] == "uniprot.sequenceVersion"
     assert "version_unversioned" in {d["code"] for d in diagnostics}
 
 
@@ -132,7 +146,73 @@ def test_fully_versioned_value_in_both_fields_is_exact():
     record, diagnostics = _make_record(sequence_row(accession="PZ955173.1", version="PZ955173.1"))
 
     assert diagnostics == []
+    assert record["version_state"] == "exact"
+    assert record["version_evidence"]["shape"] == "fully_versioned_accession"
     assert record["eligible_for_exact_identity_join"] is True
+
+
+def test_captured_uniprot_sequence_version_two_matches_exact_source_and_sequence():
+    row = sequence_row(
+        accession="P00549", version="2", source="uniprot", sequence_type="protein",
+        gene=None, region=None, sequence_sha256=UNIPROT_SEQUENCE_HASH,
+        sequence_utf8_bytes=len(UNIPROT_SEQUENCE.encode("utf-8")),
+        metadata={
+            "taxon_linkage": {"state": "linked_unique_exact_external_id"},
+            "uniprot_source_record": UNIPROT_CAPTURE,
+        },
+    )
+    record, diagnostics = _make_record(row)
+
+    assert diagnostics == []
+    assert record["version_state"] == "exact"
+    assert record["version_namespace"] == "uniprot.sequenceVersion"
+    assert record["version_evidence"]["source_sequence_version"] == 2
+    assert record["version_evidence"]["source_entry_version"] == 238
+    assert record["version_evidence"]["source_sequence_sha256"] == UNIPROT_SEQUENCE_HASH
+    assert record["eligible_for_exact_identity_join"] is True
+
+
+def test_uniprot_entry_version_238_is_not_sequence_version_two():
+    row = sequence_row(
+        accession="P00549", version="238", source="uniprot", sequence_type="protein",
+        gene=None, region=None, sequence_sha256=UNIPROT_SEQUENCE_HASH,
+        sequence_utf8_bytes=len(UNIPROT_SEQUENCE.encode("utf-8")),
+        metadata={
+            "taxon_linkage": {"state": "linked_unique_exact_external_id"},
+            "uniprot_source_record": UNIPROT_CAPTURE,
+        },
+    )
+    record, diagnostics = _make_record(row)
+
+    assert record["version"] == "238"
+    assert record["version_evidence"]["source_sequence_version"] == 2
+    assert record["version_evidence"]["source_entry_version"] == 238
+    assert record["eligible_for_exact_identity_join"] is False
+    assert "version_conflict" in {item["code"] for item in diagnostics}
+
+
+@pytest.mark.parametrize("provider", ["ensembl", "bold", "unite"])
+def test_unestablished_provider_version_namespaces_stay_unsupported(provider):
+    row = sequence_row(source=provider, version="PZ955173.1")
+    if provider in {"bold", "unite"}:
+        row.update(sequence_type="dna", gene="ITS", region="ITS1")
+    else:
+        row.update(sequence_type="dna", gene=None, region=None)
+    record, diagnostics = _make_record(row)
+
+    assert record["version_state"] == "version_namespace_unsupported"
+    assert record["version_namespace"] is None
+    assert record["eligible_for_exact_identity_join"] is False
+    assert "version_namespace_unsupported" in {item["code"] for item in diagnostics}
+
+
+@pytest.mark.parametrize("version", ["P00549", "PZ955173.1"])
+def test_unestablished_namespace_is_unsupported_even_for_unversioned_or_dotted_values(version):
+    record, diagnostics = _make_record(sequence_row(source="ensembl", version=version))
+
+    assert record["version_state"] == "version_namespace_unsupported"
+    assert record["version_namespace"] is None
+    assert "version_namespace_unsupported" in {item["code"] for item in diagnostics}
 
 
 def test_total_export_byte_cap_omits_hash_and_qualifies_the_row():

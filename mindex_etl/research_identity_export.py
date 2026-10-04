@@ -142,18 +142,80 @@ def _canonical_uuid(value: Any) -> str | None:
     raise ValueError("database UUID has an unexpected representation")
 
 
-def _expected_version_state(accession: str, version: Any) -> str:
+def _version_evidence(
+    provider: Any,
+    accession: str,
+    version: Any,
+    sequence_sha256: Any,
+    metadata: Any,
+) -> tuple[str, str | None, dict[str, Any] | None, str | None]:
+    """Validate versions only against evidence in the provider's namespace."""
+    if not isinstance(provider, str):
+        return "version_namespace_unsupported", None, None, "version_namespace_unsupported"
+    provider = provider.casefold()
+    if provider not in {"genbank", "ncbi", "refseq", "uniprot"}:
+        # Do not apply a different provider's accession syntax, even when a
+        # stored value happens to look versioned or equals the accession.
+        return "version_namespace_unsupported", None, None, "version_namespace_unsupported"
     if not isinstance(version, str) or not version:
-        return "version_missing"
+        return "version_missing", None, None, "version_missing"
     if not _ACCESSION_RE.fullmatch(version):
-        return "version_invalid"
-    if version == accession:
-        # Equality is exact only when both fields actually contain accession.version.
+        return "version_invalid", None, None, "version_invalid"
+
+    if provider in {"genbank", "ncbi", "refseq"}:
         base, separator, suffix = version.rpartition(".")
-        return "exact" if separator and base and suffix.isdigit() else "version_unversioned"
-    if version.startswith(accession + ".") and version[len(accession) + 1 :].isdigit():
-        return "exact"
-    return "version_conflict"
+        exact = (
+            bool(separator and base and suffix.isdigit())
+            and (version == accession or (base == accession and version.startswith(accession + ".")))
+        )
+        if exact:
+            shape = "fully_versioned_accession" if version == accession else "accession_plus_version"
+            return "exact", "ncbi.accession_version", {
+                "stored_accession": accession, "stored_version": version, "shape": shape,
+            }, None
+        if version == accession:
+            return "version_unversioned", "ncbi.accession_version", {
+                "stored_accession": accession, "stored_version": version,
+            }, "version_unversioned"
+        return "version_conflict", "ncbi.accession_version", {
+            "stored_accession": accession, "stored_version": version,
+        }, "version_conflict"
+
+    if provider == "uniprot":
+        namespace = "uniprot.sequenceVersion"
+        if version == accession:
+            return "version_unversioned", namespace, {
+                "stored_accession": accession, "stored_version": version,
+            }, "version_unversioned"
+        capture = metadata.get("uniprot_source_record") if isinstance(metadata, Mapping) else None
+        if not isinstance(capture, Mapping):
+            return "version_source_evidence_unavailable", namespace, None, "version_source_evidence_unavailable"
+        audit = capture.get("entryAudit")
+        sequence = capture.get("sequence")
+        primary_accession = capture.get("primaryAccession")
+        sequence_version = audit.get("sequenceVersion") if isinstance(audit, Mapping) else None
+        entry_version = audit.get("entryVersion") if isinstance(audit, Mapping) else None
+        sequence_value = sequence.get("value") if isinstance(sequence, Mapping) else None
+        evidence: dict[str, Any] = {
+            "stored_accession": accession,
+            "stored_version": version,
+            "source_primary_accession": primary_accession,
+            "source_sequence_version": sequence_version,
+            "source_entry_version": entry_version,
+        }
+        if not isinstance(primary_accession, str) or primary_accession != accession:
+            return "version_source_identity_conflict", namespace, evidence, "version_source_identity_conflict"
+        if not isinstance(sequence_value, str) or not isinstance(sequence_sha256, str) or not _SHA256_RE.fullmatch(sequence_sha256):
+            return "version_source_evidence_unavailable", namespace, evidence, "version_source_evidence_unavailable"
+        source_sequence_sha256 = _sha256(sequence_value.encode("utf-8"))
+        evidence["source_sequence_sha256"] = source_sequence_sha256
+        if source_sequence_sha256 != sequence_sha256:
+            return "source_sequence_hash_conflict", namespace, evidence, "source_sequence_hash_conflict"
+        if type(sequence_version) is not int or str(sequence_version) != version:
+            return "version_conflict", namespace, evidence, "version_conflict"
+        return "exact", namespace, evidence, None
+
+    raise AssertionError("recognized provider version policy was not handled")
 
 
 def _resource_mapping(row: Mapping[str, Any]) -> tuple[str | None, str | None, str | None]:
@@ -250,9 +312,11 @@ def _make_record(row: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str,
     def add(code: str) -> None:
         diagnostics.append({"code": code, "sequence_row_id": row_id, "accession": accession})
 
-    version_state = _expected_version_state(accession, row.get("version"))
-    if version_state != "exact":
-        add(version_state)
+    version_state, version_namespace, version_evidence, version_diagnostic = _version_evidence(
+        row.get("source"), accession, row.get("version"), sequence_sha256, metadata,
+    )
+    if version_diagnostic:
+        add(version_diagnostic)
     if mapping_error:
         add(mapping_error)
 
@@ -305,6 +369,9 @@ def _make_record(row: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         "sequence_row_id": row_id,
         "accession": accession,
         "version": row.get("version"),
+        "version_state": version_state,
+        "version_namespace": version_namespace,
+        "version_evidence": version_evidence,
         "provider": row.get("source"),
         "molecule": row.get("sequence_type"),
         "gene": row.get("gene"),

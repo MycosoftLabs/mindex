@@ -84,6 +84,13 @@ def test_exact_declared_postgres_rows_export_read_only_stored_identity():
             "sequence_row_id": sequence_row_id,
             "accession": accession,
             "version": version,
+            "version_state": "exact",
+            "version_namespace": "ncbi.accession_version",
+            "version_evidence": {
+                "stored_accession": accession,
+                "stored_version": version,
+                "shape": "accession_plus_version",
+            },
             "provider": "genbank",
             "molecule": "dna",
             "gene": "ITS",
