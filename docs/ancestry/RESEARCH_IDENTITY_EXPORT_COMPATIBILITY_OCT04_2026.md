@@ -2,7 +2,7 @@
 
 ## Scope and source pins
 
-This additive compatibility report and exporter are on isolated branch `codex/research-identity-export-oct04`, based on MINDEX PR #34 head `a60f2f309c438f375313f8c843877dc9881aaf7b`. PR #34 remains frozen. Static schema findings below pin its source files; the implementation section documents this branch's new producer and private-fixture validation. No shared/native database, provider, Website, first40/16, FG026, wallet, or live service was contacted.
+This additive compatibility report and exporter are on isolated branch `codex/research-identity-export-oct04`, based on MINDEX PR #34 head `a60f2f309c438f375313f8c843877dc9881aaf7b`. Producer and test implementation commit: `dd3f8e92ad1d6a1a4cdb78409565726d35dd8aa9`; a later commit only refreshes this report's handoff receipt pointers and hashes. PR #34 remains frozen. Static schema findings below pin its source files; the implementation section documents this branch's new producer and private-fixture validation. No shared/native database, provider, Website, first40/16, FG026, wallet, or live service was contacted.
 
 The pinned MAS consumer is `research_jobs/identity_snapshot.py` from the offline installed-package receipt for MAS PR #202 head `b886147511021672f1e1ac488ee5d883a75516be`; its SHA-256 is `a95d735d58051a13101e1537a42f88eb1d7381beb193e40346464adcac9b6979`. Its `research.identity-export.v1` validator requires each record to contain exactly `resource`, `accession`, `sequence_sha256`, `canonical_taxon_id`, `canonical_reference_id`, and `source_record_id`; all three identity fields must be canonical UUID strings. It also requires an authority URL, authority-response SHA-256, capture time, expiry, and one of `available|empty|partial|unavailable`. Duplicate `(resource, accession, sequence_sha256)` keys reject the entire export.
 
@@ -131,6 +131,9 @@ All paths are relative to the pinned MINDEX checkout unless stated otherwise.
 | `mindex_etl/sources/publication_evidence.py` | source XML parsing, versioned provider ID and source hash | `40840496eb6e68a57192dfea4ac2fd2ed4827e62de00193ba2a95c3f1640c74f` |
 | `mindex_etl/jobs/import_taxon_publication_evidence.py` | local string publication ID and read/write queries for evidence | `23a0b8a093d2b310b6bcc2a1e2f896a73847b9752854817988052188fb391b56` |
 | `mindex_api/routers/genetics.py` | exact stored GET query by base accession/version | `d66b72eb61a53f29aa2942ba2b93307d8bcb19e8479916d0aeda52a6dafa45f1` |
+| `mindex_etl/research_identity_export.py` | additive fixed-query v2 producer; int4 row identity, UUID/null taxon link, exact-byte hash | `827ff6814abe5416e20c6ff869793d9b2d50bf6ef5823748cfb61c4bb9ee02d0` |
+| `tests/test_research_identity_export.py` | offline contract, mapping, status and conflict regressions | `d348d974a8aaa2a3826ec0995e816367fedc9620d4d2e16beeccdd4b8872cc53` |
+| `tests/test_research_identity_export_postgres.py` | opt-in private PostgreSQL integration regression | `39c9da348f69f65150357391adb51eaeeeb84b9e680063ef09d485a202a8e323` |
 
 ## Validation and custody
 
@@ -138,4 +141,4 @@ Focused validation passed 26/26 tests (25 offline producer/contract tests and on
 
 The integration case inserted and removed one synthetic taxon/sequence pair. It verified the `SERIAL` sequence-row ID as int4, the actual taxon UUID, exact accession/version/source/molecule/marker fields, hash of unnormalized UTF-8 sequence bytes, and the transaction read-only/repeatable-read receipt. The exporter returned no sequence content. A post-test count found no remaining `ZZTEST%` row. The private PostgreSQL process stopped successfully; `pg_ctl` reports no server, the owned process count is zero, port 55477 is closed, the PID file is absent, and the cluster data is retained at `outputs/ancestry-continuation-oct04/research-identity-export-v2-pg/data`.
 
-JUnit: `outputs/ancestry-continuation-oct04/research-identity-export-v2-pg/pytest-v2.junit.xml` (SHA-256 `4b468b16f159296c2942a9b7c330aec44655f48d6938aedcbe42c6a541988f2f`). Test log: `outputs/ancestry-continuation-oct04/research-identity-export-v2-pg/pytest-v2.log` (SHA-256 `17a53cfb8c801dc846fcb871cab8a31eccf3509bab840ad6a91fe7a0972090ab`). These results qualify only the isolated schema fixture and static/offline producer behavior. No shared/native database, provider, deployment, Website, first40/16, FG026, wallet, or `.189` action occurred.
+JUnit, test log, PostgreSQL logs and exact final run receipt are under `outputs/ancestry-continuation-oct04/research-identity-export-v2-pg/`; the handoff receipt pins their final hashes and the exact test head. These results qualify only the isolated schema fixture and static/offline producer behavior. No shared/native database, provider, deployment, Website, first40/16, FG026, wallet, or `.189` action occurred.
