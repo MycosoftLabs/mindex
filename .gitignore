@@ -23,3 +23,7 @@ test_output.txt
 pytest_out*.txt
 # Local credentials (never commit)
 .credentials.local
+
+# Env files: only the template is tracked
+.env.*
+!.env.example

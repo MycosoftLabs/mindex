@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 FIRMS_API = "https://firms.modaps.eosdis.nasa.gov/api"
 # Suomi NPP FIRMS delivery ends 2026-11-01; NOAA-20 and NOAA-21 carry VIIRS NRT.
 FIRMS_SOURCES = ("VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT")
+# The MAP_KEY is shared by every Mycosoft system (5000 transactions / 10 min),
+# so identical requests are served from memory for 10 minutes.
+FIRMS_CACHE_TTL_SECONDS = 600
+_firms_cache: Dict[tuple, tuple] = {}
 
 
 def _firms_map_key() -> str:
@@ -95,8 +99,14 @@ def iter_fire_hotspots(
         return
     with httpx.Client() as client:
         for source in sources:
+            cache_key = (source, area, days)
+            cached = _firms_cache.get(cache_key)
             try:
-                records = _fetch_firms_data(client, source, area, days)
+                if cached and time.monotonic() - cached[0] < FIRMS_CACHE_TTL_SECONDS:
+                    records = cached[1]
+                else:
+                    records = _fetch_firms_data(client, source, area, days)
+                    _firms_cache[cache_key] = (time.monotonic(), records)
             except Exception as e:
                 logger.warning("FIRMS %s fetch failed: %s", source, e)
                 continue
