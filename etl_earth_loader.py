@@ -114,16 +114,18 @@ async def load_wildfires(conn: asyncpg.Connection):
     log.info("Loading wildfires from NASA FIRMS...")
     # FIRMS CSV endpoint for last 7 days, VIIRS sensor
     # Use NASA EarthData bearer token for authenticated access
-    earthdata_token = os.environ.get("NASA_EARTHDATA_TOKEN", "")
-    # FIRMS rejects DEMO_KEY; a MAP_KEY is required.
-    firms_key = os.environ.get("NASA_FIRMS_MAP_KEY", "").strip()
+    earthdata_token = os.environ.get("EARTHDATA_TOKEN") or os.environ.get("NASA_EARTHDATA_TOKEN", "")
+    firms_key = (
+        os.environ.get("NASA_FIRMS_MAP_KEY")
+        or os.environ.get("FIRMS_MAP_KEY")
+        or os.environ.get("FIRMS_API_KEY", "")
+    )
     if not firms_key:
-        log.warning("NASA_FIRMS_MAP_KEY not set; skipping FIRMS wildfires")
+        log.warning("  NASA_FIRMS_MAP_KEY is not set; skipping FIRMS wildfires")
         return 0
     # Use 1-day window per request to stay within size limits
     # world/7 returns 400 for global (too much data), world/1 works
-    # Suomi NPP FIRMS delivery ends 2026-11-01; use NOAA-20.
-    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{firms_key}/VIIRS_NOAA20_NRT/world/1"
+    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{firms_key}/VIIRS_SNPP_NRT/world/1"
 
     headers = {}
     if earthdata_token:

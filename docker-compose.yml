@@ -113,8 +113,10 @@ services:
       API_CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002","http://127.0.0.1:3000","http://natureos-web:3000","http://crep-web:3000"]'
 
       # Earth data API keys (optional, enables higher rate limits)
-      NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
+      NASA_API_KEY: ${NASA_API_KEY:-}
       NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
+      EARTHDATA_USERNAME: ${EARTHDATA_USERNAME:-}
+      EARTHDATA_TOKEN: ${EARTHDATA_TOKEN:-}
 
       # Git SHA for version endpoint
       GIT_SHA: ${GIT_SHA:-}
@@ -180,8 +182,10 @@ services:
       GBIF_DOMAIN_MODE: ${GBIF_DOMAIN_MODE:-fungi}
       INAT_API_TOKEN: ${INAT_API_TOKEN:-}
       LOCAL_DATA_DIR: ${LOCAL_DATA_DIR:-/mnt/nas/mindex/scrapes/work}
-      NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
+      NASA_API_KEY: ${NASA_API_KEY:-}
       NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
+      EARTHDATA_USERNAME: ${EARTHDATA_USERNAME:-}
+      EARTHDATA_TOKEN: ${EARTHDATA_TOKEN:-}
       CHEMSPIDER_API_KEY: ${CHEMSPIDER_API_KEY:-}
       NCBI_API_KEY: ${NCBI_API_KEY:-}
     healthcheck:
@@ -243,8 +247,10 @@ services:
       INAT_DOMAIN_MODE: ${INAT_DOMAIN_MODE:-all}
       GBIF_DOMAIN_MODE: ${GBIF_DOMAIN_MODE:-all}
       INAT_API_TOKEN: ${INAT_API_TOKEN:-}
-      NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
+      NASA_API_KEY: ${NASA_API_KEY:-}
       NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
+      EARTHDATA_USERNAME: ${EARTHDATA_USERNAME:-}
+      EARTHDATA_TOKEN: ${EARTHDATA_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
@@ -341,7 +347,7 @@ services:
       STATIC_MAS_ENDPOINT: "${STATIC_MAS_ENDPOINT:-}"
 
       # Earth data API keys
-      NASA_API_KEY: ${NASA_API_KEY:-DEMO_KEY}
+      NASA_API_KEY: ${NASA_API_KEY:-}
       GIT_SHA: ${GIT_SHA:-}
     depends_on:
       db:
