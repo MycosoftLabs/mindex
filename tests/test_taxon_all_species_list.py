@@ -124,6 +124,17 @@ async def test_cached_zero_does_not_label_a_nonempty_page_as_empty():
 
 
 @pytest.mark.asyncio
+async def test_cached_zero_with_empty_first_page_reports_empty():
+    db = Session(Result(rows=[]), Result(scalar=0), Result(rows=[]))
+    first = await call_list(db, rank="species")
+    second = await call_list(db, rank="species")
+    assert first.query.status == "empty"
+    assert second.query.count_cache_state == "cache_hit"
+    assert second.pagination.total == 0
+    assert second.query.status == "empty"
+
+
+@pytest.mark.asyncio
 async def test_prefix_and_query_are_escaped_and_prefix_is_index_friendly():
     db = Session(Result(rows=[]), Result(scalar=0))
     await call_list(db, prefix="Ab_", q="50%")
