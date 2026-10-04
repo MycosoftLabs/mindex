@@ -9,8 +9,16 @@ import pytest
 
 from mindex_api.contracts.v1.ancestry_index import FungiPIndexAvailability
 from mindex_api.dependencies import PaginationParams
-from mindex_api.routers.taxon import list_taxa
+from mindex_api.routers import taxon as taxon_router
 from mindex_api.services import ancestry_public_members as ancestry
+
+
+@pytest.fixture(autouse=True)
+def isolate_taxon_count_cache():
+    """Keep fake SQL response ordering independent of previous list-route tests."""
+    taxon_router._count_cache.clear()
+    yield
+    taxon_router._count_cache.clear()
 
 
 CANONICAL_UUID = UUID("6eb9e962-05c3-4f2b-8ed1-598cbb2a0ac2")
@@ -111,7 +119,7 @@ async def test_ordinary_taxa_route_keeps_all_life_rows_when_index_is_missing():
     session = _FakeSession([
         _Result(rows=[ordinary]), _Result(scalar=1), _Result(scalar_or_none=None),
     ])
-    response = await list_taxa(
+    response = await taxon_router.list_taxa(
         pagination=PaginationParams(limit=20, offset=0), db=session,
         ids=None, q=None, rank=None, source=None, prefix=None, kingdom=None,
         lineage_contains=None, order_by="canonical_name", order="asc",
@@ -149,7 +157,7 @@ async def test_ordinary_taxa_route_attaches_only_linked_fungip_member():
         _Result(rows=[ordinary]), _Result(scalar=1),
         _Result(scalar_or_none="fungip.species"), _Result(rows=[member_row]),
     ])
-    response = await list_taxa(
+    response = await taxon_router.list_taxa(
         pagination=PaginationParams(limit=20, offset=0), db=session,
         ids=None, q=None, rank=None, source=None, prefix=None, kingdom=None,
         lineage_contains=None, order_by="canonical_name", order="asc",

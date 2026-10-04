@@ -9,6 +9,15 @@ from fastapi.testclient import TestClient
 from mindex_api.main import create_app
 from mindex_api.dependencies import get_db_session, require_api_key
 from mindex_api.auth import require_internal_token
+from mindex_api.routers import taxon as taxon_router
+
+
+@pytest.fixture(autouse=True)
+def isolate_taxon_count_cache():
+    """Keep fake SQL response ordering independent of previous list-route tests."""
+    taxon_router._count_cache.clear()
+    yield
+    taxon_router._count_cache.clear()
 
 
 class FakeMappingsResult:
