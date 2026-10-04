@@ -148,16 +148,19 @@ def _version_evidence(
     version: Any,
     sequence_sha256: Any,
     metadata: Any,
+    sequence_type: Any,
 ) -> tuple[str, str | None, dict[str, Any] | None, str | None]:
     """Validate versions only against evidence in the provider's namespace."""
     if not isinstance(provider, str):
         return "version_namespace_unsupported", None, None, "version_namespace_unsupported"
     provider = provider.casefold()
-    if provider not in {"genbank", "ncbi", "refseq", "uniprot"}:
+    if provider not in {"genbank", "ncbi", "refseq", "uniprot", "ensembl"}:
         # Do not apply a different provider's accession syntax, even when a
         # stored value happens to look versioned or equals the accession.
         return "version_namespace_unsupported", None, None, "version_namespace_unsupported"
     if not isinstance(version, str) or not version:
+        if provider == "ensembl":
+            return "version_source_evidence_unavailable", "ensembl.stable_id_version", None, "version_source_evidence_unavailable"
         return "version_missing", None, None, "version_missing"
     if not _ACCESSION_RE.fullmatch(version):
         return "version_invalid", None, None, "version_invalid"
@@ -212,6 +215,51 @@ def _version_evidence(
         if source_sequence_sha256 != sequence_sha256:
             return "source_sequence_hash_conflict", namespace, evidence, "source_sequence_hash_conflict"
         if type(sequence_version) is not int or str(sequence_version) != version:
+            return "version_conflict", namespace, evidence, "version_conflict"
+        return "exact", namespace, evidence, None
+
+    if provider == "ensembl":
+        namespace = "ensembl.stable_id_version"
+        capture = metadata.get("ensembl_source_record") if isinstance(metadata, Mapping) else None
+        if not isinstance(capture, Mapping):
+            return "version_source_evidence_unavailable", namespace, None, "version_source_evidence_unavailable"
+        source_id = capture.get("id")
+        source_version = capture.get("version")
+        source_molecule = capture.get("molecule")
+        source_sequence = capture.get("seq")
+        evidence: dict[str, Any] = {
+            "stored_accession": accession,
+            "stored_version": version,
+            "source_stable_id": source_id,
+            "source_version": source_version,
+            "source_molecule": source_molecule,
+        }
+        if not isinstance(source_id, str):
+            return "version_source_evidence_unavailable", namespace, evidence, "version_source_evidence_unavailable"
+        if source_id != accession:
+            return "version_source_identity_conflict", namespace, evidence, "version_source_identity_conflict"
+        if type(source_version) is not int or source_version < 1:
+            return "version_source_evidence_unavailable", namespace, evidence, "version_source_evidence_unavailable"
+        if (
+            not isinstance(source_molecule, str)
+            or source_molecule not in {"dna", "protein"}
+            or not isinstance(sequence_type, str)
+            or sequence_type not in {"dna", "protein"}
+        ):
+            return "version_source_evidence_unavailable", namespace, evidence, "version_source_evidence_unavailable"
+        if source_molecule != sequence_type:
+            return "version_source_type_conflict", namespace, evidence, "version_source_type_conflict"
+        if (
+            not isinstance(source_sequence, str)
+            or not isinstance(sequence_sha256, str)
+            or not _SHA256_RE.fullmatch(sequence_sha256)
+        ):
+            return "version_source_evidence_unavailable", namespace, evidence, "version_source_evidence_unavailable"
+        source_sequence_sha256 = _sha256(source_sequence.encode("utf-8"))
+        evidence["source_sequence_sha256"] = source_sequence_sha256
+        if source_sequence_sha256 != sequence_sha256:
+            return "source_sequence_hash_conflict", namespace, evidence, "source_sequence_hash_conflict"
+        if str(source_version) != version:
             return "version_conflict", namespace, evidence, "version_conflict"
         return "exact", namespace, evidence, None
 
@@ -314,6 +362,7 @@ def _make_record(row: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str,
 
     version_state, version_namespace, version_evidence, version_diagnostic = _version_evidence(
         row.get("source"), accession, row.get("version"), sequence_sha256, metadata,
+        row.get("sequence_type"),
     )
     if version_diagnostic:
         add(version_diagnostic)
@@ -337,6 +386,8 @@ def _make_record(row: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         raise ValueError("database sequence digest has an unexpected representation")
     else:
         hash_state = None
+    if sequence_utf8_bytes == 0:
+        add("sequence_empty")
 
     linkage_provenance_state = _metadata_linkage_state(metadata, taxon_id)
     linkage_provenance_supported = linkage_provenance_state in {
@@ -390,7 +441,8 @@ def _make_record(row: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str,
         "eligible_for_exact_identity_join": bool(
             resource and version_state == "exact" and taxon_state == "stored_fk"
             and linkage_provenance_supported
-            and hash_state not in {"conflict", "omitted_export_byte_limit"} and not mapping_error
+            and hash_state not in {"conflict", "omitted_export_byte_limit"}
+            and sequence_utf8_bytes > 0 and not mapping_error
         ),
         "diagnostic_codes": [item["code"] for item in diagnostics],
     }

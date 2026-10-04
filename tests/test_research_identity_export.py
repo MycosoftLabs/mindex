@@ -35,6 +35,10 @@ UNIPROT_CAPTURE = UNIPROT_FIXTURE["source_record"]
 assert UNIPROT_FIXTURE["capture_source_sha256"] == "4c92140529b0da623ba26d5143fc89a1802fd40511222529b788ab7a43e4ae4d"
 UNIPROT_SEQUENCE = UNIPROT_CAPTURE["sequence"]["value"]
 UNIPROT_SEQUENCE_HASH = hashlib.sha256(UNIPROT_SEQUENCE.encode("utf-8")).hexdigest()
+ENSEMBL_CAPTURE_FIXTURE = json.loads(
+    (Path(__file__).parent / "fixtures" / "ensembl_yal001c_capture_projection.json").read_text(encoding="utf-8-sig")
+)
+assert ENSEMBL_CAPTURE_FIXTURE["capture_source_sha256"] == "48baf827379a85f77d56e82e74fa1baecfb259e090c3a9d810561c1b6d6707d4"
 
 
 def sequence_row(**changes):
@@ -191,13 +195,10 @@ def test_uniprot_entry_version_238_is_not_sequence_version_two():
     assert "version_conflict" in {item["code"] for item in diagnostics}
 
 
-@pytest.mark.parametrize("provider", ["ensembl", "bold", "unite"])
+@pytest.mark.parametrize("provider", ["bold", "unite"])
 def test_unestablished_provider_version_namespaces_stay_unsupported(provider):
     row = sequence_row(source=provider, version="PZ955173.1")
-    if provider in {"bold", "unite"}:
-        row.update(sequence_type="dna", gene="ITS", region="ITS1")
-    else:
-        row.update(sequence_type="dna", gene=None, region=None)
+    row.update(sequence_type="dna", gene="ITS", region="ITS1")
     record, diagnostics = _make_record(row)
 
     assert record["version_state"] == "version_namespace_unsupported"
@@ -206,13 +207,95 @@ def test_unestablished_provider_version_namespaces_stay_unsupported(provider):
     assert "version_namespace_unsupported" in {item["code"] for item in diagnostics}
 
 
+def test_ensembl_stable_id_version_requires_exact_source_identity_type_and_sequence():
+    source_sequence = "MSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVYLLPRRGPRLGV"
+    source_sha256 = hashlib.sha256(source_sequence.encode("utf-8")).hexdigest()
+    row = sequence_row(
+        accession="ENSP00000288602", version="7", source="ensembl", sequence_type="protein",
+        gene=None, region=None, sequence_sha256=source_sha256,
+        sequence_utf8_bytes=len(source_sequence.encode("utf-8")),
+        metadata={
+            "taxon_linkage": {"state": "linked_unique_exact_external_id"},
+            "ensembl_source_record": {
+                "id": "ENSP00000288602", "version": 7, "molecule": "protein", "seq": source_sequence,
+            },
+        },
+    )
+    record, diagnostics = _make_record(row)
+
+    assert diagnostics == []
+    assert record["version_state"] == "exact"
+    assert record["version_namespace"] == "ensembl.stable_id_version"
+    assert record["version_evidence"] == {
+        "stored_accession": "ENSP00000288602",
+        "stored_version": "7",
+        "source_stable_id": "ENSP00000288602",
+        "source_version": 7,
+        "source_molecule": "protein",
+        "source_sequence_sha256": source_sha256,
+    }
+    assert record["eligible_for_exact_identity_join"] is True
+
+
 @pytest.mark.parametrize("version", ["P00549", "PZ955173.1"])
-def test_unestablished_namespace_is_unsupported_even_for_unversioned_or_dotted_values(version):
+def test_ensembl_accession_equality_or_dotted_value_does_not_infer_version_without_capture(version):
     record, diagnostics = _make_record(sequence_row(source="ensembl", version=version))
 
-    assert record["version_state"] == "version_namespace_unsupported"
-    assert record["version_namespace"] is None
-    assert "version_namespace_unsupported" in {item["code"] for item in diagnostics}
+    assert record["version_state"] == "version_source_evidence_unavailable"
+    assert record["version_namespace"] == "ensembl.stable_id_version"
+    assert record["eligible_for_exact_identity_join"] is False
+    assert "version_source_evidence_unavailable" in {item["code"] for item in diagnostics}
+
+
+@pytest.mark.parametrize(
+    ("capture_change", "expected_state", "expected_code"),
+    [
+        ({"id": "ENSP00000000000"}, "version_source_identity_conflict", "version_source_identity_conflict"),
+        ({"molecule": "dna"}, "version_source_type_conflict", "version_source_type_conflict"),
+        ({"seq": "different source sequence"}, "source_sequence_hash_conflict", "source_sequence_hash_conflict"),
+        ({"version": 8}, "version_conflict", "version_conflict"),
+    ],
+)
+def test_ensembl_source_identity_type_hash_and_version_conflicts_are_not_admitted(
+    capture_change, expected_state, expected_code,
+):
+    source_sequence = "MSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVYLLPRRGPRLGV"
+    capture = {"id": "ENSP00000288602", "version": 7, "molecule": "protein", "seq": source_sequence}
+    capture.update(capture_change)
+    row = sequence_row(
+        accession="ENSP00000288602", version="7", source="ensembl", sequence_type="protein",
+        gene=None, region=None,
+        sequence_sha256=hashlib.sha256(source_sequence.encode("utf-8")).hexdigest(),
+        sequence_utf8_bytes=len(source_sequence.encode("utf-8")),
+        metadata={
+            "taxon_linkage": {"state": "linked_unique_exact_external_id"},
+            "ensembl_source_record": capture,
+        },
+    )
+    record, diagnostics = _make_record(row)
+
+    assert record["version_state"] == expected_state
+    assert record["eligible_for_exact_identity_join"] is False
+    assert expected_code in {item["code"] for item in diagnostics}
+
+
+def test_retained_ensembl_sgd_capture_with_release_but_no_stable_id_version_stays_unavailable():
+    capture = ENSEMBL_CAPTURE_FIXTURE["record"]
+    record, diagnostics = _make_record(sequence_row(
+        accession="YAL001C", version=None, source="ensembl", sequence_type="dna",
+        gene=None, region=None, taxon_id=None,
+        sequence_sha256=capture["sequence_sha256"],
+        sequence_utf8_bytes=capture["sequence_utf8_bytes"],
+        metadata={"ensembl_source_record": capture},
+    ))
+
+    assert capture["id"] == "YAL001C"
+    assert capture["release_reported"] == 116
+    assert capture["sequence_version"] is None
+    assert record["version_state"] == "version_source_evidence_unavailable"
+    assert record["version_namespace"] == "ensembl.stable_id_version"
+    assert record["eligible_for_exact_identity_join"] is False
+    assert "version_source_evidence_unavailable" in {item["code"] for item in diagnostics}
 
 
 def test_total_export_byte_cap_omits_hash_and_qualifies_the_row():
@@ -339,6 +422,24 @@ def test_successful_no_match_is_empty_but_unlinked_or_unmapped_rows_are_partial(
     assert partial["status"] == "partial" and partial["records"][0]["canonical_taxon_id"] is None
     assert_sealed(empty)
     assert_sealed(partial)
+
+
+def test_zero_byte_sequence_keeps_empty_digest_but_is_partial_and_ineligible():
+    empty_sha256 = hashlib.sha256(b"").hexdigest()
+    export = export_identity_snapshot(FakeConnection([sequence_row(
+        sequence_sha256=empty_sha256,
+        sequence_utf8_bytes=0,
+    )]), producer_commit=COMMIT)
+    record = export["records"][0]
+
+    assert export["status"] == "partial"
+    assert record["sequence_sha256"] == empty_sha256
+    assert record["sequence_hash_scope"] == "exact_stored_sequence_utf8_bytes"
+    assert record["sequence_utf8_bytes"] == 0
+    assert record["eligible_for_exact_identity_join"] is False
+    assert "sequence_empty" in record["diagnostic_codes"]
+    assert any(item["code"] == "sequence_empty" for item in export["diagnostics"])
+    assert_sealed(export)
 
 
 def test_authority_failure_and_schema_drift_fail_unavailable_without_rows():
