@@ -1,6 +1,7 @@
 """Offline all-species list/stats behavior; fake SQL results, no DB."""
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -98,12 +99,28 @@ async def test_species_rank_includes_abbreviated_sources_and_uses_core_page_path
 
 
 @pytest.mark.asyncio
-async def test_total_is_cached_across_pages_of_the_same_filter():
+async def test_cached_total_reports_freshness_and_non_atomic_consistency():
     db = Session(Result(rows=[row()]), Result(scalar=42), Result(rows=[row()]))
-    await call_list(db, rank="sp.", kingdom="Plantae")
-    response = await call_list(db, rank="sp.", kingdom="Plantae", offset=50)
+    first = await call_list(db, rank="sp.", kingdom="Plantae")
+    second = await call_list(db, rank="sp.", kingdom="Plantae", offset=50)
     assert len(db.calls) == 3
-    assert response.pagination.total == 42
+    assert first.pagination.total == 42
+    assert second.pagination.total == 42
+    assert first.query.count_cache_state == "fresh_query"
+    assert second.query.count_cache_state == "cache_hit"
+    assert second.query.count_consistency == "best_effort_not_atomic"
+    assert second.query.count_cache_ttl_seconds == route._COUNT_CACHE_TTL_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_cached_zero_does_not_label_a_nonempty_page_as_empty():
+    db = Session(Result(rows=[]), Result(scalar=0), Result(rows=[row()]))
+    await call_list(db, rank="species")
+    response = await call_list(db, rank="species", offset=50)
+    assert response.pagination.total == 0
+    assert len(response.data) == 1
+    assert response.query.count_cache_state == "cache_hit"
+    assert response.query.status == "available"
 
 
 @pytest.mark.asyncio
@@ -246,6 +263,99 @@ async def test_family_filter_and_featured_sort_use_native_page_sql():
     assert params["family"] == "Agaricaceae"
     assert "5000 THEN 0 ELSE 1 END" in sql
     assert response.query.status == "available"
+
+
+@pytest.mark.asyncio
+async def test_family_filter_uses_one_resolved_value_for_match_and_count():
+    db = Session(Result(scalar="fungip.species"), Result(rows=[]), Result(scalar=0))
+    await call_list(db, family="Unknown")
+    sql, params = db.calls[1]
+    assert "COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), fungip_family.family, 'Unknown') = :family" in sql
+    assert "ORDER BY source.species_id ASC" in sql
+    assert params["family"] == "Unknown"
+    count_sql, _ = db.calls[2]
+    assert "LEFT JOIN LATERAL" in count_sql and "fungip_family.family" in count_sql
+
+
+def test_family_projection_keeps_primary_and_source_disagreement():
+    item = row()
+    item["metadata"] = {"family": "Coreaceae"}
+    member = SimpleNamespace(taxonomy={"family": "FungiPaceae"}, species_id="FG026")
+    route._project_family(item, member)
+    assert item["family"] == "Coreaceae"
+    assert item["family_source"] == "core.taxon.metadata.family"
+    assert [e["value"] for e in item["family_evidence"]] == ["Coreaceae", "FungiPaceae"]
+    assert item["family_evidence"][1]["species_id"] == "FG026"
+
+
+def test_category_evidence_projects_persisted_source_values_with_a_hard_bound():
+    projected, truncated = route._project_category_evidence([
+        {"source": "bio.taxon_trait", "value": "Choice-Edible"},
+        {"source": "bio.taxon_characteristic", "value": "medicinal"},
+        {"source": "unknown", "value": "poisonous"},
+    ])
+    assert {item["category"] for item in projected} == {"edible", "gourmet", "medicinal"}
+    assert all(item["source"] != "unknown" for item in projected)
+    assert truncated is False
+    bounded, truncated = route._project_category_evidence([
+        {"source": "bio.taxon_trait", "value": "edible"} for _ in range(65)
+    ])
+    assert len(bounded) == 1
+    assert truncated is True
+
+
+def test_image_selection_skips_unsafe_placeholder_and_keeps_selected_credit_atomic():
+    item = row()
+    item["metadata"] = {
+        "default_photo": {"medium_url": "https://example.test/placeholder.svg", "attribution": "wrong credit"},
+        "photos": [{"url": "https://example.test/valid.jpg", "attribution": "valid credit", "license_code": "CC-BY"}],
+    }
+    member = SimpleNamespace(image=None)
+    selected = route._project_image_selection(item, member)
+    assert selected == {
+        "url": "https://example.test/valid.jpg",
+        "source": "core.taxon.metadata.photos[0].url",
+        "attribution": "valid credit",
+        "license_code": "CC-BY",
+        "source_url": "https://example.test/valid.jpg",
+    }
+    item["metadata"]["default_photo"] = {"medium_url": "https://example.test\\unsafe.jpg"}
+    assert route._project_image_selection(item, member)["url"] == "https://example.test/valid.jpg"
+
+
+@pytest.mark.asyncio
+async def test_fungip_enrichment_error_fails_closed_instead_of_returning_an_unexplained_page():
+    from fastapi import HTTPException
+
+    async def failed_members(db, taxon_ids):
+        return {}, FungiPIndexAvailability(status="error", reason="query_failed")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(route, "load_public_fungip_members", failed_members)
+    try:
+        db = Session(Result(scalar="fungip.species"), Result(rows=[row()]), Result(scalar=1))
+        with pytest.raises(HTTPException) as exc:
+            await call_list(db, family="FungiPaceae")
+        assert exc.value.status_code == 503
+        assert "FungiP enrichment" in exc.value.detail
+    finally:
+        monkeypatch.undo()
+
+
+@pytest.mark.asyncio
+async def test_fungip_enrichment_error_does_not_overturn_a_genuine_zero_count():
+    async def failed_members(db, taxon_ids):
+        return {}, FungiPIndexAvailability(status="error", reason="query_failed")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(route, "load_public_fungip_members", failed_members)
+    try:
+        db = Session(Result(scalar="fungip.species"), Result(rows=[]), Result(scalar=0))
+        response = await call_list(db, family="NoSuchFamily")
+        assert response.pagination.total == 0
+        assert response.query.status == "empty"
+    finally:
+        monkeypatch.undo()
 
 
 @pytest.mark.asyncio

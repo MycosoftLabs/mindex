@@ -1,6 +1,6 @@
 {
-  "schema": "mycosoft.mindex.ancestry.filtered-catalog.v1",
-  "task": "native filtered Ancestry catalog page and matching-count contract",
+  "schema": "mycosoft.mindex.ancestry.filtered-catalog.v2",
+  "task": "native filtered Ancestry catalog page, resolved projections, and qualified matching-count contract",
   "repository": "MINDEX",
   "base": {
     "branch": "codex/research-identity-provider-versions-oct04",
@@ -9,11 +9,11 @@
     "source_export_base_commit": "e9b740327da80f2b28a36635e7235734bbd026a9"
   },
   "candidate": {
-    "branch": "codex/research-identity-filtered-catalog-oct04",
-    "branch_ref": "refs/heads/codex/research-identity-filtered-catalog-oct04",
+    "branch": "codex/research-identity-filtered-catalog-correctness-oct04",
+    "branch_ref": "refs/heads/codex/research-identity-filtered-catalog-correctness-oct04",
     "commit": null,
     "commit_sha_note": "Resolve the branch ref and verify against the exact HEAD SHA in the delivery message; self-referential commit hashes are not embedded in this file.",
-    "parent_commit": "0cefc83e41df9db93dcf15a8d96fc11ea0cd7094"
+    "parent_commit": "01e0709cbf80f8f1e8414e7105d639def7eabee1"
   },
   "upstream_contract_pins": {
     "website_repository": "WEBSITE",
@@ -22,12 +22,11 @@
     "requirements_ledger_sha256": "924137c20690a9538ad959b99413f84703f81375272e8dd6400ebb11193209aa"
   },
   "changed_paths": [
-    "mindex_api/contracts/v1/taxon.py",
     "mindex_api/routers/taxon.py",
     "mindex_api/schemas/taxon.py",
+    "mindex_api/services/ancestry_public_members.py",
     "tests/test_taxon_all_species_list.py",
     "tests/test_taxon_filtered_catalog_postgres.py",
-    "tests/test_ancestry_fungip_enrichment.py",
     "tests/test_taxon_fungip_identifier_search.py",
     "docs/ancestry-filtered-catalog-oct04.md",
     "docs/ancestry-filtered-catalog-postgres-receipt-oct04.md",
@@ -37,55 +36,157 @@
     "method": "GET",
     "route": "/taxa",
     "filters": {
-      "family": "exact displayed family from stored core metadata or an exact validated FungiP source record",
-      "category": ["all", "edible", "medicinal", "poisonous", "psychoactive", "gourmet", "unknown"],
-      "filter": ["all", "has_images", "has_description"],
-      "order_by": ["server", "canonical_name", "name-asc", "name-desc", "observations", "observations_count", "obs_count", "family", "featured"]
+      "family": "Exact resolved displayed family: nonblank core metadata, otherwise the first exact validated FungiP family in species_id order, otherwise Unknown; filter, sort, and row projection use the same scalar.",
+      "category": [
+        "all",
+        "edible",
+        "medicinal",
+        "poisonous",
+        "psychoactive",
+        "gourmet",
+        "unknown"
+      ],
+      "filter": [
+        "all",
+        "has_images",
+        "has_description"
+      ],
+      "order_by": [
+        "server",
+        "canonical_name",
+        "name-asc",
+        "name-desc",
+        "observations",
+        "observations_count",
+        "obs_count",
+        "family",
+        "featured"
+      ]
     },
-    "pagination": "pagination.total is the full matching core-taxon count before limit/offset; ordinary browsing excludes merged rows while explicit IDs retain direct-lookup behavior; current max_page_size applies; no 500 cap added",
-    "status": ["available", "empty", "partial", "unavailable"],
-    "unavailable_behavior": "HTTP 503; never a successful empty list",
-    "unsupported_behavior": "HTTP 422 with field-level detail"
+    "pagination": "pagination.total is the filtered count before limit/offset; it uses a 300-second TTL cache and may lag current page membership. query.count_cache_state and query.count_consistency qualify freshness; ordinary browsing excludes merged rows while explicit IDs retain direct-lookup behavior; current max_page_size applies; no 500 cap added",
+    "status": [
+      "available",
+      "empty",
+      "partial",
+      "unavailable"
+    ],
+    "unavailable_behavior": "HTTP 503 for core failure or for a nonempty source-dependent page when required FungiP enrichment fails; a genuine zero-match result remains empty",
+    "unsupported_behavior": "HTTP 422 with field-level detail",
+    "family_projection": {
+      "resolution_order": [
+        "nonblank core.taxon.metadata.family",
+        "first exact validated fungip.species record family by species_id",
+        "Unknown"
+      ],
+      "filter_sort_and_display_share_value": true,
+      "evidence_source_order": [
+        "core.taxon.metadata.family",
+        "fungip.species.record.taxonomy.family"
+      ],
+      "max_evidence_entries": 2,
+      "max_value_chars": 200,
+      "max_species_id_chars": 64
+    },
+    "category_evidence": {
+      "max_entries": 64,
+      "max_value_chars": 120,
+      "allowed_categories": [
+        "edible",
+        "medicinal",
+        "poisonous",
+        "psychoactive",
+        "gourmet"
+      ],
+      "allowed_sources": [
+        "core.taxon.metadata.edibility",
+        "core.taxon.metadata.characteristics",
+        "bio.taxon_trait",
+        "bio.taxon_characteristic"
+      ],
+      "projected_only_for_explicit_category_pages": true
+    },
+    "image_projection": {
+      "max_url_chars": 2048,
+      "max_source_url_chars": 2048,
+      "max_attribution_chars": 512,
+      "max_license_code_chars": 128,
+      "selection_and_filter_use_same_usable_url_rules": true,
+      "url_credit_license_are_paired_to_selected_source": true
+    },
+    "query_metadata": {
+      "contract_version": "mycosoft.mindex.ancestry.filtered-catalog.v2",
+      "count_scope": "matching_core_taxa",
+      "count_consistency": "best_effort_not_atomic",
+      "count_cache_state": [
+        "fresh_query",
+        "cache_hit"
+      ],
+      "count_cache_ttl_seconds": 300,
+      "count_note": "A cache hit can be stale relative to the returned page; consumers must not present it as an exact count of the current rows. Existing PostgreSQL ILIKE wildcard behavior for lineage_contains is preserved.",
+      "empty_status_rule": "empty only when a fresh zero count and no rows are returned; a cached zero paired with rows stays available"
+    }
   },
   "database_changes": {
     "schema_migration": null,
     "applied_to_shared_database": false,
     "private_postgres_fixture": {
-      "database_name": "mindex_filtered_fixture_oct04c",
-      "loopback_port": 55499,
+      "database_name": "mindex_filtered_fixture_correctness_oct04",
+      "loopback_port": 55502,
       "postgresql_version": "17.11",
-      "evidence": "finite synthetic fixture; not captured production rows; production uniqueness constraints mirrored"
+      "evidence": "finite synthetic fixture mirroring tested uniqueness, foreign-key, hash, and resolution-state constraints; no captured production rows",
+      "private_cluster_stopped_after_test": true,
+      "shared_database_contacted": false
     }
   },
   "validation": {
     "offline": {
-      "command": ".venv-filtered-catalog\\Scripts\\python.exe -m pytest -q tests/test_taxon_all_species_list.py",
-      "result": "16 passed"
+      "command": "<existing-isolated-venv>\\Scripts\\python.exe -m pytest -o addopts='' -q --tb=short tests/test_taxon_all_species_list.py",
+      "result": "23 passed"
     },
     "private_postgres": {
-      "command": "$env:MINDEX_FILTERED_TEST_DATABASE_URL='postgresql+asyncpg://postgres@127.0.0.1:55499/mindex_filtered_fixture_oct04c'; .\\.venv-filtered-catalog\\Scripts\\python.exe -m pytest -q tests/test_taxon_filtered_catalog_postgres.py",
-      "result": "4 passed",
-      "coverage": [
-        "131 exact category+family matches with a page requested at offset 120",
-        "exact unique source crosswalk admits family/image; conflicting identifier is excluded",
-        "stored observation relation drives descending observation order",
-        "core-metadata family sorting remains native when optional FungiP table is absent and reports partial"
-      ]
+      "command": "$env:MINDEX_FILTERED_TEST_DATABASE_URL='postgresql+asyncpg://postgres@127.0.0.1:55502/mindex_filtered_fixture_correctness_oct04'; <existing-isolated-venv>\\Scripts\\python.exe -m pytest -o addopts='' -q --tb=short tests/test_taxon_filtered_catalog_postgres.py",
+      "result": "10 passed",
+      "evidence_doc": "docs/ancestry-filtered-catalog-postgres-receipt-oct04.md"
     },
     "adjacent_taxon_and_contract_suites": {
-      "command": ".venv-filtered-catalog\\Scripts\\python.exe -m pytest -q tests/test_api_routes.py tests/test_unified_search_biological_schema.py tests/test_ancestry_fungip_enrichment.py tests/test_taxon_fungip_identifier_search.py",
+      "command": "<existing-isolated-venv>\\Scripts\\python.exe -m pytest -o addopts='' -q --tb=short tests/test_api_routes.py tests/test_unified_search_biological_schema.py tests/test_ancestry_fungip_enrichment.py tests/test_taxon_fungip_identifier_search.py",
       "result": "42 passed"
     },
-    "combined_focused_set": "62 passed (16 route, 4 guarded PostgreSQL, 42 adjacent contract tests)",
+    "combined_focused_set": "75 passed (23 route, 10 guarded PostgreSQL, 42 adjacent API/contract tests)",
     "compileall": "passed for changed Python modules",
-    "git_diff_check": "passed"
+    "git_diff_check": "passed for staged source, tests, and documentation paths; four unrelated fixture-text line-ending-only modifications remained unstaged and untouched",
+    "focused_set": {
+      "command": "$env:MINDEX_FILTERED_TEST_DATABASE_URL='postgresql+asyncpg://postgres@127.0.0.1:55502/mindex_filtered_fixture_correctness_oct04'; <existing-isolated-venv>\\Scripts\\python.exe -m pytest -o addopts='' -q --tb=short tests/test_taxon_all_species_list.py tests/test_taxon_filtered_catalog_postgres.py tests/test_api_routes.py tests/test_unified_search_biological_schema.py tests/test_ancestry_fungip_enrichment.py tests/test_taxon_fungip_identifier_search.py",
+      "result": "75 passed, 8 existing warnings",
+      "scope": "75 total focused tests; the 10 guarded PostgreSQL cases ran against the explicitly named loopback fixture database during the full set.",
+      "test_counts": {
+        "tests/test_taxon_all_species_list.py": 23,
+        "tests/test_taxon_filtered_catalog_postgres.py": 10,
+        "tests/test_api_routes.py": 6,
+        "tests/test_unified_search_biological_schema.py": 18,
+        "tests/test_ancestry_fungip_enrichment.py": 11,
+        "tests/test_taxon_fungip_identifier_search.py": 7
+      }
+    }
   },
-  "rollback": "git revert <candidate.commit> on the integration branch; no schema rollback exists because no schema migration is included",
+  "rollback": "git revert <successor_candidate.commit> on the integration branch; no schema rollback exists because no schema migration is included",
   "scope_boundaries": {
     "website_bff_or_client_changed": false,
     "live_database_migration_or_apply": false,
     "aws_or_production_mutation": false,
     "ancestry_route_or_shared_auth_changes": false,
-    "preserved_prior_contracts": ["PR40 provider-version pins", "Search packaging", "First40/FG026/16paths", "DB189 ingest", "evidence captures and expired receipts"]
+    "preserved_prior_contracts": [
+      "PR40 provider-version pins",
+      "Search packaging",
+      "First40/FG026/16paths",
+      "DB189 ingest",
+      "evidence captures and expired receipts",
+      "original frozen candidate 01e0709cbf80f8f1e8414e7105d639def7eabee1"
+    ]
+  },
+  "predecessor_candidate": {
+    "branch": "codex/research-identity-filtered-catalog-oct04",
+    "commit": "01e0709cbf80f8f1e8414e7105d639def7eabee1",
+    "base_commit": "0cefc83e41df9db93dcf15a8d96fc11ea0cd7094"
   }
 }

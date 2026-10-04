@@ -99,7 +99,7 @@ async def test_linked_identifier_is_in_where_clause_before_count_and_page(monkey
             "by_popularity": by_popularity,
             "order_normalized": order_normalized,
         })
-        return [], 1
+        return [], 1, "fresh_query"
 
     async def load_members(_db, ids):
         assert ids == []
@@ -165,7 +165,7 @@ async def test_identifier_lookup_status_survives_empty_page_enrichment(
     async def empty_core_page(_db, **_kwargs):
         nonlocal page_called
         page_called = True
-        return ordinary_name_rows, len(ordinary_name_rows)
+        return ordinary_name_rows, len(ordinary_name_rows), "fresh_query"
 
     async def successful_empty_enrichment(_db, ids):
         assert ids == ([ordinary_taxon_id] if ordinary_name_rows else [])

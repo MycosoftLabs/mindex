@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -459,7 +461,7 @@ async def _list_taxa_query(
     params: dict[str, Any],
     order_expr: str,
     order_normalized: str,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, str]:
     stmt = text(
         f"""
         SELECT {_TAXON_LIST_COLUMNS}
@@ -471,8 +473,10 @@ async def _list_taxa_query(
     )
     result = await db.execute(stmt, params)
     rows = [_normalize_taxon_row(dict(row)) for row in result.mappings().all()]
-    total = await _cached_count(db, from_clause=from_clause, where_sql=where_sql, params=params)
-    return rows, total
+    total, count_cache_state = await _cached_count_with_state(
+        db, from_clause=from_clause, where_sql=where_sql, params=params,
+    )
+    return rows, total, count_cache_state
 
 
 # Bounded TTL cache for list totals and stats: counts over millions of rows are re-used
@@ -499,15 +503,24 @@ def _cache_put(key: str, value: Any) -> None:
 
 
 async def _cached_count(db: AsyncSession, *, from_clause: str, where_sql: str, params: dict[str, Any]) -> int:
+    total, _ = await _cached_count_with_state(
+        db, from_clause=from_clause, where_sql=where_sql, params=params,
+    )
+    return total
+
+
+async def _cached_count_with_state(
+    db: AsyncSession, *, from_clause: str, where_sql: str, params: dict[str, Any],
+) -> tuple[int, str]:
     filters = {k: v for k, v in params.items() if k not in ("limit", "offset")}
     key = json.dumps([from_clause, where_sql, filters], sort_keys=True, default=str)
     cached = _cache_get(key)
     if cached is not None:
-        return cached
+        return cached, "cache_hit"
     count_result = await db.execute(text(f"SELECT count(*) FROM {from_clause} WHERE {where_sql}"), filters)
     total = int(count_result.scalar_one() or 0)
     _cache_put(key, total)
-    return total
+    return total, "fresh_query"
 
 
 # Sources abbreviate ranks differently (MycoBank: "sp.", "gen.", ...). A rank filter matches every
@@ -589,11 +602,13 @@ def _category_match_sql(values: tuple[str, ...], prefix: str) -> tuple[str, dict
 
 
 def _valid_photo_url_sql(url_sql: str) -> str:
+    url_sql = f"btrim({url_sql})"
     return (
         f"({url_sql} ~* '^https?://[^[:space:]]+$' OR "
         f"({url_sql} LIKE '/%' AND {url_sql} NOT LIKE '//%')) "
         f"AND {url_sql} !~* 'placeholder\\.(svg|png|jpe?g)([?#]|$)' "
         f"AND {url_sql} !~ '[[:cntrl:]]' "
+        f"AND strpos(COALESCE({url_sql}, ''), chr(92)) = 0 "
         f"AND {url_sql} !~* '^https?://[^/]*@'"
     )
 
@@ -644,6 +659,156 @@ def _fungip_linked_record_sql(record_predicate: str) -> str:
     )"""
 
 
+def _fungip_family_join_sql() -> str:
+    """Resolve one deterministic family from an exact validated FungiP identity."""
+    return """LEFT JOIN LATERAL (
+        SELECT NULLIF(btrim(source.record->'taxonomy'->>'family'), '') AS family,
+               source.species_id
+        FROM fungip.species source
+        JOIN LATERAL (
+            SELECT COUNT(DISTINCT external_id.taxon_id)::int AS candidate_count,
+                   (ARRAY_AGG(DISTINCT external_id.taxon_id))[1] AS candidate_taxon_id
+            FROM jsonb_array_elements(
+                CASE WHEN jsonb_typeof(source.external_ids) = 'array'
+                     THEN source.external_ids ELSE '[]'::jsonb END
+            ) AS source_identifier(value)
+            JOIN core.taxon_external_id external_id
+              ON external_id.source = source_identifier.value->>'source'
+             AND external_id.external_id = source_identifier.value->>'external_id'
+        ) matches ON TRUE
+        WHERE source.taxon_id = t.id AND source.resolution_status = 'resolved'
+          AND matches.candidate_count = 1 AND matches.candidate_taxon_id = t.id
+          AND lower(t.rank) = 'species' AND lower(t.kingdom) = 'fungi'
+          AND t.canonical_name = source.record->>'accepted_name'
+          AND source.accepted_name = source.record->>'accepted_name'
+          AND NULLIF(btrim(source.record->'taxonomy'->>'family'), '') IS NOT NULL
+        ORDER BY source.species_id ASC
+        LIMIT 1
+    ) fungip_family ON TRUE"""
+
+
+def _family_value_sql(*, fungip_available: bool) -> str:
+    core_family = "NULLIF(btrim(t.metadata->>'family'), '')"
+    if fungip_available:
+        return f"COALESCE({core_family}, fungip_family.family, 'Unknown')"
+    return f"COALESCE({core_family}, 'Unknown')"
+
+
+def _safe_image_url(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    candidate = value.strip()
+    if len(candidate) > 2048 or re.search(r"[\\\x00-\x1f\x7f]", candidate):
+        return None
+    if re.search(r"placeholder\.(?:svg|png|jpe?g)(?:[?#]|$)", candidate, re.IGNORECASE):
+        return None
+    if candidate.startswith("/"):
+        return candidate if not candidate.startswith("//") else None
+    try:
+        parsed = urlsplit(candidate)
+        return candidate if parsed.scheme.lower() in {"http", "https"} and parsed.hostname and not parsed.username and not parsed.password else None
+    except ValueError:
+        return None
+
+
+def _project_category_evidence(raw: Any) -> tuple[list[dict[str, str]], bool]:
+    if not isinstance(raw, list):
+        return [], False
+    truncated = len(raw) > 64
+    projected: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in raw[:64]:
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source")
+        value = item.get("value")
+        if source not in {
+            "core.taxon.metadata.edibility",
+            "core.taxon.metadata.characteristics",
+            "bio.taxon_trait",
+            "bio.taxon_characteristic",
+        } or not isinstance(value, str) or not value.strip():
+            continue
+        normalized = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", value.strip().lower()))
+        for category, aliases in _EXPLICIT_CATEGORY_ALIASES.items():
+            if normalized not in aliases:
+                continue
+            key = (category, source, normalized)
+            if key in seen:
+                continue
+            if len(projected) >= 64:
+                truncated = True
+                return projected, truncated
+            seen.add(key)
+            projected.append({"category": category, "source": source, "value": value.strip()[:120]})
+    return projected, truncated
+
+
+def _project_family(row: dict[str, Any], member: Optional[FungiPIndexMember]) -> None:
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    core_family_raw = metadata.get("family")
+    core_family = core_family_raw.strip() if isinstance(core_family_raw, str) and core_family_raw.strip() else None
+    taxonomy = member.taxonomy if member is not None and isinstance(member.taxonomy, dict) else {}
+    source_family_raw = taxonomy.get("family")
+    source_family = source_family_raw.strip() if isinstance(source_family_raw, str) and source_family_raw.strip() else None
+    row["family"] = core_family or source_family or "Unknown"
+    row["family_source"] = (
+        "core.taxon.metadata.family" if core_family else
+        "fungip.species.record.taxonomy.family" if source_family else "unknown"
+    )
+    evidence = []
+    if core_family:
+        evidence.append({"source": "core.taxon.metadata.family", "value": core_family[:200]})
+    if source_family:
+        evidence.append({
+            "source": "fungip.species.record.taxonomy.family", "value": source_family[:200],
+            "species_id": member.species_id,
+        })
+    row["family_evidence"] = evidence
+
+
+def _project_image_selection(row: dict[str, Any], member: Optional[FungiPIndexMember]) -> Optional[dict[str, Any]]:
+    def selection(photo: Any, url_key: str, source: str) -> Optional[dict[str, Any]]:
+        if not isinstance(photo, dict):
+            return None
+        url = _safe_image_url(photo.get(url_key))
+        if not url:
+            return None
+        source_url = (
+            _safe_image_url(photo.get("source_url"))
+            or _safe_image_url(photo.get("source_page"))
+            or _safe_image_url(photo.get("url"))
+            or url
+        )
+        attribution = photo.get("attribution")
+        license_code = photo.get("license_code")
+        return {
+            "url": url,
+            "source": source,
+            "attribution": attribution.strip()[:512] if isinstance(attribution, str) and attribution.strip() else None,
+            "license_code": license_code.strip()[:128] if isinstance(license_code, str) and license_code.strip() else None,
+            "source_url": source_url,
+        }
+
+    if member is not None:
+        image = member.image if isinstance(member.image, dict) else None
+        selected = selection(image, "image_url", "fungip.species.record.image.image_url")
+        if selected is None:
+            selected = selection(image, "url", "fungip.species.record.image.url")
+        if selected:
+            return selected
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    default_photo = metadata.get("default_photo") if isinstance(metadata.get("default_photo"), dict) else {}
+    for key in ("medium_url", "url"):
+        selected = selection(default_photo, key, f"core.taxon.metadata.default_photo.{key}")
+        if selected:
+            return selected
+    photos = metadata.get("photos")
+    if isinstance(photos, list) and photos:
+        return selection(photos[0], "url", "core.taxon.metadata.photos[0].url")
+    return None
+
+
 _PAGE_COUNT_COLUMNS = """
             (SELECT COUNT(*)::bigint FROM obs.observation o WHERE o.taxon_id = page.id) AS obs_count,
             (SELECT COUNT(*)::bigint FROM media.image i WHERE i.taxon_id = page.id) AS image_count,
@@ -655,6 +820,43 @@ _PAGE_COUNT_COLUMNS = """
              WHERE ti.source_taxon_id = page.id OR ti.target_taxon_id = page.id) AS interaction_count,
             (SELECT COUNT(*)::bigint FROM bio.publication_taxon pt WHERE pt.taxon_id = page.id) AS publication_count,
             (SELECT COUNT(*)::bigint FROM bio.taxon_characteristic c WHERE c.taxon_id = page.id) AS characteristic_count
+"""
+
+_PAGE_CATEGORY_EVIDENCE_SQL = """
+            (
+                SELECT COALESCE(
+                    jsonb_agg(evidence_rows.payload ORDER BY evidence_rows.source, evidence_rows.value),
+                    '[]'::jsonb
+                )
+                FROM (
+                    SELECT recognized.source, recognized.value,
+                           jsonb_build_object('source', recognized.source, 'value', recognized.value) AS payload
+                    FROM (
+                        SELECT 'core.taxon.metadata.edibility'::text AS source,
+                               __NORMALIZED_METADATA_EDIBILITY__ AS value
+                        UNION ALL
+                        SELECT 'core.taxon.metadata.characteristics', __NORMALIZED_METADATA_CHARACTERISTIC__
+                        FROM jsonb_array_elements_text(CASE
+                            WHEN jsonb_typeof(page.metadata->'characteristics') = 'array'
+                            THEN page.metadata->'characteristics' ELSE '[]'::jsonb END) AS metadata_tag(value)
+                        UNION ALL
+                        SELECT 'bio.taxon_trait', __NORMALIZED_TRAIT__
+                        FROM bio.taxon_trait trait
+                        WHERE trait.taxon_id = page.id
+                          AND NULLIF(btrim(trait.source), '') IS NOT NULL
+                          AND lower(trait.trait_name) IN ('edibility', 'characteristic', 'characteristics')
+                        UNION ALL
+                        SELECT 'bio.taxon_characteristic', __NORMALIZED_CHARACTERISTIC__
+                        FROM bio.taxon_characteristic characteristic
+                        WHERE characteristic.taxon_id = page.id
+                          AND NULLIF(btrim(characteristic.source), '') IS NOT NULL
+                          AND lower(characteristic.name) IN ('edibility', 'characteristic', 'characteristics')
+                    ) recognized
+                    WHERE recognized.value = ANY(:category_evidence_values)
+                    ORDER BY recognized.source, recognized.value
+                    LIMIT 65
+                ) evidence_rows
+            ) AS category_evidence_raw
 """
 
 _METADATA_OBS_EXPR = (
@@ -674,17 +876,30 @@ async def _list_taxa_core_page(
     order_expr_override: Optional[str] = None,
     order_source_sql: str = "",
     secondary_order_expr: Optional[str] = None,
-) -> tuple[list[dict[str, Any]], int]:
+    include_category_evidence: bool = False,
+) -> tuple[list[dict[str, Any]], int, str]:
     """Filter, sort and page on core.taxon first; per-taxon counts only for the returned page."""
     order_expr = order_expr_override or (_OBSERVATION_COUNT_SQL if by_popularity else "canonical_name")
     secondary_select = f", {secondary_order_expr} AS secondary_sort_key" if secondary_order_expr else ""
     secondary_inner_order = f", {secondary_order_expr} DESC" if secondary_order_expr else ""
     secondary_outer_order = ", page.secondary_sort_key DESC" if secondary_order_expr else ""
+    category_evidence_sql = "NULL::jsonb AS category_evidence_raw"
+    if include_category_evidence:
+        category_evidence_sql = _PAGE_CATEGORY_EVIDENCE_SQL.replace(
+            "__NORMALIZED_METADATA_EDIBILITY__", _normalized_tag_sql("page.metadata->>'edibility'"),
+        ).replace(
+            "__NORMALIZED_METADATA_CHARACTERISTIC__", _normalized_tag_sql("metadata_tag.value"),
+        ).replace(
+            "__NORMALIZED_TRAIT__", _normalized_tag_sql("trait.value_text"),
+        ).replace(
+            "__NORMALIZED_CHARACTERISTIC__", _normalized_tag_sql("characteristic.value_text"),
+        )
     stmt = text(
         f"""
         SELECT page.id, page.canonical_name, page.rank, page.common_name, page.author, page.description,
                page.source, page.metadata, page.kingdom, page.lineage, page.lineage_ids, page.external_ids,
                page.created_at, page.updated_at,
+               {category_evidence_sql},
                {_PAGE_COUNT_COLUMNS}
         FROM (
             SELECT id, canonical_name, rank, common_name, COALESCE(author, authority) AS author,
@@ -700,10 +915,20 @@ async def _list_taxa_core_page(
         ORDER BY page.sort_key {order_normalized}{secondary_outer_order}, page.canonical_name ASC, page.id ASC
         """
     )
-    result = await db.execute(stmt, params)
+    page_params = dict(params)
+    if include_category_evidence:
+        page_params["category_evidence_values"] = list(_ALL_EXPLICIT_CATEGORY_VALUES)
+    result = await db.execute(stmt, page_params)
     rows = [_normalize_taxon_row(dict(row)) for row in result.mappings().all()]
-    total = await _cached_count(db, from_clause="core.taxon t", where_sql=where_sql, params=params)
-    return rows, total
+    for row in rows:
+        evidence, truncated = _project_category_evidence(row.pop("category_evidence_raw", None))
+        row["category_evidence"] = evidence
+        row["category_evidence_truncated"] = truncated
+    count_from_clause = f"core.taxon t {order_source_sql}" if order_source_sql else "core.taxon t"
+    total, count_cache_state = await _cached_count_with_state(
+        db, from_clause=count_from_clause, where_sql=where_sql, params=params,
+    )
+    return rows, total, count_cache_state
 
 
 @router.get("/stats")
@@ -927,21 +1152,11 @@ async def list_taxa(
                 detail="Optional source-qualified FungiP filter state unavailable.",
             ) from exc
 
-    fungip_family_sql = None
-    if fungip_available and normalized_family:
-        fungip_family_sql = _fungip_linked_record_sql(
-            "NULLIF(btrim(source.record->'taxonomy'->>'family'), '') = :family"
-        )
+    family_join = _fungip_family_join_sql() if fungip_available and (normalized_family or order_by_normalized in {"family", "family-asc"}) else ""
+    family_value_sql = _family_value_sql(fungip_available=bool(family_join))
     if normalized_family:
-        if not fungip_available:
-            params["family"] = normalized_family
-            where_clauses.append("COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), 'Unknown') = :family")
-        else:
-            params["family"] = normalized_family
-            family_sources = ["COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), 'Unknown') = :family"]
-            if fungip_family_sql:
-                family_sources.append(fungip_family_sql)
-            where_clauses.append("(" + " OR ".join(family_sources) + ")")
+        params["family"] = normalized_family
+        where_clauses.append(f"{family_value_sql} = :family")
 
     if normalized_completeness == "has_description":
         where_clauses.append(
@@ -984,7 +1199,7 @@ async def list_taxa(
     if order_by_normalized == "canonical_name":
         order_expr = "canonical_name"
     elif order_by_normalized == "family":
-        order_expr = "COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), 'Unknown')"
+        order_expr = family_value_sql
     elif order_by_normalized == "featured":
         order_expr = f"CASE WHEN {_OBSERVATION_COUNT_SQL} > 5000 THEN 0 ELSE 1 END"
     else:
@@ -1061,62 +1276,33 @@ async def list_taxa(
 
     rows: list[dict[str, Any]] = []
     total = 0
+    count_cache_state = "fresh_query"
+    category_evidence_fallback = False
     try:
-        if order_by_normalized == "family" and fungip_available:
-            family_sort = "COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), fungip_family.family, 'Unknown')"
-            family_sort_join = """LEFT JOIN LATERAL (
-                SELECT NULLIF(btrim(source.record->'taxonomy'->>'family'), '') AS family
-                FROM fungip.species source
-                JOIN LATERAL (
-                    SELECT COUNT(DISTINCT external_id.taxon_id)::int AS candidate_count,
-                           (ARRAY_AGG(DISTINCT external_id.taxon_id))[1] AS candidate_taxon_id
-                    FROM jsonb_array_elements(
-                        CASE WHEN jsonb_typeof(source.external_ids) = 'array'
-                             THEN source.external_ids ELSE '[]'::jsonb END
-                    ) source_identifier(value)
-                    JOIN core.taxon_external_id external_id
-                      ON external_id.source = source_identifier.value->>'source'
-                     AND external_id.external_id = source_identifier.value->>'external_id'
-                ) matches ON TRUE
-                WHERE source.taxon_id = t.id AND source.resolution_status = 'resolved'
-                  AND matches.candidate_count = 1 AND matches.candidate_taxon_id = t.id
-                  AND lower(t.rank) = 'species' AND lower(t.kingdom) = 'fungi'
-                  AND t.canonical_name = source.record->>'accepted_name'
-                  AND source.accepted_name = source.record->>'accepted_name'
-                ORDER BY source.species_id LIMIT 1
-            ) fungip_family ON TRUE"""
-            rows, total = await _list_taxa_core_page(
-                db,
-                where_sql=where_sql,
-                params=params,
-                by_popularity=False,
-                order_normalized=order_normalized,
-                order_expr_override=family_sort,
-                order_source_sql=family_sort_join,
+        photo_tiebreak = f"CASE WHEN {_core_photo_exists_sql()} THEN 1 ELSE 0 END"
+        if fungip_available:
+            photo_tiebreak = (
+                f"CASE WHEN ({_core_photo_exists_sql()} OR {_fungip_photo_exists_sql()}) "
+                "THEN 1 ELSE 0 END"
             )
-        else:
-            photo_tiebreak = f"CASE WHEN {_core_photo_exists_sql()} THEN 1 ELSE 0 END"
-            if fungip_available:
-                photo_tiebreak = (
-                    f"CASE WHEN ({_core_photo_exists_sql()} OR {_fungip_photo_exists_sql()}) "
-                    "THEN 1 ELSE 0 END"
-                )
-            rows, total = await _list_taxa_core_page(
-                db,
-                where_sql=where_sql,
-                params=params,
-                by_popularity=order_by_normalized not in {"canonical_name", "family", "featured"},
-                order_normalized=order_normalized,
-                order_expr_override=order_expr if order_by_normalized in {"family", "featured"} else None,
-                secondary_order_expr=(
-                    photo_tiebreak if order_by_normalized in {"observations_count", "obs_count"} else None
-                ),
-            )
+        rows, total, count_cache_state = await _list_taxa_core_page(
+            db,
+            where_sql=where_sql,
+            params=params,
+            by_popularity=order_by_normalized not in {"canonical_name", "family", "featured"},
+            order_normalized=order_normalized,
+            order_expr_override=order_expr if order_by_normalized in {"family", "featured"} else None,
+            order_source_sql=family_join,
+            secondary_order_expr=(
+                photo_tiebreak if order_by_normalized in {"observations_count", "obs_count"} else None
+            ),
+            include_category_evidence=normalized_category not in {"", "all"},
+        )
     except Exception:
         await db.rollback()
         for from_clause in ("bio.taxon_full", rich_fallback_from, minimal_fallback_from):
             try:
-                rows, total = await _list_taxa_query(
+                rows, total, count_cache_state = await _list_taxa_query(
                     db,
                     from_clause=from_clause,
                     where_sql=where_sql,
@@ -1124,6 +1310,7 @@ async def list_taxa(
                     order_expr=order_expr if from_clause == "bio.taxon_full" else fallback_order,
                     order_normalized=order_normalized,
                 )
+                category_evidence_fallback = normalized_category not in {"", "all"}
                 break
             except Exception:
                 await db.rollback()
@@ -1149,13 +1336,21 @@ async def list_taxa(
             fungip_index = fungip_search_status
         elif fungip_search_status.status == "unavailable" and fungip_index.status == "available":
             fungip_index = fungip_search_status
+    if rows and needs_fungip_fields and fungip_available and fungip_index.status != "available":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Source-dependent taxon page unavailable; FungiP enrichment could not verify returned family or image evidence.",
+        )
     for row in rows:
-        row["fungip"] = public_members.get(str(row.get("id")))
+        member = public_members.get(str(row.get("id")))
+        _project_family(row, member)
+        row["image_selection"] = _project_image_selection(row, member)
+        row["fungip"] = member
 
     filter_sources: dict[str, str] = {}
     if normalized_family or order_by_normalized == "family":
         filter_sources["family"] = (
-            "core.taxon.metadata.family + exact validated fungip.species taxonomy.family"
+            "resolved family: core.taxon.metadata.family, else first exact validated fungip.species taxonomy.family by species_id, else Unknown; family_evidence preserves both sources"
             if fungip_available else "core.taxon.metadata.family"
         )
     if normalized_category and normalized_category != "all":
@@ -1165,12 +1360,12 @@ async def list_taxa(
         )
     if normalized_completeness == "has_images":
         filter_sources["has_images"] = (
-            "core.taxon.metadata.default_photo/photos + exact validated fungip.species image"
+            "first usable photo: exact validated FungiP image, then core default medium/url, then first core photo; URL and credit stay paired"
             if fungip_available else "core.taxon.metadata.default_photo/photos"
         )
     if order_by_normalized in {"observations_count", "obs_count"}:
         filter_sources["observation_tiebreak_photo"] = (
-            "core.taxon.metadata.default_photo/photos + exact validated fungip.species image"
+            "usable photo presence: exact validated FungiP image or core default medium/url or first core photo"
             if fungip_available else "core.taxon.metadata.default_photo/photos"
         )
     if normalized_completeness == "has_description":
@@ -1186,7 +1381,17 @@ async def list_taxa(
         query_partial_reasons.append(
             "FungiP identifier search unavailable; query covers canonical/common taxon names only"
         )
-    query_state = "partial" if query_partial_reasons else ("empty" if total == 0 else "available")
+    if rows and needs_fungip_fields and fungip_index.status != "available":
+        query_partial_reasons.append(
+            "FungiP enrichment unavailable after native filtering; source-dependent family or image evidence may be omitted"
+        )
+    if category_evidence_fallback:
+        query_partial_reasons.append(
+            "Per-row category evidence projection unavailable after the native filtered page query"
+        )
+    query_state = "partial" if query_partial_reasons else (
+        "empty" if total == 0 and not rows and count_cache_state == "fresh_query" else "available"
+    )
 
     return TaxonListResponse(
         data=rows,
@@ -1197,8 +1402,12 @@ async def list_taxa(
         },
         fungip_index=fungip_index,
         query={
+            "contract_version": "mycosoft.mindex.ancestry.filtered-catalog.v2",
             "status": query_state,
             "count_scope": "matching_core_taxa",
+            "count_consistency": "best_effort_not_atomic",
+            "count_cache_state": count_cache_state,
+            "count_cache_ttl_seconds": _COUNT_CACHE_TTL_SECONDS,
             "filter_sources": filter_sources,
             "partial_reasons": query_partial_reasons,
         },

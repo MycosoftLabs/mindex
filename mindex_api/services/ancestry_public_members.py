@@ -240,10 +240,12 @@ async def load_public_fungip_members(
         if not taxon_ids:
             return {}, FungiPIndexAvailability(status="available")
         result = await db.execute(_PUBLIC_MEMBER_SQL, {"taxon_ids": taxon_ids})
-        members = {
-            str(row["taxon_id"]): _public_member(dict(row))
-            for row in result.mappings().all()
-        }
+        members: dict[str, FungiPIndexMember] = {}
+        # The native family/image projection uses the same exact, validated link
+        # and selects the first source identity by species_id. Keep that member
+        # here too if duplicate valid source rows point at one canonical taxon.
+        for row in result.mappings().all():
+            members.setdefault(str(row["taxon_id"]), _public_member(dict(row)))
         return members, FungiPIndexAvailability(status="available")
     except Exception:
         await db.rollback()
