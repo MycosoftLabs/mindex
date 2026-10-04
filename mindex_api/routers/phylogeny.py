@@ -38,39 +38,118 @@ async def get_phylogeny(
     row = r.mappings().one_or_none()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Taxon not found")
-    names = list(row["lineage"] or [])
+    names = [str(name) for name in (row["lineage"] or [])]
+    raw_ids = list(row["lineage_ids"] or [])
+    issues: list[dict[str, Any]] = []
+    ids_by_index: dict[int, UUID] = {}
     if not names:
-        return {
-            "success": True,
-            "taxon_id": str(taxon_id),
-            "canonical_name": row["canonical_name"],
-            "kingdom": row["kingdom"],
-            "tree": None,
-            "message": "No lineage for this taxon; run ETL and backfill_kingdom_lineage.",
-        }
-    # Nested path from root to tip (names only; links via lineage_ids when present)
-    lid = list(row["lineage_ids"] or [])
+        issues.append({"reason": "lineage_unavailable"})
 
-    def node_at(i: int) -> dict[str, Any]:
-        tid: Optional[str] = None
-        if i < len(lid) and lid[i] is not None:
-            tid = str(lid[i])
-        return {
-            "id": tid or f"name:{names[i]}",
-            "name": names[i],
-            "rank": "clade" if i < len(names) - 1 else (row["rank"] or "species"),
-            "children": [],
-        }
+    # lineage_ids is documented as parallel to lineage, but a malformed array
+    # must never shift UUIDs onto unrelated names. Keep all names while dropping
+    # every positional link when the arrays disagree in length.
+    aligned = len(names) == len(raw_ids)
+    if not aligned:
+        issues.append({
+            "reason": "lineage_arrays_misaligned",
+            "name_count": len(names),
+            "lineage_id_count": len(raw_ids),
+        })
+    else:
+        for index, raw_id in enumerate(raw_ids):
+            if raw_id is None:
+                continue
+            try:
+                ids_by_index[index] = UUID(str(raw_id))
+            except (ValueError, TypeError, AttributeError):
+                issues.append({"index": index, "reason": "invalid_lineage_uuid"})
 
-    root: Optional[dict[str, Any]] = None
-    for i in range(len(names)):
-        n = node_at(i)
-        if root is None:
-            root = n
+    candidates = sorted(set(ids_by_index.values()), key=str)
+    identity_by_id: dict[UUID, Any] = {}
+    if candidates:
+        identities = await db.execute(
+            text("""
+                SELECT id, kingdom, canonical_name, rank
+                FROM core.taxon
+                WHERE id = ANY(CAST(:ids AS uuid[]))
+            """),
+            {"ids": candidates},
+        )
+        identity_by_id = {UUID(str(item["id"])): item for item in identities.mappings().all()}
+
+    def same_identity_name(left: Any, right: Any) -> bool:
+        return " ".join(str(left or "").split()).casefold() == " ".join(str(right or "").split()).casefold()
+
+    def same_kingdom(left: Any, right: Any) -> bool:
+        return not left or not right or str(left).strip().casefold() == str(right).strip().casefold()
+
+    ancestors: list[dict[str, Any]] = []
+    for index, name in enumerate(names):
+        candidate_id = ids_by_index.get(index) if aligned else None
+        candidate = identity_by_id.get(candidate_id) if candidate_id else None
+        valid = bool(
+            candidate
+            and same_identity_name(candidate["canonical_name"], name)
+            and same_kingdom(candidate["kingdom"], row["kingdom"])
+            and candidate_id != taxon_id
+        )
+        if candidate_id and not valid:
+            issues.append({"index": index, "reason": "lineage_uuid_identity_mismatch"})
+        elif not candidate_id:
+            issues.append({"index": index, "reason": "lineage_identity_unavailable"})
+        if valid:
+            node_id = str(candidate_id)
+            rank = candidate["rank"] or "unknown"
+            identity_status = "verified"
+            rank_source = "core.taxon"
         else:
-            # attach as child chain (single path)
-            cur = root
-            while cur["children"]:
-                cur = cur["children"][0]
-            cur["children"] = [n]
-    return {"success": True, "taxon_id": str(taxon_id), "canonical_name": row["canonical_name"], "kingdom": row["kingdom"], "tree": root}
+            node_id = f"name:{name}"
+            rank = "unknown"
+            identity_status = "name_only"
+            rank_source = "unavailable"
+        ancestors.append({
+            "id": node_id,
+            "taxon_id": str(candidate_id) if valid else None,
+            "name": name,
+            "rank": rank,
+            "identity_status": identity_status,
+            "rank_source": rank_source,
+            "children": [],
+        })
+
+    # The exact selected row is authoritative for the selected tip. If an
+    # inclusive lineage ends in the selected taxon, replace that position with
+    # this separately verified row instead of duplicating it.
+    if ancestors and same_identity_name(ancestors[-1]["name"], row["canonical_name"]):
+        ancestors.pop()
+    selected = {
+        "id": str(taxon_id),
+        "taxon_id": str(taxon_id),
+        "name": row["canonical_name"],
+        "rank": row["rank"] or "unknown",
+        "identity_status": "verified_selected_row",
+        "rank_source": "core.taxon",
+        "children": [],
+    }
+    path = [*ancestors, selected]
+    for parent, child in zip(path, path[1:]):
+        parent["children"] = [child]
+    tree = path[0] if path else None
+
+    return {
+        "success": True,
+        "taxon_id": str(taxon_id),
+        "canonical_name": row["canonical_name"],
+        "kingdom": row["kingdom"],
+        "status": "available" if not issues and names else "partial",
+        "tree": tree,
+        "lineage_provenance": {
+            "source": "core.taxon.lineage",
+            "identity_source": "core.taxon exact UUID lookup",
+            "alignment": "parallel" if aligned else "misaligned",
+            "status": "available" if not issues and names else "partial",
+            "raw_lineage": names,
+            "raw_lineage_ids": [str(value) if value is not None else None for value in raw_ids],
+            "issues": issues,
+        },
+    }

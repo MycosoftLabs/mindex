@@ -4,7 +4,7 @@
 
 This review candidate is based on frozen source commit `9e902613d192f4aeee7f60dd30d31f558d3221ed` and adds the independent-review fixes in commit `00f6d78ce5a7df456946ef1444ac48c720c70450`, branch `codex/ancestry-scientific-evidence-oct04`. The complete review branch is a clean diff from `origin/main` at `8da30115ca3aac6b67683138e02376bcde504a8f`.
 
-The remediation changes only the publication evidence importer, its additive evidence migration and focused regression tests. It does not alter `bio.publication_taxon`, create reviewed species-publication links, fetch providers, touch Cursor-owned all-species loaders, change Website code, or apply schema/data changes outside the isolated qualification database.
+The publication-linkage remediation changes the publication evidence importer, its additive evidence migration and focused regression tests. A later, separate native API correction in this branch changes only `mindex_api/routers/phylogeny.py` and its focused regression tests. Neither change alters `bio.publication_taxon`, creates reviewed species-publication links, fetches providers, touches Cursor-owned all-species loaders, changes Website code, or applies schema/data changes outside isolated qualification databases.
 
 ## Behavior corrected
 
@@ -12,6 +12,14 @@ The remediation changes only the publication evidence importer, its additive evi
 - Distinguish newly inserted evidence from an idempotent existing row. Read back and return the persisted evidence UUID and candidate/accepted/rejected review state; a missing readback fails so the caller can roll back.
 - Preserve mixed per-row review dispositions in the receipt. The importer never promotes or overwrites an existing disposition and does not create a `bio.publication_taxon` link.
 - Require a nonblank reviewer for terminal dispositions on both INSERT and UPDATE. Include `evidence_id` in the immutable source-identity guard.
+
+## Native lineage projection correction
+
+The previous `/api/mindex/phylogeny` projector zipped `core.taxon.lineage` and `lineage_ids` by position, then assigned the selected row's rank to the last lineage name. A retained safe-flow capture showed the resulting cross-kingdom identity error: the selected `Bucephala albeola` species UUID (`e8c03e91-444e-48ed-9d7d-6d44c5486c0b`) appeared on the `Animalia` root and `Bucephala` was labeled `species`. The exact API response is retained at `outputs/ancestry-continuation-oct04/independent-flow-review/review-20261004T023940Z/ordinary_lineage.raw.json` (SHA-256 `35439cfb5e249f58ce91a7f897642788bb32b698c2811280a525fe8010e89a7e`).
+
+The corrected projector checks each positional ancestor UUID against its own `core.taxon` row, including canonical name and compatible kingdom, before attaching that identity or its rank. Unverified names remain name-only with `unknown` rank. Misaligned arrays retain their raw values, mark the lineage `partial`, and do not transfer links across positions. The exact selected row is appended as the selected tip with its UUID, canonical name and rank; an inclusive final self-name is replaced by that verified tip. The response adds provenance and issue details while preserving the existing nested `tree` shape and top-level selected taxon fields.
+
+The retained Fungi search capture supplies the selected `Schizophyllum commune` identity (`6db28640-67fb-4808-90de-956a856366f7`, kingdom `Fungi`, rank `species`) at `outputs/ancestry-continuation-oct04/independent-flow-review/review-20261004T023940Z/schizophyllum_search.raw.json` (SHA-256 `ef76f98bc4ed6dc2e65da2fb7a92694e28c21c8c9058ba149bfd6354f98b99f2`). That capture does not include a native lineage response; the regression uses its exact selected identity with local fixture lineage arrays and does not claim the fixture arrays reflect production state.
 
 ## Validation executed
 
@@ -21,6 +29,8 @@ Project environment: Python 3.12.10; imports passed for psycopg 3.1.20, SQLAlche
 - Independent importer regression: 14/14 passed.
 - Independent SQL guard-contract regression: 4/4 passed, including six faulty guard mutations rejected.
 - Qualification-plan checks: 4/4 passed.
+- Phylogeny focused regressions: 3 passed, including the retained Animalia reproduction, the retained Fungi selected identity, verified ancestor rank/name checks and misaligned-array handling.
+- Isolated API/DB qualification: the actual `/api/mindex/phylogeny` route returned HTTP 200 against PostgreSQL 17.11 on a task-owned loopback cluster at port 15911. The local `core.taxon` fixture used the exact selected Animalia and Fungi IDs/names/ranks from the retained captures, verified the Animalia UUID was not attached to the `Animalia` root, and verified both exact selected taxa were returned as tips. The Fungi lineage array was a local fixture because no native Fungi lineage capture was retained. Result SHA-256 `70c1a21b56d33ab203086006ae4166c59460bfd6f6010fcbce6eb5d887317c7d`; output and PostgreSQL logs are under `outputs/phylogeny-lineage-projection-oct04/`. The isolated server has been stopped.
 - Exact PostgreSQL qualification: PASS on PostgreSQL 17.11 in a task-owned loopback-only cluster. Database `ancestry_pub_evidence_review_a4f1c842594f4f71a59167ee09b320a6`; port 15910. Migration SHA-256 `fc3e9389371c199b06baa1f5bb1ee0af2a4328a70ada08284292cc0311af1c15`. The pinned script verified reviewer guards, candidate-to-terminal updates, immutable source/evidence identities and rollback; it returned `PASS: exact migration guards, reviewed dispositions, immutable identity and rollback verified`. Its transaction rolled back, leaving no `core` or `bio` fixture schema. The task-owned server is stopped.
 - Qualification log SHA-256: `440d2d8fe6672f515eBAA10ABA22EDC9F421D26AD0973E056557BB7B31E3B547`.
 
