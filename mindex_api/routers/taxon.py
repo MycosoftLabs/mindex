@@ -569,6 +569,9 @@ def _normalized_tag_sql(value_sql: str) -> str:
     return f"regexp_replace(regexp_replace(lower(btrim({value_sql})), '[_-]+', ' ', 'g'), '[[:space:]]+', ' ', 'g')"
 
 
+_CATEGORY_TAG_NAMES_SQL = "('edibility', 'characteristic', 'characteristics')"
+
+
 def _category_match_sql(values: tuple[str, ...], prefix: str) -> tuple[str, dict[str, Any]]:
     names = []
     params: dict[str, Any] = {}
@@ -582,7 +585,7 @@ def _category_match_sql(values: tuple[str, ...], prefix: str) -> tuple[str, dict
     normalized_trait = _normalized_tag_sql("trait.value_text")
     normalized_characteristic = _normalized_tag_sql("characteristic.value_text")
     return (
-        "(" + " OR ".join((
+        f"(t.id IN ({_category_candidate_ids_sql()}) AND (" + " OR ".join((
             f"COALESCE({normalized_metadata_edibility} IN ({in_values}), FALSE)",
             f"EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE "
             f"WHEN jsonb_typeof(t.metadata->'characteristics') = 'array' "
@@ -590,15 +593,38 @@ def _category_match_sql(values: tuple[str, ...], prefix: str) -> tuple[str, dict
             f"WHERE {normalized_metadata_characteristic} IN ({in_values}))",
             f"EXISTS (SELECT 1 FROM bio.taxon_trait trait WHERE trait.taxon_id = t.id "
             f"AND NULLIF(btrim(trait.source), '') IS NOT NULL "
-            f"AND lower(trait.trait_name) IN ('edibility', 'characteristic', 'characteristics') "
+            f"AND lower(trait.trait_name) IN {_CATEGORY_TAG_NAMES_SQL} "
             f"AND {normalized_trait} IN ({in_values}))",
             f"EXISTS (SELECT 1 FROM bio.taxon_characteristic characteristic "
             f"WHERE characteristic.taxon_id = t.id AND NULLIF(btrim(characteristic.source), '') IS NOT NULL "
-            f"AND lower(characteristic.name) IN ('edibility', 'characteristic', 'characteristics') "
+            f"AND lower(characteristic.name) IN {_CATEGORY_TAG_NAMES_SQL} "
             f"AND {normalized_characteristic} IN ({in_values}))",
-        )) + ")",
+        )) + "))",
         params,
     )
+
+
+def _category_candidate_ids_sql() -> str:
+    """Index-backed superset of ids any explicit category tag can match.
+
+    Every branch of ``_category_match_sql`` needs a top-level ``edibility`` or ``characteristics``
+    metadata key or a qualifying trait/characteristic row, so gating on these ids lets the planner
+    probe a few primary keys instead of normalizing tags for every taxon.
+    """
+    return (
+        "SELECT c.id FROM core.taxon c WHERE c.metadata ?| array['edibility','characteristics'] "
+        "UNION SELECT trait.taxon_id FROM bio.taxon_trait trait WHERE trait.taxon_id IS NOT NULL "
+        f"AND lower(trait.trait_name) IN {_CATEGORY_TAG_NAMES_SQL} "
+        "UNION SELECT characteristic.taxon_id FROM bio.taxon_characteristic characteristic "
+        f"WHERE characteristic.taxon_id IS NOT NULL AND lower(characteristic.name) IN {_CATEGORY_TAG_NAMES_SQL}"
+    )
+
+
+# Superset of has_description matches; idx_taxon_description_present and idx_taxon_metadata_gin serve it.
+_DESCRIPTION_CANDIDATE_SQL = (
+    "t.id IN (SELECT c.id FROM core.taxon c WHERE c.description IS NOT NULL "
+    "UNION SELECT c.id FROM core.taxon c WHERE c.metadata ? 'description')"
+)
 
 
 def _valid_photo_url_sql(url_sql: str) -> str:
@@ -1242,6 +1268,7 @@ async def list_taxa(
         where_clauses.append(f"{family_value_sql} = :family")
 
     if normalized_completeness == "has_description":
+        where_clauses.append(_DESCRIPTION_CANDIDATE_SQL)
         where_clauses.append(
             "COALESCE(NULLIF(btrim(t.description), ''), NULLIF(btrim(t.metadata->>'description'), '')) IS NOT NULL"
         )
