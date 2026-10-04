@@ -224,13 +224,14 @@ def sync_solar_events():
                 INSERT INTO space.solar_events (source, event_type, class, intensity,
                     kp_index, speed_km_s, source_region, start_time, peak_time, end_time,
                     earth_directed, properties)
-                SELECT %(source)s, %(event_type)s, %(class)s, %(intensity)s::float8,
-                    %(kp_index)s::float8, %(speed_km_s)s::float8, %(source_region)s,
+                SELECT %(source)s::varchar, %(event_type)s::varchar, %(class)s::varchar,
+                    %(intensity)s::float8, %(kp_index)s::float8, %(speed_km_s)s::float8,
+                    %(source_region)s::varchar,
                     %(start_time)s::timestamptz, %(peak_time)s::timestamptz,
                     %(end_time)s::timestamptz, %(earth_directed)s::boolean, %(properties)s::jsonb
                 WHERE NOT EXISTS (
                     SELECT 1 FROM space.solar_events
-                    WHERE source = %(source)s AND event_type = %(event_type)s
+                    WHERE source = %(source)s::varchar AND event_type = %(event_type)s::varchar
                       AND start_time = %(start_time)s::timestamptz
                 )
             """, {
