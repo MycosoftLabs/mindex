@@ -146,10 +146,70 @@ async def test_prefix_and_query_are_escaped_and_prefix_is_index_friendly():
 
 @pytest.mark.asyncio
 async def test_popular_sort_orders_by_stored_observation_count():
-    db = Session(Result(scalar="fungip.species"), Result(rows=[row()]), Result(scalar=1))
+    db = Session(Result(scalar="fungip.species"), Result(rows=[row()]), Result(rows=[]), Result(scalar=1))
     await call_list(db, order_by="observations_count", order="desc")
     assert "FROM obs.observation observation WHERE observation.taxon_id = t.id" in db.calls[1][0]
     assert "secondary_sort_key DESC" in db.calls[1][0]
+
+
+def _named(name):
+    item = row()
+    item["id"] = UUID(int=abs(hash(name)) % (1 << 128))
+    item["canonical_name"] = name
+    return item
+
+
+@pytest.mark.asyncio
+async def test_popular_full_head_page_skips_the_tied_tail():
+    db = Session(Result(scalar="fungip.species"), Result(rows=[_named("A a"), _named("B b")]), Result(scalar=9))
+    response = await call_list(db, order_by="observations_count", order="desc", limit=2)
+    head_sql, head_params = db.calls[1]
+    assert "t.id IN (SELECT observation.taxon_id FROM obs.observation observation" in head_sql
+    assert "c.metadata ?| array['default_photo', 'photos']" in head_sql
+    assert (head_params["limit"], head_params["offset"]) == (2, 0)
+    assert "SELECT count(*) FROM core.taxon t WHERE" in db.calls[2][0]
+    assert [item.canonical_name for item in response.data] == ["A a", "B b"]
+
+
+@pytest.mark.asyncio
+async def test_popular_short_head_continues_into_tail_by_name():
+    db = Session(
+        Result(scalar="fungip.species"), Result(rows=[_named("Head one")]),
+        Result(rows=[_named("Aaa tail"), _named("Bbb tail")]), Result(scalar=3_300_000),
+    )
+    response = await call_list(db, order_by="observations_count", order="desc", limit=3)
+    tail_sql, tail_params = db.calls[2]
+    assert "AND NOT (t.id IN (" in tail_sql
+    assert "0::bigint AS sort_key, 0 AS secondary_sort_key" in tail_sql
+    assert "ORDER BY canonical_name ASC, id ASC" in tail_sql
+    assert (tail_params["limit"], tail_params["offset"]) == (2, 0)
+    assert [item.canonical_name for item in response.data] == ["Head one", "Aaa tail", "Bbb tail"]
+    assert response.pagination.total == 3_300_000
+
+
+@pytest.mark.asyncio
+async def test_popular_offset_past_head_skips_it_by_exact_size():
+    db = Session(
+        Result(scalar="fungip.species"), Result(rows=[]), Result(scalar=10_561),
+        Result(rows=[_named("Tail row")]), Result(scalar=3_300_000),
+    )
+    await call_list(db, order_by="observations_count", order="desc", limit=500, offset=20_000)
+    assert db.calls[1][1]["offset"] == 20_000
+    assert db.calls[2][0].startswith("SELECT count(*) FROM core.taxon t") and "AND NOT (t.id IN" not in db.calls[2][0]
+    assert (db.calls[3][1]["limit"], db.calls[3][1]["offset"]) == (500, 20_000 - 10_561)
+
+
+@pytest.mark.asyncio
+async def test_popular_ascending_ranks_zero_count_photo_rows_before_the_tail():
+    db = Session(
+        Result(scalar="fungip.species"), Result(rows=[_named("Photo only")]),
+        Result(rows=[_named("Tail row")]), Result(rows=[]), Result(scalar=3),
+    )
+    response = await call_list(db, order_by="observations_count", order="asc", limit=5)
+    assert "taxon_id = t.id) = 0" in db.calls[1][0]
+    assert "AND NOT (t.id IN (" in db.calls[2][0]
+    assert "taxon_id = t.id) > 0" in db.calls[3][0]
+    assert [item.canonical_name for item in response.data] == ["Photo only", "Tail row"]
 
 
 @pytest.mark.asyncio
