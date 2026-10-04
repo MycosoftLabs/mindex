@@ -60,6 +60,14 @@ def _fetch_firms_data(
     return results
 
 
+def _firms_acquired_at(acq_date: Optional[str], acq_time: Optional[str]) -> Optional[str]:
+    """FIRMS reports acq_date (YYYY-MM-DD) and acq_time (HHMM, UTC) separately."""
+    if not acq_date:
+        return None
+    hhmm = (acq_time or "0000").strip().zfill(4)
+    return f"{acq_date}T{hhmm[:2]}:{hhmm[2:]}:00+00:00"
+
+
 def map_fire_hotspot(record: dict) -> dict:
     """Map FIRMS CSV record to MINDEX wildfire format."""
     return {
@@ -71,7 +79,7 @@ def map_fire_hotspot(record: dict) -> dict:
         "name": None,
         "lat": float(record.get("latitude", 0)),
         "lng": float(record.get("longitude", 0)),
-        "detected_at": f"{record.get('acq_date')} {record.get('acq_time', '0000')}",
+        "detected_at": _firms_acquired_at(record.get("acq_date"), record.get("acq_time")),
         "brightness": float(record.get("bright_ti4", 0) or record.get("brightness", 0)),
         "frp": float(record.get("frp", 0) or 0),
         "confidence": record.get("confidence"),
