@@ -27,9 +27,15 @@ from typing import Any, Dict, List, Optional
 import psycopg
 from psycopg.types.json import Json
 
+from .. import log_redaction
 from ..config import settings
 
+log_redaction.install()
 logger = logging.getLogger(__name__)
+
+# The sync runs every 15 minutes; the USGS hour feed is often empty above M2.5, so
+# each run upserts the full day feed and catches late or revised events.
+EARTHQUAKE_WINDOW_HOURS = 24
 
 
 def _get_conn():
@@ -37,12 +43,39 @@ def _get_conn():
     return psycopg.connect(settings.database_url)
 
 
+_LOGGED_ROW_ERRORS = 3
+
+
+class _RowCursor:
+    """Runs each row in its own savepoint so one rejected row cannot discard the batch."""
+
+    def __init__(self, conn, label: str):
+        self._conn = conn
+        self._cur = conn.cursor()
+        self.label = label
+        self.errors = 0
+
+    def execute(self, sql, params=None):
+        with self._conn.transaction():
+            self._cur.execute(sql, params)
+
+    def row_failed(self, exc: Exception) -> None:
+        self.errors += 1
+        if self.errors <= _LOGGED_ROW_ERRORS:
+            logger.warning("%s row rejected: %s", self.label, exc)
+
+    def close(self) -> None:
+        if self.errors:
+            logger.warning("%s: %d rows rejected", self.label, self.errors)
+        self._cur.close()
+
+
 def _upsert_batch(conn, table: str, records: List[dict], conflict_col: str = "source_id"):
     """Generic upsert for ETL records with PostGIS geometry."""
     if not records:
         return 0
 
-    cur = conn.cursor()
+    cur = _RowCursor(conn, table)
     count = 0
 
     for record in records:
@@ -72,8 +105,7 @@ def _upsert_batch(conn, table: str, records: List[dict], conflict_col: str = "so
             cur.execute(sql, record)
             count += 1
         except Exception as e:
-            logger.debug(f"Upsert error for {table}: {e}")
-            conn.rollback()
+            cur.row_failed(e)
             continue
 
     conn.commit()
@@ -93,7 +125,7 @@ def sync_earthquakes(hours: int = 24, min_magnitude: float = 2.5):
     records = fetch_recent_earthquakes(hours=hours, min_magnitude=min_magnitude)
 
     conn = _get_conn()
-    cur = conn.cursor()
+    cur = _RowCursor(conn, "earthquakes")
     count = 0
 
     for record in records:
@@ -124,8 +156,7 @@ def sync_earthquakes(hours: int = 24, min_magnitude: float = 2.5):
             })
             count += 1
         except Exception as e:
-            logger.debug(f"Earthquake upsert error: {e}")
-            conn.rollback()
+            cur.row_failed(e)
 
     conn.commit()
     cur.close()
@@ -140,7 +171,7 @@ def sync_wildfires():
 
     logger.info("Syncing active wildfires")
     conn = _get_conn()
-    cur = conn.cursor()
+    cur = _RowCursor(conn, "wildfires")
     count = 0
 
     for record in iter_active_wildfires():
@@ -169,8 +200,7 @@ def sync_wildfires():
             })
             count += 1
         except Exception as e:
-            logger.debug(f"Wildfire upsert error: {e}")
-            conn.rollback()
+            cur.row_failed(e)
 
     conn.commit()
     cur.close()
@@ -179,13 +209,19 @@ def sync_wildfires():
     return count
 
 
+SOLAR_EVENT_COLUMNS = (
+    "source", "event_type", "class", "intensity", "kp_index", "speed_km_s",
+    "source_region", "start_time", "peak_time", "end_time", "earth_directed",
+)
+
+
 def sync_solar_events():
     """Sync space weather events from NASA DONKI."""
     from ..sources.noaa import iter_solar_events
 
     logger.info("Syncing solar/space weather events")
     conn = _get_conn()
-    cur = conn.cursor()
+    cur = _RowCursor(conn, "solar_events")
     count = 0
 
     for record in iter_solar_events():
@@ -194,21 +230,23 @@ def sync_solar_events():
                 INSERT INTO space.solar_events (source, event_type, class, intensity,
                     kp_index, speed_km_s, source_region, start_time, peak_time, end_time,
                     earth_directed, properties)
-                VALUES (%(source)s, %(event_type)s, %(class)s, %(intensity)s,
-                    %(kp_index)s, %(speed_km_s)s, %(source_region)s, %(start_time)s,
-                    %(peak_time)s, %(end_time)s, %(earth_directed)s, %(properties)s::jsonb)
-                ON CONFLICT DO NOTHING
+                SELECT %(source)s::varchar, %(event_type)s::varchar, %(class)s::varchar,
+                    %(intensity)s::float8, %(kp_index)s::float8, %(speed_km_s)s::float8,
+                    %(source_region)s::varchar,
+                    %(start_time)s::timestamptz, %(peak_time)s::timestamptz,
+                    %(end_time)s::timestamptz, %(earth_directed)s::boolean, %(properties)s::jsonb
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM space.solar_events
+                    WHERE source = %(source)s::varchar AND event_type = %(event_type)s::varchar
+                      AND start_time = %(start_time)s::timestamptz
+                )
             """, {
-                **record,
-                "class": record.get("class"),
-                "peak_time": record.get("peak_time"),
-                "end_time": record.get("end_time"),
+                **{col: record.get(col) for col in SOLAR_EVENT_COLUMNS},
                 "properties": Json(record.get("properties", {})),
             })
             count += 1
         except Exception as e:
-            logger.debug(f"Solar event upsert error: {e}")
-            conn.rollback()
+            cur.row_failed(e)
 
     conn.commit()
     cur.close()
@@ -223,7 +261,7 @@ def sync_air_quality(country: Optional[str] = None):
 
     logger.info(f"Syncing air quality data (country={country})")
     conn = _get_conn()
-    cur = conn.cursor()
+    cur = _RowCursor(conn, "air_quality")
     count = 0
 
     for record in iter_air_quality(country=country, max_pages=3):
@@ -242,8 +280,7 @@ def sync_air_quality(country: Optional[str] = None):
                 })
                 count += 1
         except Exception as e:
-            logger.debug(f"Air quality upsert error: {e}")
-            conn.rollback()
+            cur.row_failed(e)
 
     conn.commit()
     cur.close()
@@ -262,7 +299,7 @@ def sync_satellites(groups: Optional[List[str]] = None):
 
     logger.info("Syncing satellite catalog from CelesTrak")
     conn = _get_conn()
-    cur = conn.cursor()
+    cur = _RowCursor(conn, "satellites")
     count = 0
 
     for record in iter_satellites(groups=groups or ["active"]):
@@ -288,8 +325,7 @@ def sync_satellites(groups: Optional[List[str]] = None):
             })
             count += 1
         except Exception as e:
-            logger.debug(f"Satellite upsert error: {e}")
-            conn.rollback()
+            cur.row_failed(e)
 
     conn.commit()
     cur.close()
@@ -304,7 +340,7 @@ def sync_launches():
 
     logger.info("Syncing space launches")
     conn = _get_conn()
-    cur = conn.cursor()
+    cur = _RowCursor(conn, "launches")
     count = 0
 
     for status in ["upcoming", "previous"]:
@@ -328,8 +364,7 @@ def sync_launches():
                 })
                 count += 1
             except Exception as e:
-                logger.debug(f"Launch upsert error: {e}")
-                conn.rollback()
+                cur.row_failed(e)
 
     conn.commit()
     cur.close()
@@ -344,7 +379,7 @@ def sync_submarine_cables():
 
     logger.info("Syncing submarine cables")
     conn = _get_conn()
-    cur = conn.cursor()
+    cur = _RowCursor(conn, "submarine_cables")
     count = 0
 
     for record in iter_submarine_cables():
@@ -367,8 +402,7 @@ def sync_submarine_cables():
             })
             count += 1
         except Exception as e:
-            logger.debug(f"Cable upsert error: {e}")
-            conn.rollback()
+            cur.row_failed(e)
 
     conn.commit()
     cur.close()
@@ -383,7 +417,7 @@ def sync_species_all_kingdoms(max_pages: int = 10):
 
     logger.info("Syncing all-kingdom species from GBIF")
     conn = _get_conn()
-    cur = conn.cursor()
+    cur = _RowCursor(conn, "species")
     count = 0
 
     for record in iter_gbif_species(domain_mode="all", max_pages=max_pages):
@@ -414,8 +448,7 @@ def sync_species_all_kingdoms(max_pages: int = 10):
             })
             count += 1
         except Exception as e:
-            logger.debug(f"Species upsert error: {e}")
-            conn.rollback()
+            cur.row_failed(e)
 
     conn.commit()
     cur.close()
@@ -439,7 +472,7 @@ def run_realtime_sync():
 
     # Real-time feeds
     jobs = [
-        ("earthquakes", lambda: sync_earthquakes(hours=1)),
+        ("earthquakes", lambda: sync_earthquakes(hours=EARTHQUAKE_WINDOW_HOURS)),
         ("wildfires", sync_wildfires),
         ("solar_events", sync_solar_events),
         ("air_quality", lambda: sync_air_quality()),

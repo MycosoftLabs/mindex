@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -118,13 +118,31 @@ class ETLSettings(BaseSettings):
     usgs_min_magnitude: float = 2.5
 
     # --- NASA ---
+    # Server-side only. No DEMO_KEY fallback: a missing key logs a warning and the feed is skipped.
     nasa_api_key: Optional[str] = Field(
         default=None,
-        description="NASA API key (DEMO_KEY works with rate limits). Get from https://api.nasa.gov/",
+        validation_alias=AliasChoices("NASA_API_KEY", "NASA_KEY"),
+        description="api.nasa.gov key (DONKI, APOD, NeoWs, EONET). Get from https://api.nasa.gov/",
     )
     nasa_firms_map_key: Optional[str] = Field(
         default=None,
-        description="NASA FIRMS MAP_KEY for fire/hotspot data. Get from https://firms.modaps.eosdis.nasa.gov/api/",
+        validation_alias=AliasChoices("NASA_FIRMS_MAP_KEY", "FIRMS_MAP_KEY", "FIRMS_API_KEY"),
+        description="NASA FIRMS MAP_KEY for fire/hotspot data. Shared across systems: 5000 tx / 10 min.",
+    )
+    earthdata_username: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("EARTHDATA_USERNAME", "NASA_EARTHDATA_USERNAME"),
+    )
+    earthdata_password: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("EARTHDATA_PASSWORD", "NASA_EARTHDATA_PASSWORD"),
+    )
+    earthdata_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "EARTHDATA_TOKEN", "NASA_EARTHDATA_TOKEN", "EDL_TOKEN", "EARTHDATA_BEARER_TOKEN"
+        ),
+        description="Earthdata Login user token (Authorization: Bearer). Expires about every 60 days.",
     )
 
     # --- NOAA ---
