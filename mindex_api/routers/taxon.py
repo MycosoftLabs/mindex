@@ -628,13 +628,17 @@ def _has_images_candidate_sql(*, fungip_available: bool) -> str:
     Every core photo URL lives under a top-level default_photo/photos key and every FungiP image
     requires a valid image row keyed by taxon_id, so ANDing this never changes which taxa match.
     """
+    return f"t.id IN ({_photo_candidate_ids_sql(fungip_available=fungip_available)})"
+
+
+def _photo_candidate_ids_sql(*, fungip_available: bool) -> str:
     candidates = "SELECT c.id FROM core.taxon c WHERE c.metadata ?| array['default_photo', 'photos']"
     if fungip_available:
         candidates += (
             " UNION SELECT source.taxon_id FROM fungip.species source "
             "WHERE source.image_valid IS TRUE AND source.taxon_id IS NOT NULL"
         )
-    return f"t.id IN ({candidates})"
+    return candidates
 
 
 def _fungip_photo_exists_sql() -> str:
@@ -881,6 +885,20 @@ _METADATA_OBS_EXPR = (
 _OBSERVATION_COUNT_SQL = "(SELECT COUNT(*)::bigint FROM obs.observation observation WHERE observation.taxon_id = t.id)"
 
 
+def _popularity_head_sql(*, photo_sql: str, fungip_available: bool) -> str:
+    """Rows whose (observation count, photo) popularity key is above (0, no photo).
+
+    Every other row ties on that key, so it orders by canonical_name, id alone. The UNION of
+    observed and photo-candidate ids is a superset of the head, so the planner probes those
+    primary keys instead of computing the count and photo regexes for every species.
+    """
+    candidates = (
+        "SELECT observation.taxon_id FROM obs.observation observation WHERE observation.taxon_id IS NOT NULL "
+        f"UNION {_photo_candidate_ids_sql(fungip_available=fungip_available)}"
+    )
+    return f"(t.id IN ({candidates}) AND ({_OBSERVATION_COUNT_SQL} > 0 OR {photo_sql}))"
+
+
 async def _list_taxa_core_page(
     db: AsyncSession,
     *,
@@ -891,13 +909,21 @@ async def _list_taxa_core_page(
     order_expr_override: Optional[str] = None,
     order_source_sql: str = "",
     secondary_order_expr: Optional[str] = None,
+    popularity_head_sql: Optional[str] = None,
     include_category_evidence: bool = False,
 ) -> tuple[list[dict[str, Any]], int, str]:
-    """Filter, sort and page on core.taxon first; per-taxon counts only for the returned page."""
+    """Filter, sort and page on core.taxon first; per-taxon counts only for the returned page.
+
+    With ``popularity_head_sql`` the popularity order is paged as consecutive segments: the
+    small head ordered by the full key, and the tied remainder ordered by canonical_name, id.
+    The concatenation is exactly the single ORDER BY over all matching rows.
+    """
     order_expr = order_expr_override or (_OBSERVATION_COUNT_SQL if by_popularity else "canonical_name")
     secondary_select = f", {secondary_order_expr} AS secondary_sort_key" if secondary_order_expr else ""
     secondary_inner_order = f", {secondary_order_expr} DESC" if secondary_order_expr else ""
     secondary_outer_order = ", page.secondary_sort_key DESC" if secondary_order_expr else ""
+    full_order_sql = f"{order_expr} {order_normalized}{secondary_inner_order}, canonical_name ASC, id ASC"
+    full_keys_sql = f"{order_expr} AS sort_key{secondary_select}"
     category_evidence_sql = "NULL::jsonb AS category_evidence_raw"
     if include_category_evidence:
         category_evidence_sql = _PAGE_CATEGORY_EVIDENCE_SQL.replace(
@@ -909,32 +935,74 @@ async def _list_taxa_core_page(
         ).replace(
             "__NORMALIZED_CHARACTERISTIC__", _normalized_tag_sql("characteristic.value_text"),
         )
-    stmt = text(
-        f"""
-        SELECT page.id, page.canonical_name, page.rank, page.common_name, page.author, page.description,
-               page.source, page.metadata, page.kingdom, page.lineage, page.lineage_ids, page.external_ids,
-               page.created_at, page.updated_at,
-               {category_evidence_sql},
-               {_PAGE_COUNT_COLUMNS}
-        FROM (
-            SELECT id, canonical_name, rank, common_name, COALESCE(author, authority) AS author,
-                   description, source, metadata, {_EFFECTIVE_KINGDOM_SQL} AS kingdom,
-                   lineage, lineage_ids, external_ids, created_at, updated_at,
-                   {order_expr} AS sort_key{secondary_select}
-            FROM core.taxon t
-            {order_source_sql}
-            WHERE {where_sql}
-            ORDER BY {order_expr} {order_normalized}{secondary_inner_order}, canonical_name ASC, id ASC
-            LIMIT :limit OFFSET :offset
-        ) page
-        ORDER BY page.sort_key {order_normalized}{secondary_outer_order}, page.canonical_name ASC, page.id ASC
-        """
-    )
     page_params = dict(params)
     if include_category_evidence:
         page_params["category_evidence_values"] = list(_ALL_EXPLICIT_CATEGORY_VALUES)
-    result = await db.execute(stmt, page_params)
-    rows = [_normalize_taxon_row(dict(row)) for row in result.mappings().all()]
+
+    async def fetch_segment(
+        segment_where: str, keys_sql: str, order_sql: str, limit: int, offset: int,
+    ) -> list[dict[str, Any]]:
+        stmt = text(
+            f"""
+            SELECT page.id, page.canonical_name, page.rank, page.common_name, page.author, page.description,
+                   page.source, page.metadata, page.kingdom, page.lineage, page.lineage_ids, page.external_ids,
+                   page.created_at, page.updated_at,
+                   {category_evidence_sql},
+                   {_PAGE_COUNT_COLUMNS}
+            FROM (
+                SELECT id, canonical_name, rank, common_name, COALESCE(author, authority) AS author,
+                       description, source, metadata, {_EFFECTIVE_KINGDOM_SQL} AS kingdom,
+                       lineage, lineage_ids, external_ids, created_at, updated_at,
+                       {keys_sql}
+                FROM core.taxon t
+                {order_source_sql}
+                WHERE {segment_where}
+                ORDER BY {order_sql}
+                LIMIT :limit OFFSET :offset
+            ) page
+            ORDER BY page.sort_key {order_normalized}{secondary_outer_order}, page.canonical_name ASC, page.id ASC
+            """
+        )
+        result = await db.execute(stmt, {**page_params, "limit": limit, "offset": offset})
+        return [dict(row) for row in result.mappings().all()]
+
+    if not (by_popularity and popularity_head_sql and order_expr_override is None):
+        raw_rows = await fetch_segment(
+            where_sql, full_keys_sql, full_order_sql, int(params["limit"]), int(params["offset"]),
+        )
+    else:
+        tied_keys_sql = "0::bigint AS sort_key" + (", 0 AS secondary_sort_key" if secondary_order_expr else "")
+        head = f"({where_sql}) AND {popularity_head_sql}"
+        tail = (f"({where_sql}) AND NOT {popularity_head_sql}", tied_keys_sql, "canonical_name ASC, id ASC")
+        if order_normalized == "desc":
+            segments = [(head, full_keys_sql, full_order_sql), tail]
+        else:
+            # Ascending count still ranks photo rows first among zero-observation ties.
+            segments = [
+                (f"{head} AND {_OBSERVATION_COUNT_SQL} = 0", full_keys_sql, full_order_sql),
+                tail,
+                (f"{head} AND {_OBSERVATION_COUNT_SQL} > 0", full_keys_sql, full_order_sql),
+            ]
+        raw_rows = []
+        remaining = int(params["limit"])
+        offset = int(params["offset"])
+        for index, (segment_where, keys_sql, order_sql) in enumerate(segments):
+            if remaining <= 0:
+                break
+            segment_rows = await fetch_segment(segment_where, keys_sql, order_sql, remaining, offset)
+            raw_rows.extend(segment_rows)
+            remaining -= len(segment_rows)
+            if segment_rows or offset == 0:
+                offset = 0
+            elif index < len(segments) - 1:
+                # The requested offset lies past this whole segment; skip it by its size.
+                skipped = await db.execute(
+                    text(f"SELECT count(*) FROM core.taxon t {order_source_sql} WHERE {segment_where}"),
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                offset = max(0, offset - int(skipped.scalar_one() or 0))
+
+    rows = [_normalize_taxon_row(row) for row in raw_rows]
     for row in rows:
         evidence, truncated = _project_category_evidence(row.pop("category_evidence_raw", None))
         row["category_evidence"] = evidence
@@ -1295,12 +1363,11 @@ async def list_taxa(
     count_cache_state = "fresh_query"
     category_evidence_fallback = False
     try:
-        photo_tiebreak = f"CASE WHEN {_core_photo_exists_sql()} THEN 1 ELSE 0 END"
+        photo_sql = _core_photo_exists_sql()
         if fungip_available:
-            photo_tiebreak = (
-                f"CASE WHEN ({_core_photo_exists_sql()} OR {_fungip_photo_exists_sql()}) "
-                "THEN 1 ELSE 0 END"
-            )
+            photo_sql = f"({_core_photo_exists_sql()} OR {_fungip_photo_exists_sql()})"
+        photo_tiebreak = f"CASE WHEN {photo_sql} THEN 1 ELSE 0 END"
+        by_observations = order_by_normalized in {"observations_count", "obs_count"}
         rows, total, count_cache_state = await _list_taxa_core_page(
             db,
             where_sql=where_sql,
@@ -1309,8 +1376,10 @@ async def list_taxa(
             order_normalized=order_normalized,
             order_expr_override=order_expr if order_by_normalized in {"family", "featured"} else None,
             order_source_sql=family_join,
-            secondary_order_expr=(
-                photo_tiebreak if order_by_normalized in {"observations_count", "obs_count"} else None
+            secondary_order_expr=photo_tiebreak if by_observations else None,
+            popularity_head_sql=(
+                _popularity_head_sql(photo_sql=photo_sql, fungip_available=fungip_available)
+                if by_observations else None
             ),
             include_category_evidence=normalized_category not in {"", "all"},
         )
