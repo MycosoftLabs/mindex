@@ -2,7 +2,7 @@
 
 ## Scope and source pins
 
-This is a static, source-grounded compatibility review at MINDEX commit `a60f2f309c438f375313f8c843877dc9881aaf7b` on isolated branch `codex/research-identity-export-oct04`. It does not modify PR #34 or call a database, provider, Website, first40/16, FG026, wallet, or live service. No exporter or consumer code was changed.
+This additive compatibility report and exporter are on isolated branch `codex/research-identity-export-oct04`, based on MINDEX PR #34 head `a60f2f309c438f375313f8c843877dc9881aaf7b`. PR #34 remains frozen. Static schema findings below pin its source files; the implementation section documents this branch's new producer and private-fixture validation. No shared/native database, provider, Website, first40/16, FG026, wallet, or live service was contacted.
 
 The pinned MAS consumer is `research_jobs/identity_snapshot.py` from the offline installed-package receipt for MAS PR #202 head `b886147511021672f1e1ac488ee5d883a75516be`; its SHA-256 is `a95d735d58051a13101e1537a42f88eb1d7381beb193e40346464adcac9b6979`. Its `research.identity-export.v1` validator requires each record to contain exactly `resource`, `accession`, `sequence_sha256`, `canonical_taxon_id`, `canonical_reference_id`, and `source_record_id`; all three identity fields must be canonical UUID strings. It also requires an authority URL, authority-response SHA-256, capture time, expiry, and one of `available|empty|partial|unavailable`. Duplicate `(resource, accession, sequence_sha256)` keys reject the entire export.
 
@@ -21,7 +21,7 @@ The migration inventory and source search found no MINDEX `canonical_reference_i
 
 ## Exact read-only schema and candidate-row queries
 
-These statements are inspection/proposal text only; none was run against any database.
+The two following inspection statements are documented for source review and future diagnosis; they were not run against a database. The v2 producer uses separate fixed SQL constants and was qualified only on the disposable private database recorded below.
 
 Schema/type inventory for the identities in scope:
 
@@ -72,13 +72,50 @@ The sequence digest above is a computed digest of MINDEX's stored UTF-8 sequence
 
 ## Compatibility decision
 
-A conforming v1 export is not feasible from the committed MINDEX schema without fabricating or mislabeling identities. The genuine UUID `core.taxon.id` can populate `canonical_taxon_id` for an exactly linked row. No `canonical_reference_id UUID` exists. The existing source-record ID is provider text, while `evidence_id UUID` identifies MINDEX's evidence row and is not the source record. `core.publications.id` is text, and the MAS envelope's authority URL/response hash/capture-expiry contract is not represented by a MINDEX snapshot record. Renaming, UUID-casting, or deterministically formatting any of these values would change their semantics.
 
-Recommended narrow consumer-contract change for a MINDEX-native export: keep `canonical_taxon_id` as UUID, but represent local references and provider records as tagged opaque identities, for example `canonical_reference: {namespace: "mindex.core.publications.id.v1", value: "<stored id>"}` and `source_record: {provider: "ncbi_genbank", id: "<provider_source_record_id>"}`. Keep `evidence_id` separately named as a MINDEX evidence-row UUID. Give the database snapshot its own envelope (`producer`, snapshot ID, capture time, export digest, and status) instead of claiming an authority-response URL/hash. This requires MAS consumer adaptation; this MINDEX branch does not implement it.
+A conforming v1 export is not feasible from the committed MINDEX schema without fabricating or mislabeling identities. The genuine UUID `core.taxon.id` can populate `canonical_taxon_id` for a stored, extant foreign-key link. No `canonical_reference_id UUID` exists. The source-record ID is provider text, while `evidence_id UUID` identifies MINDEX's evidence row and is not the source record. `core.publications.id` is text, and the MAS authority-HTTP-response envelope is not represented by a MINDEX snapshot record. Renaming, UUID-casting, or deterministically formatting any of these values would change their semantics.
+
+## Additive v2 producer contract
+
+`mindex_etl.research_identity_export.export_identity_snapshot` implements a read-only, bounded producer with no database schema changes. Its exact top-level shape is:
+
+```json
+{
+  "schema": "research.identity-export.v2",
+  "id": "<export receipt UUID>",
+  "status": "available|empty|partial|unavailable",
+  "authority": {
+    "kind": "mindex.postgresql.readonly-snapshot.v2",
+    "instance": {"postgres_system_identifier": "<actual PG system id>", "database": "<current database>"},
+    "receipt_id": "<same export receipt UUID>",
+    "captured_at": "<transaction_timestamp UTC>",
+    "expires_at": "<capture time plus bounded TTL>",
+    "transaction_read_only": true,
+    "transaction_isolation": "repeatable read|serializable"
+  },
+  "producer": {
+    "name": "MINDEX",
+    "source_commit": "<operator-supplied source commit>",
+    "source_file_sha256": "<actual producer code bytes>",
+    "query_sha256": "<fixed read-only SQL bytes>"
+  },
+  "records": [],
+  "diagnostics": [],
+  "export_sha256": "<canonical export bytes excluding this field>"
+}
+```
+
+Each record contains `resource` (nullable if no explicit mapping), `sequence_row_id` (the actual PostgreSQL `int4` identity), exact stored `accession`, `version`, `provider` (`source`), `molecule` (`sequence_type`), `gene`, `region`, and `source_url`; `sequence_sha256` and `sequence_utf8_bytes`; `sequence_hash_scope="exact_stored_sequence_utf8_bytes"`; any stored declared sequence hashes and their match/conflict state; actual `canonical_taxon_id` UUID or null; source taxon IDs unchanged as provider strings; stored FK/linkage-provenance states; row eligibility; and row diagnostic codes. No sequence bytes, publication links or evidence-row IDs are included in the initial v2 producer. Citation rows remain optional, separately typed data and are not prerequisites for a sequence-to-taxon association.
+
+The SHA-256 is computed in PostgreSQL as `digest(convert_to(sequence, 'UTF8'), 'sha256')`, with no trimming, case conversion, alphabet normalization, or other sequence rewrite. The query enforces both an `int4`-typed schema check and a fixed row limit; it hashes no more than the configured aggregate UTF-8 byte bound. Caller accession filters are validated and passed only as a `text[]` bind. SQL identifiers and query fragments are fixed constants. The producer requires a fresh idle DB-API connection, starts one `REPEATABLE READ READ ONLY` transaction, binds the authority envelope to `pg_control_system().system_identifier`, `current_database()` and `transaction_timestamp()`, and always rolls the transaction back. If the authority identity, transaction mode, schema, or query cannot be verified, the result is `unavailable` with a fixed reason code and no rows.
+
+The provider/resource/marker map is explicit and preserves raw stored values: `uniprot` plus `protein` maps to resource `uniprot`; `ensembl` plus `dna` or `protein` maps to `ensembl`; `genbank`, `ncbi`, `refseq`, `bold`, or `unite` maps to `its` only for DNA with at least one explicit `gene`/`region` marker in `{ITS, ITS1, ITS2}` and no unsupported marker. Source name, taxon name, URL host, and accession spelling never imply a provider, marker, or canonical taxon. Other combinations remain in the export with `resource: null` and a diagnostic. Unversioned accession equality (for example `P00549` in both fields) is not exact version evidence; fully versioned dotted values in both fields can be exact. Ensembl/UniProt versions are never synthesized from accessions, releases, or hashes.
+
+`available` means all returned rows have an explicit resource map, exact version evidence, an extant stored taxon FK with recognized exact linkage provenance, and no conflicting hash. `empty` means a successful bounded query returned no rows for the request. `partial` retains rows and explicit diagnostics for absent/unlinked taxa, unknown linkage provenance, unmapped provider/molecule/marker, missing or conflicting versions, declared/computed hash conflicts, row/byte caps, or invalid row projections. Ambiguous source-taxonomy metadata is retained as an ambiguous conflict. `unavailable` represents failed authority/schema/query/read-only checks. A positive row means only an exact stored sequence-row to canonical-taxon-FK association in this captured database snapshot; it is not species identification, a provider recheck, or a live claim. The separate MAS consumer must adapt to v2 before consuming this producer.
 
 If the consumer retains mandatory UUID canonical-reference and source-record fields, MINDEX needs a separately reviewed schema/identity design that creates and persists those identities with provenance. A UUID default on an evidence row does not itself satisfy either identity. No migration, backfill, source enrichment, or apply is proposed here.
 
-For a future producer after contract resolution, preserve status distinctions: `unavailable` for absent required relations/columns or query failure; `empty` only when all required reads succeed and the bounded request yields no candidate; `partial` when rows exist but some lack a unique exact taxon/reference/source/version/hash binding; and `available` only when every exported row has the required verified identities and hashes. Report absent, ambiguous, version, and hash conflicts explicitly; never make a conflicting row look like an empty successful result. The current strict v1 consumer only accepts valid UUID rows and does not accept per-row conflict diagnostics, another reason not to emit a fabricated v1 envelope.
+The v1 consumer requires producer-owned UUIDs for canonical-reference and provider-record identities that MINDEX does not have. V2 therefore changes the sequence identity grain to the real genetic-sequence row and keeps a local publication/evidence identity out of that required join. Source-specific references can be added later as optional separately typed relationships if an owner-approved consumer contract needs them.
 
 ## Source anchors and byte pins
 
@@ -95,4 +132,10 @@ All paths are relative to the pinned MINDEX checkout unless stated otherwise.
 | `mindex_etl/jobs/import_taxon_publication_evidence.py` | local string publication ID and read/write queries for evidence | `23a0b8a093d2b310b6bcc2a1e2f896a73847b9752854817988052188fb391b56` |
 | `mindex_api/routers/genetics.py` | exact stored GET query by base accession/version | `d66b72eb61a53f29aa2942ba2b93307d8bcb19e8479916d0aeda52a6dafa45f1` |
 
-No database/provider request, migration, test fixture, or external service was used for this static review.
+## Validation and custody
+
+Focused validation passed 26/26 tests (25 offline producer/contract tests and one actual PostgreSQL/DB-API integration case) using the declared-dependency Python environment at `outputs/ancestry-continuation-oct04/native-declared-env/env-20261004-52f3a79e/.venv`. The SQL integration used PostgreSQL 17.11 on `127.0.0.1:55477`, database `mindex_identity_export_test_20261004`, system identifier `7692666474618622360`. It applied the committed `migrations/0001_init.sql` and `migrations/0012_genetics.sql` definitions, with `pg_trgm` and the `core.migration_log` prerequisite from `20260610_etl_schema_upgrade_JUN10_2026.sql`. It did not apply the publication/evidence migration, showing that citations are not required for the sequence-to-taxon identity export.
+
+The integration case inserted and removed one synthetic taxon/sequence pair. It verified the `SERIAL` sequence-row ID as int4, the actual taxon UUID, exact accession/version/source/molecule/marker fields, hash of unnormalized UTF-8 sequence bytes, and the transaction read-only/repeatable-read receipt. The exporter returned no sequence content. A post-test count found no remaining `ZZTEST%` row. The private PostgreSQL process stopped successfully; `pg_ctl` reports no server, the owned process count is zero, port 55477 is closed, the PID file is absent, and the cluster data is retained at `outputs/ancestry-continuation-oct04/research-identity-export-v2-pg/data`.
+
+JUnit: `outputs/ancestry-continuation-oct04/research-identity-export-v2-pg/pytest-v2.junit.xml` (SHA-256 `4b468b16f159296c2942a9b7c330aec44655f48d6938aedcbe42c6a541988f2f`). Test log: `outputs/ancestry-continuation-oct04/research-identity-export-v2-pg/pytest-v2.log` (SHA-256 `17a53cfb8c801dc846fcb871cab8a31eccf3509bab840ad6a91fe7a0972090ab`). These results qualify only the isolated schema fixture and static/offline producer behavior. No shared/native database, provider, deployment, Website, first40/16, FG026, wallet, or `.189` action occurred.
