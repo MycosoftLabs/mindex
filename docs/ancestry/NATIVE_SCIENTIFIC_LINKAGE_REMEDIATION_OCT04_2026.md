@@ -2,7 +2,7 @@
 
 ## Source pin and scope
 
-This review candidate is based on frozen source commit `9e902613d192f4aeee7f60dd30d31f558d3221ed` and adds the independent-review fixes in commit `c177f8b610ae86362305bc86e535b43fd5f08ffc`, branch `codex/ancestry-scientific-evidence-oct04`. The complete review branch is a clean diff from `origin/main` at `dca61ecc77a95711d05a45ef4a2bd8671776394c`.
+This review candidate is based on frozen source commit `9e902613d192f4aeee7f60dd30d31f558d3221ed` and adds the independent-review fixes in commit `00f6d78ce5a7df456946ef1444ac48c720c70450`, branch `codex/ancestry-scientific-evidence-oct04`. The complete review branch is a clean diff from `origin/main` at `8da30115ca3aac6b67683138e02376bcde504a8f`.
 
 The remediation changes only the publication evidence importer, its additive evidence migration and focused regression tests. It does not alter `bio.publication_taxon`, create reviewed species-publication links, fetch providers, touch Cursor-owned all-species loaders, change Website code, or apply schema/data changes outside the isolated qualification database.
 
