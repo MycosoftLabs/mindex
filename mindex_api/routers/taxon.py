@@ -1405,8 +1405,10 @@ async def list_taxa(
         query_partial_reasons.append(
             "Per-row category evidence projection unavailable after the native filtered page query"
         )
+    # A cached zero alone can be stale, but an empty first page is a fresh read of the same filter.
+    page_proves_empty = not rows and (count_cache_state == "fresh_query" or pagination.offset == 0)
     query_state = "partial" if query_partial_reasons else (
-        "empty" if total == 0 and not rows and count_cache_state == "fresh_query" else "available"
+        "empty" if total == 0 and page_proves_empty else "available"
     )
 
     return TaxonListResponse(
