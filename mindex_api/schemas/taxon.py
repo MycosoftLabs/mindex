@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -50,7 +50,17 @@ class TaxonResponse(TaxonBase):
     fungip_index: Optional[FungiPIndexAvailability] = None
 
 
+class TaxonListQueryMeta(BaseModel):
+    """Truthful scope for native filtered taxon pages and matching totals."""
+
+    status: Literal["available", "empty", "partial", "unavailable"]
+    count_scope: str
+    filter_sources: dict[str, str] = Field(default_factory=dict)
+    partial_reasons: list[str] = Field(default_factory=list)
+
+
 class TaxonListResponse(BaseModel):
     data: List[TaxonBase]
     pagination: PaginationMeta
     fungip_index: Optional[FungiPIndexAvailability] = None
+    query: Optional[TaxonListQueryMeta] = None

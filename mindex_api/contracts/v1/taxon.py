@@ -1,6 +1,6 @@
 """Versioned contract DTOs: taxa."""
 
-from ...schemas.taxon import TaxonBase, TaxonListResponse, TaxonResponse, TaxonTrait
+from ...schemas.taxon import TaxonBase, TaxonListQueryMeta, TaxonListResponse, TaxonResponse, TaxonTrait
 
-__all__ = ["TaxonTrait", "TaxonBase", "TaxonResponse", "TaxonListResponse"]
+__all__ = ["TaxonTrait", "TaxonBase", "TaxonResponse", "TaxonListResponse", "TaxonListQueryMeta"]
 

@@ -92,7 +92,7 @@ async def test_linked_identifier_is_in_where_clause_before_count_and_page(monkey
         captured["query_pattern"] = query_pattern
         return [FG032_TAXON_ID], FungiPIndexAvailability(status="available")
 
-    async def list_core_page(_db, *, where_sql, params, by_popularity, order_normalized):
+    async def list_core_page(_db, *, where_sql, params, by_popularity, order_normalized, **kwargs):
         captured.update({
             "where_sql": where_sql,
             "params": dict(params),
@@ -119,6 +119,9 @@ async def test_linked_identifier_is_in_where_clause_before_count_and_page(monkey
         prefix=None,
         kingdom=None,
         lineage_contains=None,
+        family=None,
+        category=None,
+        filter=None,
         order_by="canonical_name",
         order="asc",
     )
@@ -182,6 +185,9 @@ async def test_identifier_lookup_status_survives_empty_page_enrichment(
         prefix=None,
         kingdom=None,
         lineage_contains=None,
+        family=None,
+        category=None,
+        filter=None,
         order_by="canonical_name",
         order="asc",
     )

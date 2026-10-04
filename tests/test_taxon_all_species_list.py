@@ -26,6 +26,9 @@ class Result:
     def scalar_one(self):
         return self.scalar
 
+    def scalar_one_or_none(self):
+        return self.scalar
+
 
 class Session:
     def __init__(self, *results):
@@ -73,7 +76,8 @@ def _isolate(monkeypatch):
 async def call_list(db, **kwargs):
     defaults = dict(
         ids=None, q=None, rank=None, source=None, prefix=None, kingdom=None,
-        lineage_contains=None, order_by="canonical_name", order="asc",
+        lineage_contains=None, family=None, category=None, filter=None,
+        order_by="canonical_name", order="asc",
     )
     defaults.update(kwargs)
     pagination = PaginationParams(limit=kwargs.pop("limit", 50), offset=kwargs.pop("offset", 0))
@@ -114,9 +118,10 @@ async def test_prefix_and_query_are_escaped_and_prefix_is_index_friendly():
 
 @pytest.mark.asyncio
 async def test_popular_sort_orders_by_stored_observation_count():
-    db = Session(Result(rows=[row()]), Result(scalar=1))
+    db = Session(Result(scalar="fungip.species"), Result(rows=[row()]), Result(scalar=1))
     await call_list(db, order_by="observations_count", order="desc")
-    assert "metadata->>'observations_count'" in db.calls[0][0]
+    assert "FROM obs.observation observation WHERE observation.taxon_id = t.id" in db.calls[1][0]
+    assert "secondary_sort_key DESC" in db.calls[1][0]
 
 
 @pytest.mark.asyncio
@@ -172,3 +177,81 @@ async def test_kingdom_counts_group_by_effective_kingdom_and_cache():
     assert payload["total"] == 448_138
     assert await route.taxa_kingdom_counts(rank="sp.", db=db) is not None
     assert await route.taxa_kingdom_counts(rank="species", db=db) is payload
+
+
+@pytest.mark.asyncio
+async def test_edible_filter_counts_matching_source_qualified_traits():
+    db = Session(Result(rows=[row()]), Result(scalar=129))
+    response = await call_list(db, category="edible", limit=120, offset=120)
+    sql, params = db.calls[0]
+    assert "FROM bio.taxon_trait trait WHERE trait.taxon_id = t.id" in sql
+    assert "NULLIF(btrim(trait.source), '') IS NOT NULL" in sql
+    assert params["category_0"] == "edible"
+    assert params["category_1"] == "choice"
+    assert params["category_2"] == "choice edible"
+    assert response.pagination.total == 129
+    assert response.query.status == "available"
+    assert response.query.count_scope == "matching_core_taxa"
+
+
+@pytest.mark.asyncio
+async def test_unknown_category_excludes_only_known_explicit_values():
+    db = Session(Result(rows=[]), Result(scalar=0))
+    response = await call_list(db, category="unknown")
+    sql, params = db.calls[0]
+    assert "NOT (" in sql
+    assert "metadata->'characteristics'" in sql
+    assert "bio.taxon_characteristic characteristic" in sql
+    assert params["known_category_0"] == "edible"
+    assert response.query.status == "empty"
+
+
+@pytest.mark.asyncio
+async def test_description_filter_uses_persisted_fields_and_native_matching_total():
+    db = Session(Result(rows=[row()]), Result(scalar=8))
+    response = await call_list(db, filter="has_description")
+    assert "NULLIF(btrim(t.description), '')" in db.calls[0][0]
+    assert "t.metadata->>'description'" in db.calls[0][0]
+    assert response.pagination.total == 8
+    assert response.query.filter_sources["has_description"] == "core.taxon.description/metadata.description"
+
+
+@pytest.mark.asyncio
+async def test_missing_optional_fungip_photo_source_is_explicitly_partial():
+    db = Session(Result(scalar=None), Result(rows=[row()]), Result(scalar=1))
+    response = await call_list(db, filter="has_images")
+    assert "default_photo" in db.calls[1][0]
+    assert "fungip.species" not in db.calls[1][0]
+    assert response.query.status == "partial"
+    assert response.query.partial_reasons
+    assert response.pagination.total == 1
+
+
+@pytest.mark.asyncio
+async def test_family_sort_without_optional_source_still_uses_family_field():
+    db = Session(Result(scalar=None), Result(rows=[row()]), Result(scalar=1))
+    response = await call_list(db, order_by="family")
+    sql = db.calls[1][0]
+    assert "COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), 'Unknown') AS sort_key" in sql
+    assert response.query.status == "partial"
+
+
+@pytest.mark.asyncio
+async def test_family_filter_and_featured_sort_use_native_page_sql():
+    db = Session(Result(scalar="fungip.species"), Result(rows=[row()]), Result(scalar=1))
+    response = await call_list(db, family="Agaricaceae", order_by="featured", limit=120)
+    sql, params = db.calls[1]
+    assert "source.taxon_id = t.id" in sql
+    assert "matches.candidate_count = 1" in sql
+    assert params["family"] == "Agaricaceae"
+    assert "5000 THEN 0 ELSE 1 END" in sql
+    assert response.query.status == "available"
+
+
+@pytest.mark.asyncio
+async def test_unsupported_category_is_not_reported_as_empty():
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        await call_list(Session(), category="derived-from-name")
+    assert exc.value.status_code == 422

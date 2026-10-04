@@ -539,6 +539,111 @@ def _like_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+_EXPLICIT_CATEGORY_ALIASES: dict[str, tuple[str, ...]] = {
+    "edible": ("edible", "choice", "choice edible"),
+    "medicinal": ("medicinal",),
+    "poisonous": ("poisonous", "deadly", "toxic", "deadly poisonous"),
+    "psychoactive": ("psychoactive", "hallucinogenic"),
+    "gourmet": ("gourmet", "choice", "choice edible"),
+}
+_ALL_EXPLICIT_CATEGORY_VALUES = tuple(dict.fromkeys(
+    value for aliases in _EXPLICIT_CATEGORY_ALIASES.values() for value in aliases
+))
+
+
+def _normalized_tag_sql(value_sql: str) -> str:
+    """Match the explorer's explicit-tag normalization without deriving biology."""
+    return f"regexp_replace(regexp_replace(lower(btrim({value_sql})), '[_-]+', ' ', 'g'), '[[:space:]]+', ' ', 'g')"
+
+
+def _category_match_sql(values: tuple[str, ...], prefix: str) -> tuple[str, dict[str, Any]]:
+    names = []
+    params: dict[str, Any] = {}
+    for index, value in enumerate(values):
+        key = f"{prefix}_{index}"
+        names.append(f":{key}")
+        params[key] = value
+    in_values = ", ".join(names)
+    normalized_metadata_edibility = _normalized_tag_sql("t.metadata->>'edibility'")
+    normalized_metadata_characteristic = _normalized_tag_sql("metadata_tag.value")
+    normalized_trait = _normalized_tag_sql("trait.value_text")
+    normalized_characteristic = _normalized_tag_sql("characteristic.value_text")
+    return (
+        "(" + " OR ".join((
+            f"COALESCE({normalized_metadata_edibility} IN ({in_values}), FALSE)",
+            f"EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE "
+            f"WHEN jsonb_typeof(t.metadata->'characteristics') = 'array' "
+            f"THEN t.metadata->'characteristics' ELSE '[]'::jsonb END) AS metadata_tag(value) "
+            f"WHERE {normalized_metadata_characteristic} IN ({in_values}))",
+            f"EXISTS (SELECT 1 FROM bio.taxon_trait trait WHERE trait.taxon_id = t.id "
+            f"AND NULLIF(btrim(trait.source), '') IS NOT NULL "
+            f"AND lower(trait.trait_name) IN ('edibility', 'characteristic', 'characteristics') "
+            f"AND {normalized_trait} IN ({in_values}))",
+            f"EXISTS (SELECT 1 FROM bio.taxon_characteristic characteristic "
+            f"WHERE characteristic.taxon_id = t.id AND NULLIF(btrim(characteristic.source), '') IS NOT NULL "
+            f"AND lower(characteristic.name) IN ('edibility', 'characteristic', 'characteristics') "
+            f"AND {normalized_characteristic} IN ({in_values}))",
+        )) + ")",
+        params,
+    )
+
+
+def _valid_photo_url_sql(url_sql: str) -> str:
+    return (
+        f"({url_sql} ~* '^https?://[^[:space:]]+$' OR "
+        f"({url_sql} LIKE '/%' AND {url_sql} NOT LIKE '//%')) "
+        f"AND {url_sql} !~* 'placeholder\\.(svg|png|jpe?g)([?#]|$)' "
+        f"AND {url_sql} !~ '[[:cntrl:]]' "
+        f"AND {url_sql} !~* '^https?://[^/]*@'"
+    )
+
+
+def _core_photo_exists_sql() -> str:
+    urls = [
+        "t.metadata->'default_photo'->>'medium_url'",
+        "t.metadata->'default_photo'->>'url'",
+        "t.metadata->'photos'->0->>'url'",
+    ]
+    return "(" + " OR ".join(_valid_photo_url_sql(url) for url in urls) + ")"
+
+
+def _fungip_photo_exists_sql() -> str:
+    url = "COALESCE(source.record->'image'->>'image_url', source.record->'image'->>'url')"
+    return _fungip_linked_record_sql(
+        "source.image_valid IS TRUE "
+        "AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE "
+        "WHEN jsonb_typeof(source.validation_errors) = 'array' THEN source.validation_errors "
+        "ELSE '[]'::jsonb END) error(value) WHERE error.value ILIKE '%image%') "
+        f"AND {_valid_photo_url_sql(url)}"
+    )
+
+
+def _fungip_linked_record_sql(record_predicate: str) -> str:
+    """Restrict optional FungiP evidence to the same exact validated identity used by its public projection."""
+    return f"""EXISTS (
+        SELECT 1
+        FROM fungip.species source
+        JOIN LATERAL (
+            SELECT COUNT(DISTINCT external_id.taxon_id)::int AS candidate_count,
+                   (ARRAY_AGG(DISTINCT external_id.taxon_id))[1] AS candidate_taxon_id
+            FROM jsonb_array_elements(
+                CASE WHEN jsonb_typeof(source.external_ids) = 'array' THEN source.external_ids ELSE '[]'::jsonb END
+            ) AS source_identifier(value)
+            JOIN core.taxon_external_id external_id
+              ON external_id.source = source_identifier.value->>'source'
+             AND external_id.external_id = source_identifier.value->>'external_id'
+        ) matches ON TRUE
+        WHERE source.taxon_id = t.id
+          AND source.resolution_status = 'resolved'
+          AND matches.candidate_count = 1
+          AND matches.candidate_taxon_id = t.id
+          AND lower(t.rank) = 'species' AND lower(t.kingdom) = 'fungi'
+          AND t.canonical_name = source.record->>'accepted_name'
+          AND source.accepted_name = source.record->>'accepted_name'
+          AND {record_predicate}
+    )"""
+
+
 _PAGE_COUNT_COLUMNS = """
             (SELECT COUNT(*)::bigint FROM obs.observation o WHERE o.taxon_id = page.id) AS obs_count,
             (SELECT COUNT(*)::bigint FROM media.image i WHERE i.taxon_id = page.id) AS image_count,
@@ -556,6 +661,7 @@ _METADATA_OBS_EXPR = (
     "CASE WHEN (metadata->>'observations_count') ~ '^[0-9]+$' "
     "THEN (metadata->>'observations_count')::bigint ELSE 0 END"
 )
+_OBSERVATION_COUNT_SQL = "(SELECT COUNT(*)::bigint FROM obs.observation observation WHERE observation.taxon_id = t.id)"
 
 
 async def _list_taxa_core_page(
@@ -565,9 +671,15 @@ async def _list_taxa_core_page(
     params: dict[str, Any],
     by_popularity: bool,
     order_normalized: str,
+    order_expr_override: Optional[str] = None,
+    order_source_sql: str = "",
+    secondary_order_expr: Optional[str] = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Filter, sort and page on core.taxon first; per-taxon counts only for the returned page."""
-    order_expr = _METADATA_OBS_EXPR if by_popularity else "canonical_name"
+    order_expr = order_expr_override or (_OBSERVATION_COUNT_SQL if by_popularity else "canonical_name")
+    secondary_select = f", {secondary_order_expr} AS secondary_sort_key" if secondary_order_expr else ""
+    secondary_inner_order = f", {secondary_order_expr} DESC" if secondary_order_expr else ""
+    secondary_outer_order = ", page.secondary_sort_key DESC" if secondary_order_expr else ""
     stmt = text(
         f"""
         SELECT page.id, page.canonical_name, page.rank, page.common_name, page.author, page.description,
@@ -578,18 +690,19 @@ async def _list_taxa_core_page(
             SELECT id, canonical_name, rank, common_name, COALESCE(author, authority) AS author,
                    description, source, metadata, {_EFFECTIVE_KINGDOM_SQL} AS kingdom,
                    lineage, lineage_ids, external_ids, created_at, updated_at,
-                   {order_expr} AS sort_key
-            FROM core.taxon
+                   {order_expr} AS sort_key{secondary_select}
+            FROM core.taxon t
+            {order_source_sql}
             WHERE {where_sql}
-            ORDER BY {order_expr} {order_normalized}, canonical_name ASC, id ASC
+            ORDER BY {order_expr} {order_normalized}{secondary_inner_order}, canonical_name ASC, id ASC
             LIMIT :limit OFFSET :offset
         ) page
-        ORDER BY page.sort_key {order_normalized}, page.canonical_name ASC, page.id ASC
+        ORDER BY page.sort_key {order_normalized}{secondary_outer_order}, page.canonical_name ASC, page.id ASC
         """
     )
     result = await db.execute(stmt, params)
     rows = [_normalize_taxon_row(dict(row)) for row in result.mappings().all()]
-    total = await _cached_count(db, from_clause="core.taxon", where_sql=where_sql, params=params)
+    total = await _cached_count(db, from_clause="core.taxon t", where_sql=where_sql, params=params)
     return rows, total
 
 
@@ -708,9 +821,20 @@ async def list_taxa(
         None,
         description="Match if any name in the materialized lineage array contains this substring (case-insensitive).",
     ),
+    family: Optional[str] = Query(
+        None, max_length=200,
+        description="Exact persisted family value from core metadata or an exact validated FungiP source link.",
+    ),
+    category: Optional[str] = Query(
+        None,
+        description="Explicit persisted trait category: edible, medicinal, poisonous, psychoactive, gourmet, or unknown.",
+    ),
+    filter: Optional[str] = Query(
+        None, alias="filter", description="Data completeness: has_images or has_description."
+    ),
     order_by: str = Query(
         "canonical_name",
-        description="Sort field. Allowed: canonical_name, observations_count.",
+        description="Sort field: canonical_name, observations_count, family, or featured.",
     ),
     order: str = Query("asc", description="Sort order. Allowed: asc, desc."),
 ) -> TaxonListResponse:
@@ -757,15 +881,99 @@ async def list_taxa(
         )
         params["lcp"] = f"%{lineage_contains.strip()}%"
 
-    where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+    normalized_family = (family or "").strip()
+    normalized_category = (category or "").strip().lower()
+    normalized_completeness = (filter or "").strip().lower()
+    if normalized_category and normalized_category != "all":
+        if normalized_category == "unknown":
+            known_sql, known_params = _category_match_sql(_ALL_EXPLICIT_CATEGORY_VALUES, "known_category")
+            where_clauses.append(f"NOT {known_sql}")
+            params.update(known_params)
+        elif normalized_category in _EXPLICIT_CATEGORY_ALIASES:
+            category_sql, category_params = _category_match_sql(
+                _EXPLICIT_CATEGORY_ALIASES[normalized_category], "category"
+            )
+            where_clauses.append(category_sql)
+            params.update(category_params)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Unsupported category. Allowed: edible, medicinal, poisonous, psychoactive, gourmet, unknown.",
+            )
+
+    if normalized_completeness not in {"", "all", "has_images", "has_description"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unsupported completeness filter. Allowed: has_images, has_description.",
+        )
 
     order_by_normalized = (order_by or "").strip().lower()
+    needs_fungip_fields = (
+        bool(normalized_family)
+        or normalized_completeness == "has_images"
+        or order_by_normalized in {"family", "family-asc"}
+        or order_by_normalized in {"observations", "observations_count", "obs_count"}
+    )
+    fungip_available = True
+    if needs_fungip_fields:
+        try:
+            fungip_available = (
+                await db.execute(text("SELECT to_regclass('fungip.species')"))
+            ).scalar_one_or_none() is not None
+        except Exception as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Optional source-qualified FungiP filter state unavailable.",
+            ) from exc
+
+    fungip_family_sql = None
+    if fungip_available and normalized_family:
+        fungip_family_sql = _fungip_linked_record_sql(
+            "NULLIF(btrim(source.record->'taxonomy'->>'family'), '') = :family"
+        )
+    if normalized_family:
+        if not fungip_available:
+            params["family"] = normalized_family
+            where_clauses.append("COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), 'Unknown') = :family")
+        else:
+            params["family"] = normalized_family
+            family_sources = ["COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), 'Unknown') = :family"]
+            if fungip_family_sql:
+                family_sources.append(fungip_family_sql)
+            where_clauses.append("(" + " OR ".join(family_sources) + ")")
+
+    if normalized_completeness == "has_description":
+        where_clauses.append(
+            "COALESCE(NULLIF(btrim(t.description), ''), NULLIF(btrim(t.metadata->>'description'), '')) IS NOT NULL"
+        )
+    elif normalized_completeness == "has_images":
+        image_sources = [_core_photo_exists_sql()]
+        if fungip_available:
+            image_sources.append(_fungip_photo_exists_sql())
+        where_clauses.append("(" + " OR ".join(image_sources) + ")")
+
+    where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
     order_normalized = (order or "").strip().lower()
 
-    if order_by_normalized not in {"canonical_name", "observations_count", "obs_count"}:
+    if order_by_normalized == "name-asc":
+        order_by_normalized, order_normalized = "canonical_name", "asc"
+    elif order_by_normalized == "name-desc":
+        order_by_normalized, order_normalized = "canonical_name", "desc"
+    elif order_by_normalized == "observations":
+        order_by_normalized, order_normalized = "observations_count", "desc"
+    elif order_by_normalized == "family-asc":
+        order_by_normalized, order_normalized = "family", "asc"
+    elif order_by_normalized == "featured":
+        order_normalized = "asc"
+    elif order_by_normalized == "server":
+        order_by_normalized, order_normalized = "canonical_name", "asc"
+
+    if order_by_normalized not in {"canonical_name", "observations_count", "obs_count", "family", "featured"}:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid order_by. Allowed: canonical_name, observations_count, obs_count.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unsupported order_by. Allowed: canonical_name, observations_count, family, featured.",
         )
     if order_normalized not in {"asc", "desc"}:
         raise HTTPException(
@@ -775,6 +983,10 @@ async def list_taxa(
 
     if order_by_normalized == "canonical_name":
         order_expr = "canonical_name"
+    elif order_by_normalized == "family":
+        order_expr = "COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), 'Unknown')"
+    elif order_by_normalized == "featured":
+        order_expr = f"CASE WHEN {_OBSERVATION_COUNT_SQL} > 5000 THEN 0 ELSE 1 END"
     else:
         # Prefer bio.taxon_full.obs_count; fall back to metadata for legacy rows.
         order_expr = (
@@ -850,13 +1062,56 @@ async def list_taxa(
     rows: list[dict[str, Any]] = []
     total = 0
     try:
-        rows, total = await _list_taxa_core_page(
-            db,
-            where_sql=where_sql,
-            params=params,
-            by_popularity=order_by_normalized != "canonical_name",
-            order_normalized=order_normalized,
-        )
+        if order_by_normalized == "family" and fungip_available:
+            family_sort = "COALESCE(NULLIF(btrim(t.metadata->>'family'), ''), fungip_family.family, 'Unknown')"
+            family_sort_join = """LEFT JOIN LATERAL (
+                SELECT NULLIF(btrim(source.record->'taxonomy'->>'family'), '') AS family
+                FROM fungip.species source
+                JOIN LATERAL (
+                    SELECT COUNT(DISTINCT external_id.taxon_id)::int AS candidate_count,
+                           (ARRAY_AGG(DISTINCT external_id.taxon_id))[1] AS candidate_taxon_id
+                    FROM jsonb_array_elements(
+                        CASE WHEN jsonb_typeof(source.external_ids) = 'array'
+                             THEN source.external_ids ELSE '[]'::jsonb END
+                    ) source_identifier(value)
+                    JOIN core.taxon_external_id external_id
+                      ON external_id.source = source_identifier.value->>'source'
+                     AND external_id.external_id = source_identifier.value->>'external_id'
+                ) matches ON TRUE
+                WHERE source.taxon_id = t.id AND source.resolution_status = 'resolved'
+                  AND matches.candidate_count = 1 AND matches.candidate_taxon_id = t.id
+                  AND lower(t.rank) = 'species' AND lower(t.kingdom) = 'fungi'
+                  AND t.canonical_name = source.record->>'accepted_name'
+                  AND source.accepted_name = source.record->>'accepted_name'
+                ORDER BY source.species_id LIMIT 1
+            ) fungip_family ON TRUE"""
+            rows, total = await _list_taxa_core_page(
+                db,
+                where_sql=where_sql,
+                params=params,
+                by_popularity=False,
+                order_normalized=order_normalized,
+                order_expr_override=family_sort,
+                order_source_sql=family_sort_join,
+            )
+        else:
+            photo_tiebreak = f"CASE WHEN {_core_photo_exists_sql()} THEN 1 ELSE 0 END"
+            if fungip_available:
+                photo_tiebreak = (
+                    f"CASE WHEN ({_core_photo_exists_sql()} OR {_fungip_photo_exists_sql()}) "
+                    "THEN 1 ELSE 0 END"
+                )
+            rows, total = await _list_taxa_core_page(
+                db,
+                where_sql=where_sql,
+                params=params,
+                by_popularity=order_by_normalized not in {"canonical_name", "family", "featured"},
+                order_normalized=order_normalized,
+                order_expr_override=order_expr if order_by_normalized in {"family", "featured"} else None,
+                secondary_order_expr=(
+                    photo_tiebreak if order_by_normalized in {"observations_count", "obs_count"} else None
+                ),
+            )
     except Exception:
         await db.rollback()
         for from_clause in ("bio.taxon_full", rich_fallback_from, minimal_fallback_from):
@@ -897,6 +1152,42 @@ async def list_taxa(
     for row in rows:
         row["fungip"] = public_members.get(str(row.get("id")))
 
+    filter_sources: dict[str, str] = {}
+    if normalized_family or order_by_normalized == "family":
+        filter_sources["family"] = (
+            "core.taxon.metadata.family + exact validated fungip.species taxonomy.family"
+            if fungip_available else "core.taxon.metadata.family"
+        )
+    if normalized_category and normalized_category != "all":
+        filter_sources["category"] = (
+            "core.taxon.metadata.edibility/characteristics + source-qualified bio.taxon_trait "
+            "and bio.taxon_characteristic"
+        )
+    if normalized_completeness == "has_images":
+        filter_sources["has_images"] = (
+            "core.taxon.metadata.default_photo/photos + exact validated fungip.species image"
+            if fungip_available else "core.taxon.metadata.default_photo/photos"
+        )
+    if order_by_normalized in {"observations_count", "obs_count"}:
+        filter_sources["observation_tiebreak_photo"] = (
+            "core.taxon.metadata.default_photo/photos + exact validated fungip.species image"
+            if fungip_available else "core.taxon.metadata.default_photo/photos"
+        )
+    if normalized_completeness == "has_description":
+        filter_sources["has_description"] = "core.taxon.description/metadata.description"
+
+    query_partial_reasons = []
+    if needs_fungip_fields and not fungip_available:
+        query_partial_reasons.append(
+            "FungiP source family/image evidence unavailable; source-dependent filter or photo tie-break "
+            "uses core.taxon metadata only"
+        )
+    if q and fungip_search_status is not None and fungip_search_status.status in {"unavailable", "error"}:
+        query_partial_reasons.append(
+            "FungiP identifier search unavailable; query covers canonical/common taxon names only"
+        )
+    query_state = "partial" if query_partial_reasons else ("empty" if total == 0 else "available")
+
     return TaxonListResponse(
         data=rows,
         pagination={
@@ -905,6 +1196,12 @@ async def list_taxa(
             "total": total,
         },
         fungip_index=fungip_index,
+        query={
+            "status": query_state,
+            "count_scope": "matching_core_taxa",
+            "filter_sources": filter_sources,
+            "partial_reasons": query_partial_reasons,
+        },
     )
 
 

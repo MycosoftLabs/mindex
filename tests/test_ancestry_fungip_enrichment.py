@@ -122,7 +122,8 @@ async def test_ordinary_taxa_route_keeps_all_life_rows_when_index_is_missing():
     response = await taxon_router.list_taxa(
         pagination=PaginationParams(limit=20, offset=0), db=session,
         ids=None, q=None, rank=None, source=None, prefix=None, kingdom=None,
-        lineage_contains=None, order_by="canonical_name", order="asc",
+        lineage_contains=None, family=None, category=None, filter=None,
+        order_by="canonical_name", order="asc",
     )
     assert response.pagination.total == 1
     assert len(response.data) == 1
@@ -160,7 +161,8 @@ async def test_ordinary_taxa_route_attaches_only_linked_fungip_member():
     response = await taxon_router.list_taxa(
         pagination=PaginationParams(limit=20, offset=0), db=session,
         ids=None, q=None, rank=None, source=None, prefix=None, kingdom=None,
-        lineage_contains=None, order_by="canonical_name", order="asc",
+        lineage_contains=None, family=None, category=None, filter=None,
+        order_by="canonical_name", order="asc",
     )
     assert response.fungip_index.status == "available"
     assert response.data[0].fungip.species_id == "FG026"
