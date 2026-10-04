@@ -622,6 +622,21 @@ def _core_photo_exists_sql() -> str:
     return "(" + " OR ".join(_valid_photo_url_sql(url) for url in urls) + ")"
 
 
+def _has_images_candidate_sql(*, fungip_available: bool) -> str:
+    """Superset of the exact photo predicates, shaped so the metadata GIN index bounds the scan.
+
+    Every core photo URL lives under a top-level default_photo/photos key and every FungiP image
+    requires a valid image row keyed by taxon_id, so ANDing this never changes which taxa match.
+    """
+    candidates = "SELECT c.id FROM core.taxon c WHERE c.metadata ?| array['default_photo', 'photos']"
+    if fungip_available:
+        candidates += (
+            " UNION SELECT source.taxon_id FROM fungip.species source "
+            "WHERE source.image_valid IS TRUE AND source.taxon_id IS NOT NULL"
+        )
+    return f"t.id IN ({candidates})"
+
+
 def _fungip_photo_exists_sql() -> str:
     url = "COALESCE(source.record->'image'->>'image_url', source.record->'image'->>'url')"
     return _fungip_linked_record_sql(
@@ -1166,6 +1181,7 @@ async def list_taxa(
         image_sources = [_core_photo_exists_sql()]
         if fungip_available:
             image_sources.append(_fungip_photo_exists_sql())
+        where_clauses.append(_has_images_candidate_sql(fungip_available=fungip_available))
         where_clauses.append("(" + " OR ".join(image_sources) + ")")
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
