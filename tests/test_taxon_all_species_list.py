@@ -282,6 +282,36 @@ async def test_edible_filter_counts_matching_source_qualified_traits():
     assert response.query.count_scope == "matching_core_taxa"
 
 
+def test_category_match_is_gated_by_an_indexed_superset_of_every_branch():
+    sql, _ = route._category_match_sql(("edible",), "category")
+    gate = route._category_candidate_ids_sql()
+    assert sql.startswith(f"(t.id IN ({gate}) AND (")
+    # Each match branch needs a metadata key or a tag row that the gate also selects.
+    assert "c.metadata ?| array['edibility','characteristics']" in gate
+    assert "t.metadata->>'edibility'" in sql and "t.metadata->'characteristics'" in sql
+    for table, name_column in (("bio.taxon_trait trait", "trait.trait_name"),
+                               ("bio.taxon_characteristic characteristic", "characteristic.name")):
+        tag_filter = f"lower({name_column}) IN {route._CATEGORY_TAG_NAMES_SQL}"
+        assert table in gate and tag_filter in gate and tag_filter in sql
+
+
+@pytest.mark.asyncio
+async def test_unknown_category_negates_the_gated_known_match():
+    db = Session(Result(rows=[]), Result(scalar=0))
+    await call_list(db, category="unknown")
+    sql, _ = db.calls[0]
+    assert f"NOT (t.id IN ({route._category_candidate_ids_sql()}) AND (" in sql
+
+
+@pytest.mark.asyncio
+async def test_description_filter_is_gated_by_indexed_candidates():
+    db = Session(Result(rows=[]), Result(scalar=0))
+    response = await call_list(db, filter="has_description")
+    sql, _ = db.calls[0]
+    assert "c.description IS NOT NULL" in sql and "c.metadata ? 'description'" in sql
+    assert response.query.status == "empty"
+
+
 @pytest.mark.asyncio
 async def test_unknown_category_excludes_only_known_explicit_values():
     db = Session(Result(rows=[]), Result(scalar=0))
