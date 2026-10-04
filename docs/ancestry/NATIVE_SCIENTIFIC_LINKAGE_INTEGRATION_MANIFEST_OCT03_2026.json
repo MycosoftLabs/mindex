@@ -79,20 +79,32 @@
     },
     {
       "domain": "media_images",
-      "source_files": ["mindex_api/routers/all_life.py", "mindex_etl/sources/inat.py"],
+      "source_files": ["mindex_api/routers/all_life.py", "mindex_etl/sources/inat.py", "mindex_etl/sources/wikimedia_commons.py"],
       "selector": "exact taxon UUID",
       "required_provenance": ["source", "source_id", "source_url", "license", "attribution", "verified", "label_state", "content_hash"],
       "media_pagination": "image, video and audio each include a bounded page and complete matched total",
       "unavailable_behavior": "HTTP 503 for missing required columns or query failure",
-      "qualification": "source/unit test only; iNat default photo is normalized as unpublished candidate with exact taxon/photo IDs and license/attribution; rights review and runtime schema remain unverified"
+      "candidate_source_pin": {"provider": "Wikimedia Commons", "file_page_id": "3330811", "file_title": "File:Pleurotus ostreatus JPG7.jpg", "source_content_sha256": "3e911ca464c51d8934227648cd585949a31dae5df5f1f28dd1e2eef7fb74c276", "license": "CC BY 3.0", "attribution_state": "missing_creator_unresolved"},
+      "qualification": "one exact Commons response normalized; candidate withheld for missing attribution; iNat candidate path fixture-tested; no MINDEX media row or taxon crosswalk qualified"
     },
     {
       "domain": "publications",
-      "source_files": ["mindex_api/routers/all_life.py"],
+      "source_files": ["mindex_api/routers/all_life.py", "mindex_etl/sources/publication_evidence.py", "mindex_etl/jobs/import_taxon_publication_evidence.py", "migrations/20261003_publication_taxon_evidence_OCT03_2026.sql"],
       "selector": "exact taxon UUID through bio.publication_taxon",
       "schema_gap": "current association table stores only publication ID, taxon ID, relevance score and created time; association source/method is not stored",
+      "candidate_contract": "separate bio.publication_taxon_evidence table; exact GenBank accession.version plus unique ncbi taxid crosswalk and organism/canonical-name equality; candidate evidence never writes bio.publication_taxon",
+      "migration_state": "authored_not_applied",
+      "candidate_source_pin": {
+        "provider": "NCBI EFetch nuccore",
+        "accession_version": "PZ955173.1",
+        "source_taxon_id": "5334",
+        "source_content_sha256": "bdc407ee4e1bf28042c4ee5395825c0b20014bff96dad2a33c3b9c558e5cccc2",
+        "reference_locator": "PZ955173.1#reference=1",
+        "reference_title": "Integrated Myochemical and Molecular Characterization of Selected Medicinal Mushrooms Using ITS rDNA Sequencing",
+        "source_state": "in_press_no_pubmed_or_doi_candidate"
+      },
       "unavailable_behavior": "HTTP 503 for missing schema or query failure",
-      "qualification": "source/unit test only; no exact-link ingestion or live rows qualified; current publication providers use text search and the association schema lacks link provenance"
+      "qualification": "source fetch/parser validated; ETL staging only fixture-tested; no MINDEX crosswalk/database importer run or reviewed link qualified"
     },
     {
       "domain": "interactions",
@@ -104,9 +116,10 @@
     },
     {
       "domain": "description_provenance",
-      "source_files": ["mindex_etl/sources/inat.py", "mindex_etl/taxon_canonicalizer.py"],
-      "behavior": "description text without verified revision-level license remains metadata candidate and is not copied into core.taxon.description",
-      "qualification": "unit test only; no text promoted"
+      "source_files": ["mindex_etl/sources/inat.py", "mindex_etl/sources/wikipedia.py", "mindex_etl/taxon_canonicalizer.py"],
+      "behavior": "exact Wikipedia page URL plus page ID pins a candidate to returned revision and content hash; license remains unset when provider response has no license field; candidate is not copied into core.taxon.description",
+      "source_pin": {"page_id": "1473803", "revision_id": "1366763686", "source_content_sha256": "d06dc56179de5f224124d7254f471e338653592ac20ffa46010b19bd8af65541", "content_sha256": "e97c9f466ffb413f630abd4724c9d29082f19759dacb3b2e52baaab169a1f2fe", "license_state": "revision_pinned_license_unverified"},
+      "qualification": "one exact provider response normalized; no text promoted"
     }
   ],
   "real_input_check": {
@@ -121,15 +134,35 @@
     },
     "association": "none asserted; importer unit crosswalk is synthetic"
   },
+  "publication_reference_check": {
+    "request": "exact NCBI EFetch nuccore accession.version PZ955173.1",
+    "decoded_utf8_bytes": 5730,
+    "sha256": "bdc407ee4e1bf28042c4ee5395825c0b20014bff96dad2a33c3b9c558e5cccc2",
+    "organism": "Schizophyllum commune",
+    "ncbi_taxon_id": "5334",
+    "source_reference_count": 1,
+    "ignored_direct_submission_count": 1,
+    "mindex_crosswalk_or_write": "none"
+  },
+  "description_reference_check": {
+    "request": "exact Wikipedia REST summary URL for an expected source page ID",
+    "page_id": "1473803",
+    "revision_id": "1366763686",
+    "source_content_sha256": "d06dc56179de5f224124d7254f471e338653592ac20ffa46010b19bd8af65541",
+    "content_sha256": "e97c9f466ffb413f630abd4724c9d29082f19759dacb3b2e52baaab169a1f2fe",
+    "license_state": "revision_pinned_license_unverified",
+    "published": false
+  },
   "tests": {
-    "focused_pytest": "9 suites, 84 tests passed after taxon crosswalk and iNaturalist media candidate updates",
+    "focused_pytest": "12 suites, 100 tests passed; publication migration contract and both exact media/description normalizers included",
     "python_compile": "passed for changed routers, schema, ETL source/job and canonicalizer",
     "full_suite": "not run",
-    "browser_or_live_api": "not run"
+    "mindex_runtime_or_browser": "not run"
   },
   "prohibited_or_not_performed": [
     "production189/AWS access or service restart",
-    "database read/write, schema migration, ETL/provider ingestion",
+    "database read/write, schema migration apply, ETL database importer run",
+    "provider scheduler/enrichment run or broad harvesting",
     "deployment or hosted browser qualification",
     "Website source edits",
     "FungiP first40 reserved source/data edits",

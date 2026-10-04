@@ -1,6 +1,6 @@
 # Native scientific linkage operator notes — 2026-10-03
 
-This is a portable review packet for the MINDEX owner and Cursor. It has not been executed. It grants no database, schema, migration, ETL, AWS, production, or deployment authorization.
+This is a portable review packet for the MINDEX owner and Cursor. Its SQL preflight and database staging instructions have not been executed. The source captures cited below were read-only provider GETs. It grants no database apply, migration, ETL database write, AWS, production, or deployment authorization.
 
 ## 1. Read-only qualification
 
@@ -116,25 +116,57 @@ Before a proposed apply, the read-only preflight must prove:
 
 The apply is a single transaction with row-level before/after capture and no auto-commit. The operator checks every returned accession, source taxid, old UUID and new UUID against the reviewed stage, then explicitly commits or rolls back. Save the exact before image of each changed row (at minimum `id`, `accession`, `taxon_id`, `metadata`, `updated_at`) in the controlled change record before commit. Rollback uses only that saved finite row set and compare-and-set conditions (`current taxon_id` still equals the applied target); if any row has since changed, stop and re-review. This packet does not include an executable apply statement because there is no owner-approved stage or live schema receipt.
 
-## 3. Publication-link schema gap and proposal
+## 3. Publication-link evidence staging contract
 
-Current `bio.publication_taxon` contains only publication ID, taxon UUID, relevance score and creation time. The current reader can return publication-level DOI/source/URL, but that does not document how the taxon-to-paper association was established. Current inspected publication ETL writes `core.publications`; no exact taxon-link write path was found in the bounded source search.
+Current `bio.publication_taxon` contains only publication ID, taxon UUID, relevance score and creation time. Query-derived literature remains outside that link table. A candidate link must cite an exact source record and canonical taxon identity; title/name search overlap alone is insufficient.
 
-Before any publication-link backfill, the MINDEX owner should propose a reviewed additive schema change for association-level provenance (source system, source record/identifier, source URL, association method, recorded timestamp, and evidence status), validate compatibility with both the full and minimal bootstrap schema, and supply a guarded rollback plan. The schema change and link creation must be separate reviewed steps. A candidate link must cite the exact publication ID/DOI and an authoritative source record or curator assertion for the species; title/name search overlap alone is not sufficient. No such DDL or link backfill is included or applied by this candidate.
+The successor candidate includes the additive migration `migrations/20261003_publication_taxon_evidence_OCT03_2026.sql`, which creates `bio.publication_taxon_evidence` separately from reviewed links in `bio.publication_taxon`. It records provider/taxon identity, source locator/URL, method/state, source and normalized payload SHA-256 values, and optional rights/reviewer fields. Existing links are not upgraded. The migration and importer have not been applied or run against a database.
 
-One additive shape for review (not an approved migration and not executed) is:
+### Bounded source-attested GenBank reference staging
 
-```sql
-ALTER TABLE bio.publication_taxon
-  ADD COLUMN association_source TEXT,
-  ADD COLUMN association_source_record_id TEXT,
-  ADD COLUMN association_source_url TEXT,
-  ADD COLUMN association_method TEXT,
-  ADD COLUMN association_state TEXT NOT NULL DEFAULT 'legacy_unverified',
-  ADD COLUMN association_recorded_at TIMESTAMPTZ;
+The exact NCBI record `PZ955173.1` was fetched through EFetch and pinned at 5,730 decoded UTF-8 bytes, SHA-256 `bdc407ee4e1bf28042c4ee5395825c0b20014bff96dad2a33c3b9c558e5cccc2`. It identifies organism *Schizophyllum commune*, source taxid `5334`, and one titled, in-press reference at locator `PZ955173.1#reference=1`; the separate `Direct Submission` reference is excluded. The titled source reference has no PubMed ID or DOI in this record, so it stays a candidate and is not resolved by title search.
+
+After Cursor applies and validates the additive migration in a controlled staging environment, the bounded call is:
+
+```python
+from mindex_etl.db import get_connection
+from mindex_etl.jobs.import_taxon_publication_evidence import (
+    fetch_and_stage_genbank_publication_evidence,
+)
+
+conn = get_connection()
+try:
+    receipt = fetch_and_stage_genbank_publication_evidence(
+        conn,
+        "PZ955173.1",
+        expected_source_sha256=(
+            "bdc407ee4e1bf28042c4ee5395825c0b20014bff96dad2a33c3b9c558e5cccc2"
+        ),
+    )
+    print(receipt)
+    if receipt.get("state") == "candidate_source_attested" and receipt.get("staged") == 1:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT publication_id, taxon_id, provider, provider_taxon_id,
+                          provider_source_record_id, source_content_sha256,
+                          normalization_sha256, evidence_state
+                   FROM bio.publication_taxon_evidence
+                   WHERE taxon_id = %s AND provider_source_record_id = %s
+                     AND source_content_sha256 = %s""",
+                (receipt["taxon_id"], "PZ955173.1#reference=1",
+                 "bdc407ee4e1bf28042c4ee5395825c0b20014bff96dad2a33c3b9c558e5cccc2"),
+            )
+            print(cur.fetchall())
+    # After human review, choose exactly one explicit action:
+    # conn.commit()
+    # conn.rollback()
+finally:
+    conn.close()  # Uncommitted work rolls back on close.
 ```
 
-Existing links would remain explicitly `legacy_unverified`; no historical link should be upgraded merely because the new columns exist. A future apply should first inspect the complete table/schema and backup policy, apply additive DDL in a reviewed migration, verify the columns and defaults, and only then run a separately staged finite association backfill. A rollback should be permitted only before any reviewed association evidence has been recorded; it must stop if any proposed provenance column contains non-null evidence or any state differs from `legacy_unverified`, then drop only the newly introduced empty columns in a transaction. Once provenance rows are written, rollback requires an owner-approved data-preservation plan and cannot be a blind column drop.
+The importer rejects source-hash changes, accession.version mismatches, missing/multiple NCBI taxids, missing source organism, absent/ambiguous exact `core.taxon_external_id` crosswalks, and canonical-name mismatches. Require receipt state `candidate_source_attested` and one staged row, then inspect the exact evidence row in the same transaction. Commit only after owner review; otherwise roll back. The importer never creates a `bio.publication_taxon` link, schedules work, or qualifies a deployed environment.
+
+If any stage fails before commit, call `conn.rollback()` or close the connection; both the content-addressed `core.publications` candidate and evidence row are in the same caller-owned transaction. After commit, preserve the evidence rows and mark a reviewed disposition `rejected` rather than deleting provenance. A migration rollback may drop the new empty evidence table only after a same-environment count confirms zero evidence rows and owner review confirms no dependent records; once evidence exists, use a data-preserving forward repair.
 
 Compound-link backfills have the same evidence requirement. The existing name-overlap job must not be used for this species repair. Genomics assembly association requires an actual assembly record and its taxon identifier; a GenBank marker accession is not an assembly.
 

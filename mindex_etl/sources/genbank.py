@@ -9,6 +9,7 @@ Uses NCBI E-utilities API.
 from __future__ import annotations
 
 import time
+import re
 import xml.etree.ElementTree as ET
 from typing import Dict, Generator, List, Optional
 
@@ -94,6 +95,20 @@ def _efetch(
         )
     resp.raise_for_status()
     return resp.text
+
+
+def fetch_accession_xml(accession_version: str, *, client: Optional[httpx.Client] = None) -> str:
+    """Fetch one exact accession.version without name search or result fallback."""
+    if not isinstance(accession_version, str) or not re.fullmatch(r"[A-Za-z0-9_]+\.\d+", accession_version.strip()):
+        raise ValueError("accession_version must be an exact versioned GenBank accession")
+    accession_version = accession_version.strip()
+    close_client = client is None
+    client = client or httpx.Client()
+    try:
+        return _efetch(client, "nuccore", [accession_version], rettype="gb", retmode="xml")
+    finally:
+        if close_client:
+            client.close()
 
 
 def _parse_genbank_xml(xml_content: str) -> List[Dict]:
