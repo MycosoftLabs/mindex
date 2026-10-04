@@ -104,7 +104,9 @@ def test_versionless_get_keeps_base_accession_lookup_semantics():
 
     response = asyncio.run(get_sequence_by_accession("PZ955173", session))
 
-    assert session.calls[1][1] == {"accession": "PZ955173", "requested_version": None}
+    sql, params = session.calls[1]
+    assert "version = :requested_version" not in sql
+    assert params == {"accession": "PZ955173"}
     assert response.accession == "PZ955173"
     assert response.accession_version == "PZ955173.1"
 

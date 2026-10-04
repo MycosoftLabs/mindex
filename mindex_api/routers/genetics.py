@@ -481,7 +481,8 @@ async def get_sequence_by_accession(
     else:
         accession_lookup = requested_accession
         requested_version = None
-    stmt = text("""
+    version_predicate = "AND version = :requested_version" if requested_version else ""
+    stmt = text(f"""
         SELECT
             id,
             accession,
@@ -502,14 +503,14 @@ async def get_sequence_by_accession(
             metadata
         FROM bio.genetic_sequence
         WHERE accession = :accession
-          AND (:requested_version IS NULL OR version = :requested_version)
+          {version_predicate}
     """)
-    
+
     try:
-        result = await db.execute(stmt, {
-            "accession": accession_lookup,
-            "requested_version": requested_version,
-        })
+        params = {"accession": accession_lookup}
+        if requested_version:
+            params["requested_version"] = requested_version
+        result = await db.execute(stmt, params)
         row = result.mappings().one_or_none()
     except Exception as exc:
         await db.rollback()
