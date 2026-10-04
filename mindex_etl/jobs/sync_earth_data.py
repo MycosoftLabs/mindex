@@ -218,7 +218,7 @@ def sync_solar_events():
 
 
 def sync_air_quality(country: Optional[str] = None):
-    """Sync air quality data from OpenAQ."""
+    """Sync air quality data (EPA AirNow when keyed; OpenAQ otherwise)."""
     from ..sources.openaq import iter_air_quality
 
     logger.info(f"Syncing air quality data (country={country})")
