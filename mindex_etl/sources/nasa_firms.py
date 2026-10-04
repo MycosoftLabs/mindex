@@ -8,13 +8,17 @@ Also covers wildfire tracking from NIFC and InciWeb.
 """
 from __future__ import annotations
 
+import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Generator, Optional
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 FIRMS_API = "https://firms.modaps.eosdis.nasa.gov/api"
 FIRMS_MAP_KEY = getattr(settings, "nasa_firms_map_key", "")
@@ -86,35 +90,55 @@ def iter_fire_hotspots(
             yield map_fire_hotspot(record)
 
 
+NIFC_WFIGS_URL = (
+    "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/"
+    "WFIGS_Incident_Locations_Current/FeatureServer/0/query"
+)
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def fetch_nifc_wildfires(client: httpx.Client) -> list:
-    """Fetch active wildfires from NIFC (National Interagency Fire Center)."""
-    url = "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/Active_Fires/FeatureServer/0/query"
+    """Fetch current wildfire incidents from NIFC WFIGS (public layer, no token)."""
     params = {
         "where": "1=1",
-        "outFields": "*",
+        "outFields": "OBJECTID,UniqueFireIdentifier,IncidentName,IncidentSize,PercentContained,"
+                     "FireDiscoveryDateTime,POOState,POOCounty,FireCause,IncidentTypeCategory",
+        "outSR": 4326,
         "f": "json",
-        "resultRecordCount": 1000,
+        "resultRecordCount": 2000,
     }
-    resp = client.get(url, params=params, timeout=60)
+    resp = client.get(url=NIFC_WFIGS_URL, params=params, timeout=60)
     resp.raise_for_status()
-    return resp.json().get("features", [])
+    data = resp.json()
+    if data.get("error"):
+        raise RuntimeError(f"NIFC WFIGS error: {data['error']}")
+    return data.get("features", [])
+
+
+def _epoch_ms_to_iso(value: Any) -> Optional[str]:
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+    return value
 
 
 def map_nifc_wildfire(feature: dict) -> dict:
-    """Map NIFC ArcGIS feature to MINDEX wildfire format."""
+    """Map NIFC WFIGS feature to MINDEX wildfire format."""
     attrs = feature.get("attributes", {})
     geom = feature.get("geometry", {})
+    fire_id = attrs.get("UniqueFireIdentifier") or attrs.get("OBJECTID")
     return {
         "source": "nifc",
-        "source_id": str(attrs.get("OBJECTID") or attrs.get("UniqueFireIdentifier")),
+        "source_id": f"nifc_{fire_id}",
         "name": attrs.get("IncidentName"),
         "lat": geom.get("y"),
         "lng": geom.get("x"),
-        "area_acres": attrs.get("DailyAcres") or attrs.get("GISAcres"),
+        "area_acres": attrs.get("IncidentSize"),
         "containment_pct": attrs.get("PercentContained"),
         "status": "active",
-        "detected_at": attrs.get("FireDiscoveryDateTime"),
+        "detected_at": _epoch_ms_to_iso(attrs.get("FireDiscoveryDateTime")),
+        "brightness": None,
+        "frp": None,
+        "confidence": None,
         "properties": {
             "fire_cause": attrs.get("FireCause"),
             "incident_type": attrs.get("IncidentTypeCategory"),
@@ -130,10 +154,11 @@ def iter_active_wildfires() -> Generator[Dict, None, None]:
         # NIFC wildfires
         try:
             features = fetch_nifc_wildfires(client)
-            for f in features:
-                yield map_nifc_wildfire(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("NIFC WFIGS fetch failed: %s", e)
+            features = []
+        for f in features:
+            yield map_nifc_wildfire(f)
 
     # FIRMS hotspots
     yield from iter_fire_hotspots(days=1)

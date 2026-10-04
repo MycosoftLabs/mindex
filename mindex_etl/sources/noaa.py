@@ -34,7 +34,7 @@ DONKI_API = "https://api.nasa.gov/DONKI"
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def fetch_solar_flares(client: httpx.Client, days: int = 30) -> list:
     """Fetch recent solar flare events from NASA DONKI."""
-    nasa_key = getattr(settings, "nasa_api_key", "DEMO_KEY")
+    nasa_key = settings.nasa_api_key or "DEMO_KEY"
     resp = client.get(
         f"{DONKI_API}/FLR",
         params={"api_key": nasa_key},
@@ -66,7 +66,7 @@ def map_solar_flare(record: dict) -> dict:
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def fetch_cme_events(client: httpx.Client) -> list:
     """Fetch Coronal Mass Ejection events from NASA DONKI."""
-    nasa_key = getattr(settings, "nasa_api_key", "DEMO_KEY")
+    nasa_key = settings.nasa_api_key or "DEMO_KEY"
     resp = client.get(
         f"{DONKI_API}/CME",
         params={"api_key": nasa_key},
@@ -99,7 +99,7 @@ def map_cme(record: dict) -> dict:
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def fetch_geomagnetic_storms(client: httpx.Client) -> list:
     """Fetch geomagnetic storm events from NASA DONKI."""
-    nasa_key = getattr(settings, "nasa_api_key", "DEMO_KEY")
+    nasa_key = settings.nasa_api_key or "DEMO_KEY"
     resp = client.get(
         f"{DONKI_API}/GST",
         params={"api_key": nasa_key},
@@ -131,7 +131,7 @@ def map_geomagnetic_storm(record: dict) -> dict:
 
 def iter_solar_events() -> Generator[Dict, None, None]:
     """Iterate all solar/space weather events."""
-    with httpx.Client() as client:
+    with httpx.Client(follow_redirects=True) as client:
         # Solar flares
         try:
             for flare in fetch_solar_flares(client):
