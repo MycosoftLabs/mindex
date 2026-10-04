@@ -61,6 +61,34 @@ def sanitize_description(html: Optional[str]) -> Optional[str]:
     return text if text else None
 
 
+def normalize_inat_photo_candidate(photo: object, taxon_id: object) -> Optional[dict]:
+    """Normalize an exact iNat default-photo identity without publishing it."""
+    if not isinstance(photo, dict) or not str(taxon_id or "").isdigit():
+        return None
+    photo_id = photo.get("id")
+    if not str(photo_id or "").isdigit():
+        return None
+    attribution = str(photo.get("attribution") or "").strip()
+    license_code = str(photo.get("license_code") or "").strip()
+    return {
+        "provider": "inaturalist",
+        "source_taxon_id": str(taxon_id),
+        "source_taxon_url": f"https://www.inaturalist.org/taxa/{taxon_id}",
+        "source_photo_id": str(photo_id),
+        "source_photo_url": f"https://www.inaturalist.org/photos/{photo_id}",
+        "image_url": photo.get("url"),
+        "medium_url": photo.get("medium_url"),
+        "attribution": attribution or None,
+        "license_code": license_code or None,
+        "normalization_state": (
+            "rights_metadata_recorded_review_required"
+            if attribution and license_code
+            else "withheld_missing_attribution_or_license"
+        ),
+        "published": False,
+    }
+
+
 def map_inat_taxon(record: dict) -> dict:
     """Map iNaturalist record to MINDEX taxon format."""
     wiki_url = record.get("wikipedia_url")
@@ -101,6 +129,9 @@ def map_inat_taxon(record: dict) -> dict:
         "iconic_taxon_name": record.get("iconic_taxon_name"),
         "is_active": record.get("is_active"),
     }
+    photo_candidate = normalize_inat_photo_candidate(record.get("default_photo"), record.get("id"))
+    if photo_candidate:
+        metadata["default_photo_candidate"] = photo_candidate
     if description_candidate:
         metadata["description_candidate"] = description_candidate
     return {

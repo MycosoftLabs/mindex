@@ -115,8 +115,10 @@ async def _genetic_sequence_table_exists(db: AsyncSession) -> bool:
         ) from exc
 
 
-async def _resolve_ncbi_taxon_link(db: AsyncSession, source_taxon_ids: object) -> tuple[Optional[UUID], dict]:
-    """Resolve a GenBank taxon only through a unique exact NCBI crosswalk."""
+async def _resolve_ncbi_taxon_link(
+    db: AsyncSession, source_taxon_ids: object, organism: Optional[str] = None
+) -> tuple[Optional[UUID], dict]:
+    """Resolve a unique exact NCBI crosswalk only when its source name agrees."""
     if source_taxon_ids is None:
         normalized_ids: list[str] = []
     elif isinstance(source_taxon_ids, (str, int)):
@@ -133,15 +135,38 @@ async def _resolve_ncbi_taxon_link(db: AsyncSession, source_taxon_ids: object) -
 
     result = await db.execute(
         text(
-            "SELECT DISTINCT taxon_id FROM core.taxon_external_id "
-            "WHERE source = 'ncbi' AND external_id = :external_id LIMIT 2"
+            "SELECT DISTINCT x.taxon_id, t.canonical_name, t.rank "
+            "FROM core.taxon_external_id AS x JOIN core.taxon AS t ON t.id = x.taxon_id "
+            "WHERE x.source = 'ncbi' AND x.external_id = :external_id LIMIT 2"
         ),
         {"external_id": normalized_ids[0]},
     )
-    linked_ids = {UUID(str(row[0])) for row in result.fetchall() if row[0] is not None}
+    linked_rows = {}
+    for row in result.fetchall():
+        if row[0] is not None:
+            linked_rows[UUID(str(row[0]))] = {"canonical_name": row[1], "rank": row[2]}
+    linked_ids = set(linked_rows)
     if len(linked_ids) == 1:
-        return next(iter(linked_ids)), {
+        linked_id = next(iter(linked_ids))
+        source_name = (organism or "").strip()
+        canonical_name = str(linked_rows[linked_id]["canonical_name"] or "").strip()
+        if not source_name:
+            return None, {
+                "state": "source_name_missing_unverified", "source": "ncbi",
+                "source_ids": normalized_ids, "candidate_taxon_id": str(linked_id),
+                "candidate_rank": linked_rows[linked_id]["rank"],
+            }
+        if source_name.casefold() != canonical_name.casefold():
+            return None, {
+                "state": "source_name_mismatch", "source": "ncbi",
+                "source_ids": normalized_ids, "source_name": source_name,
+                "candidate_taxon_id": str(linked_id), "candidate_name": canonical_name,
+                "candidate_rank": linked_rows[linked_id]["rank"],
+            }
+        return linked_id, {
             "state": "linked_unique_exact_external_id", "source": "ncbi", "source_ids": normalized_ids,
+            "source_name": source_name, "canonical_name": canonical_name,
+            "canonical_rank": linked_rows[linked_id]["rank"],
         }
     if len(linked_ids) > 1:
         return None, {
@@ -578,7 +603,7 @@ async def ingest_accession(
     if source_taxon_ids is None and genome.get("taxon_id") is not None:
         source_taxon_ids = [genome["taxon_id"]]
     try:
-        taxon_id, linkage = await _resolve_ncbi_taxon_link(db, source_taxon_ids)
+        taxon_id, linkage = await _resolve_ncbi_taxon_link(db, source_taxon_ids, genome.get("organism"))
     except Exception as exc:
         await db.rollback()
         raise HTTPException(

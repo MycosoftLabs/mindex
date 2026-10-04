@@ -37,7 +37,7 @@ def _row_value(row, key: str, index: int):
 
 
 def _resolve_taxon_link(cur, genome: dict) -> tuple[Optional[str], dict]:
-    """Resolve only a unique exact NCBI taxonomy crosswalk; names are never used."""
+    """Resolve a unique exact NCBI crosswalk only when its source name agrees."""
     source_ids = genome.get("source_taxon_ids")
     if source_ids is None:
         source_ids = [genome.get("taxon_id")] if genome.get("taxon_id") is not None else []
@@ -53,24 +53,48 @@ def _resolve_taxon_link(cur, genome: dict) -> tuple[Optional[str], dict]:
     source_taxon_id = normalized_ids[0]
     cur.execute(
         """
-        SELECT DISTINCT taxon_id
-        FROM core.taxon_external_id
-        WHERE source = %s AND external_id = %s
+        SELECT DISTINCT x.taxon_id, t.canonical_name, t.rank
+        FROM core.taxon_external_id AS x
+        JOIN core.taxon AS t ON t.id = x.taxon_id
+        WHERE x.source = %s AND x.external_id = %s
         LIMIT 2
         """,
         ("ncbi", source_taxon_id),
     )
     matches = cur.fetchall()
-    linked_ids = {
-        str(value)
-        for row in matches
-        if (value := _row_value(row, "taxon_id", 0)) is not None
-    }
+    linked_rows = {}
+    for row in matches:
+        value = _row_value(row, "taxon_id", 0)
+        if value is not None:
+            linked_rows[str(value)] = {
+                "canonical_name": _row_value(row, "canonical_name", 1),
+                "rank": _row_value(row, "rank", 2),
+            }
+    linked_ids = set(linked_rows)
     if len(linked_ids) == 1:
-        return next(iter(linked_ids)), {
+        linked_id = next(iter(linked_ids))
+        source_name = str(genome.get("organism") or "").strip()
+        canonical_name = str(linked_rows[linked_id]["canonical_name"] or "").strip()
+        if not source_name:
+            return None, {
+                "state": "source_name_missing_unverified", "source": "ncbi",
+                "source_ids": [source_taxon_id], "candidate_taxon_id": linked_id,
+                "candidate_rank": linked_rows[linked_id]["rank"],
+            }
+        if source_name.casefold() != canonical_name.casefold():
+            return None, {
+                "state": "source_name_mismatch", "source": "ncbi",
+                "source_ids": [source_taxon_id], "source_name": source_name,
+                "candidate_taxon_id": linked_id, "candidate_name": canonical_name,
+                "candidate_rank": linked_rows[linked_id]["rank"],
+            }
+        return linked_id, {
             "state": "linked_unique_exact_external_id",
             "source": "ncbi",
             "source_ids": [source_taxon_id],
+            "source_name": source_name,
+            "canonical_name": canonical_name,
+            "canonical_rank": linked_rows[linked_id]["rank"],
         }
     if len(linked_ids) > 1:
         return None, {

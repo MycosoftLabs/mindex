@@ -137,20 +137,49 @@ def test_genetics_schema_check_database_error_is_503_not_empty():
     assert session.rollbacks == 1
 
 
-def test_api_genbank_crosswalk_uses_only_one_exact_numeric_ncbi_identifier():
+def test_api_genbank_crosswalk_requires_exact_numeric_id_and_source_name_agreement():
     expected = UUID("c8814bf5-6317-4792-a8b2-5982404caa01")
-    session = Session([Result(rows=[(expected,)])])
+    session = Session([Result(rows=[(expected, "Pleurotus ostreatus", "species")])])
 
-    taxon_id, state = asyncio.run(_resolve_ncbi_taxon_link(session, "5322"))
+    taxon_id, state = asyncio.run(_resolve_ncbi_taxon_link(session, "5322", "Pleurotus ostreatus"))
 
     assert taxon_id == expected
     assert state == {
         "state": "linked_unique_exact_external_id",
         "source": "ncbi",
         "source_ids": ["5322"],
+        "source_name": "Pleurotus ostreatus",
+        "canonical_name": "Pleurotus ostreatus",
+        "canonical_rank": "species",
     }
-    assert "source = 'ncbi' AND external_id = :external_id" in session.calls[0][0]
+    assert "x.source = 'ncbi' AND x.external_id = :external_id" in session.calls[0][0]
+    assert "JOIN core.taxon AS t ON t.id = x.taxon_id" in session.calls[0][0]
     assert session.calls[0][1] == {"external_id": "5322"}
+
+
+def test_api_wrong_taxid_cannot_attach_splitgill_on_mismatched_canonical_name():
+    splitgill_id = UUID("6db28640-67fb-4808-90de-956a856366f7")
+    session = Session([Result(rows=[(splitgill_id, "Schizophyllum commune", "species")])])
+
+    taxon_id, state = asyncio.run(_resolve_ncbi_taxon_link(session, "5322", "Pleurotus ostreatus"))
+
+    assert taxon_id is None
+    assert state == {
+        "state": "source_name_mismatch", "source": "ncbi", "source_ids": ["5322"],
+        "source_name": "Pleurotus ostreatus", "candidate_taxon_id": str(splitgill_id),
+        "candidate_name": "Schizophyllum commune", "candidate_rank": "species",
+    }
+
+
+def test_api_exact_splitgill_taxid_and_name_link():
+    splitgill_id = UUID("6db28640-67fb-4808-90de-956a856366f7")
+    session = Session([Result(rows=[(splitgill_id, "Schizophyllum commune", "species")])])
+
+    taxon_id, state = asyncio.run(_resolve_ncbi_taxon_link(session, "5334", "Schizophyllum commune"))
+
+    assert taxon_id == splitgill_id
+    assert state["state"] == "linked_unique_exact_external_id"
+    assert state["source_ids"] == ["5334"]
 
 
 def test_api_genbank_crosswalk_keeps_missing_and_ambiguous_states_distinct():
@@ -160,8 +189,8 @@ def test_api_genbank_crosswalk_keeps_missing_and_ambiguous_states_distinct():
         {"state": "unlinked_exact_external_id", "source": "ncbi", "source_ids": ["5322"]},
     )
     ambiguous = Session([Result(rows=[
-        (UUID("c8814bf5-6317-4792-a8b2-5982404caa01"),),
-        (UUID("71bc4967-f421-45ab-86eb-d417e1293d90"),),
+        (UUID("c8814bf5-6317-4792-a8b2-5982404caa01"), "Pleurotus ostreatus", "species"),
+        (UUID("71bc4967-f421-45ab-86eb-d417e1293d90"), "Pleurotus ostreatus", "species"),
     ])])
     taxon_id, state = asyncio.run(_resolve_ncbi_taxon_link(ambiguous, ["5322"]))
     assert taxon_id is None

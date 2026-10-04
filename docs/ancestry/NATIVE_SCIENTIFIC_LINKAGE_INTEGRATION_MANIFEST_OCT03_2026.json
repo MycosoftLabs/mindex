@@ -51,7 +51,8 @@
       "domain": "genetics_and_ITS",
       "source_files": ["mindex_etl/sources/genbank.py", "mindex_etl/jobs/sync_genbank_genomes.py", "mindex_api/routers/genetics.py"],
       "association_rule": "unique core.taxon_external_id(source='ncbi', external_id=<numeric taxid>) only",
-      "unresolved_states": ["source_taxon_id_missing", "source_taxon_id_ambiguous_or_invalid", "unlinked_exact_external_id", "ambiguous_exact_external_id", "existing_link_preserved_unverified"],
+      "unresolved_states": ["source_taxon_id_missing", "source_taxon_id_ambiguous_or_invalid", "unlinked_exact_external_id", "ambiguous_exact_external_id", "source_name_missing_unverified", "source_name_mismatch", "existing_link_preserved_unverified"],
+      "crosswalk_consistency": "unique exact numeric NCBI taxid plus exact case-insensitive trimmed source organism equals core.taxon.canonical_name; mismatch/missing name is withheld; rank is retained as evidence",
       "schema_change": false,
       "qualification": "parser verified against a bounded NCBI LT627806.1 record; exact MINDEX crosswalk and live stored rows unverified"
     },
@@ -78,12 +79,12 @@
     },
     {
       "domain": "media_images",
-      "source_files": ["mindex_api/routers/all_life.py"],
+      "source_files": ["mindex_api/routers/all_life.py", "mindex_etl/sources/inat.py"],
       "selector": "exact taxon UUID",
       "required_provenance": ["source", "source_id", "source_url", "license", "attribution", "verified", "label_state", "content_hash"],
       "media_pagination": "image, video and audio each include a bounded page and complete matched total",
       "unavailable_behavior": "HTTP 503 for missing required columns or query failure",
-      "qualification": "source/unit test only; minimal bootstrap table is not sufficient"
+      "qualification": "source/unit test only; iNat default photo is normalized as unpublished candidate with exact taxon/photo IDs and license/attribution; rights review and runtime schema remain unverified"
     },
     {
       "domain": "publications",
@@ -91,7 +92,7 @@
       "selector": "exact taxon UUID through bio.publication_taxon",
       "schema_gap": "current association table stores only publication ID, taxon ID, relevance score and created time; association source/method is not stored",
       "unavailable_behavior": "HTTP 503 for missing schema or query failure",
-      "qualification": "source/unit test only; no exact-link ingestion or live rows qualified"
+      "qualification": "source/unit test only; no exact-link ingestion or live rows qualified; current publication providers use text search and the association schema lacks link provenance"
     },
     {
       "domain": "interactions",
@@ -121,7 +122,7 @@
     "association": "none asserted; importer unit crosswalk is synthetic"
   },
   "tests": {
-    "focused_pytest": "8 suites, 76 tests passed",
+    "focused_pytest": "9 suites, 84 tests passed after taxon crosswalk and iNaturalist media candidate updates",
     "python_compile": "passed for changed routers, schema, ETL source/job and canonicalizer",
     "full_suite": "not run",
     "browser_or_live_api": "not run"

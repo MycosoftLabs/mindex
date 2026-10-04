@@ -34,14 +34,24 @@ ORDER BY table_schema, table_name, ordinal_position;
 ROLLBACK;
 ```
 
-After the schema receipt, run separately bounded queries in independent read-only transactions. `$1` is the exact splitgill UUID `6db28640-67fb-4808-90de-956a856366f7`; no name lookup substitutes for it.
+After the schema receipt, run separately bounded queries in independent read-only transactions. Keep selectors separate: `$1 = '5334'` is the NCBI taxid for *Schizophyllum commune*; `$2 = '6db28640-67fb-4808-90de-956a856366f7'` is the expected canonical MINDEX UUID. A UUID is never an NCBI `external_id`, and a taxid is never cast to `uuid`.
 
 ```sql
--- Exact source crosswalk only. A result must be inspected for uniqueness.
-SELECT source, external_id, taxon_id, created_at
-FROM core.taxon_external_id
-WHERE source = 'ncbi' AND external_id = $1
-ORDER BY taxon_id
+-- Positive control: exact source taxid, joined to canonical identity for consistency.
+SELECT x.source, x.external_id, x.taxon_id, t.canonical_name, t.rank, x.created_at
+FROM core.taxon_external_id AS x
+JOIN core.taxon AS t ON t.id = x.taxon_id
+WHERE x.source = 'ncbi' AND x.external_id = $1
+ORDER BY x.taxon_id
+LIMIT 3;
+
+-- Negative control: NCBI taxid 5322 is Pleurotus ostreatus, not splitgill.
+-- Zero rows means unlinked under this exact source key, not absent source data.
+SELECT x.source, x.external_id, x.taxon_id, t.canonical_name, t.rank
+FROM core.taxon_external_id AS x
+JOIN core.taxon AS t ON t.id = x.taxon_id
+WHERE x.source = 'ncbi' AND x.external_id = '5322'
+ORDER BY x.taxon_id
 LIMIT 3;
 
 -- Stored sequences and linkage state; never export sequence bodies for this check.
@@ -50,14 +60,14 @@ SELECT id, accession, version, taxon_id, source, source_url, gene,
        metadata->'source_taxon_ids' AS source_taxon_ids,
        metadata->'taxon_linkage' AS taxon_linkage
 FROM bio.genetic_sequence
-WHERE taxon_id = $1::uuid
+WHERE taxon_id = $2::uuid
 ORDER BY accession
 LIMIT 8;
 
 -- Stored assemblies are separate from deposited nucleotide sequences.
 SELECT id, taxon_id, source, accession, assembly_level, release_date
 FROM bio.genome
-WHERE taxon_id = $1::uuid
+WHERE taxon_id = $2::uuid
 ORDER BY release_date DESC NULLS LAST, accession
 LIMIT 8;
 
@@ -67,7 +77,7 @@ SELECT tc.taxon_id, tc.compound_id, c.name, c.pubchem_id,
        tc.source, tc.source_url, tc.doi
 FROM bio.taxon_compound tc
 JOIN bio.compound c ON c.id = tc.compound_id
-WHERE tc.taxon_id = $1::uuid
+WHERE tc.taxon_id = $2::uuid
 ORDER BY tc.compound_id
 LIMIT 8;
 
@@ -76,7 +86,7 @@ SELECT pt.publication_id, pt.taxon_id, pt.relevance_score,
        p.doi, p.source, p.url
 FROM bio.publication_taxon pt
 JOIN core.publications p ON p.id = pt.publication_id
-WHERE pt.taxon_id = $1::uuid
+WHERE pt.taxon_id = $2::uuid
 ORDER BY pt.relevance_score DESC NULLS LAST, pt.publication_id
 LIMIT 8;
 
@@ -84,12 +94,12 @@ LIMIT 8;
 SELECT id, source_taxon_id, target_taxon_id, interaction_type,
        evidence_source, evidence_url
 FROM bio.taxon_interaction
-WHERE source_taxon_id = $1::uuid OR target_taxon_id = $1::uuid
+WHERE source_taxon_id = $2::uuid OR target_taxon_id = $2::uuid
 ORDER BY id
 LIMIT 8;
 ```
 
-For the source-ID crosswalk query, record the exact returned row count and UUIDs. Do not call the pair linked unless there is exactly one taxon UUID and its name/rank is consistent with the authoritative source record. Zero means no stored crosswalk was found under that exact key; two or more is ambiguous. Do not resolve either state by name, genus, fuzzy similarity, first row, or provider search result.
+For each crosswalk query, record exact row count, UUID, canonical name, and rank. Taxid 5334 is a positive control only when it has exactly one crosswalk to UUID `$2`, with canonical name *Schizophyllum commune* and the expected rank. Taxid 5322 must never resolve to the splitgill UUID; if it has a unique link, it should identify *Pleurotus ostreatus*. Zero means unlinked under that exact source key, not absent data in NCBI; two or more taxon UUIDs is ambiguous. A UUID mistakenly used as `external_id` should return no NCBI crosswalk and is a selector error, not evidence of absent source data. Do not resolve any mismatch, zero, or ambiguity by name search, genus, fuzzy similarity, first row, or provider search result.
 
 ## 2. Finite GenBank linkage backfill proposal
 

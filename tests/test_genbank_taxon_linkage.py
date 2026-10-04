@@ -57,13 +57,13 @@ def test_genbank_parser_withholds_link_for_multiple_source_taxon_ids():
     assert parsed["taxon_id"] is None
 
 
-def test_taxon_link_uses_only_one_exact_ncbi_external_id_match():
-    # The matching UUID is synthetic; no real taxon-5322 crosswalk is claimed.
+def test_taxon_link_uses_exact_ncbi_id_and_requires_matching_source_name():
+    # The matching UUID is synthetic; this does not assert a live crosswalk.
     expected = "c8814bf5-6317-4792-a8b2-5982404caa01"
-    cursor = CrosswalkCursor([(expected,)])
+    cursor = CrosswalkCursor([(expected, "Pleurotus ostreatus", "species")])
 
     taxon_id, state = _resolve_taxon_link(cursor, {
-        "organism": "A name that must not be queried",
+        "organism": "Pleurotus ostreatus",
         "source_taxon_ids": ["5322", "5322"],
     })
 
@@ -72,22 +72,68 @@ def test_taxon_link_uses_only_one_exact_ncbi_external_id_match():
         "state": "linked_unique_exact_external_id",
         "source": "ncbi",
         "source_ids": ["5322"],
+        "source_name": "Pleurotus ostreatus",
+        "canonical_name": "Pleurotus ostreatus",
+        "canonical_rank": "species",
     }
     sql, params = cursor.calls[0]
-    assert "source = %s AND external_id = %s" in sql
-    assert "canonical_name" not in sql and "ILIKE" not in sql
+    assert "x.source = %s AND x.external_id = %s" in sql
+    assert "JOIN core.taxon AS t ON t.id = x.taxon_id" in sql
+    assert "ILIKE" not in sql
     assert params == ("ncbi", "5322")
 
 
 def test_taxon_link_accepts_psycopg_dict_rows_and_a_scalar_source_id():
     expected = "c8814bf5-6317-4792-a8b2-5982404caa01"
-    cursor = CrosswalkCursor([{"taxon_id": UUID(expected)}])
+    cursor = CrosswalkCursor([{
+        "taxon_id": UUID(expected), "canonical_name": "Pleurotus ostreatus", "rank": "species",
+    }])
 
-    taxon_id, state = _resolve_taxon_link(cursor, {"source_taxon_ids": "5322"})
+    taxon_id, state = _resolve_taxon_link(cursor, {
+        "source_taxon_ids": "5322", "organism": "Pleurotus ostreatus",
+    })
 
     assert taxon_id == expected
     assert state["state"] == "linked_unique_exact_external_id"
     assert cursor.calls[0][1] == ("ncbi", "5322")
+
+
+def test_wrong_ncbi_taxid_cannot_attach_splitgill_even_if_crosswalk_is_corrupt():
+    splitgill_uuid = "6db28640-67fb-4808-90de-956a856366f7"
+    cursor = CrosswalkCursor([(splitgill_uuid, "Schizophyllum commune", "species")])
+
+    taxon_id, state = _resolve_taxon_link(cursor, {
+        "source_taxon_ids": ["5322"], "organism": "Pleurotus ostreatus",
+    })
+
+    assert taxon_id is None
+    assert state == {
+        "state": "source_name_mismatch", "source": "ncbi", "source_ids": ["5322"],
+        "source_name": "Pleurotus ostreatus", "candidate_taxon_id": splitgill_uuid,
+        "candidate_name": "Schizophyllum commune", "candidate_rank": "species",
+    }
+
+
+def test_splitgill_ncbi_taxid_with_exact_name_can_link():
+    splitgill_uuid = "6db28640-67fb-4808-90de-956a856366f7"
+    cursor = CrosswalkCursor([(splitgill_uuid, "Schizophyllum commune", "species")])
+
+    taxon_id, state = _resolve_taxon_link(cursor, {
+        "source_taxon_ids": ["5334"], "organism": "Schizophyllum commune",
+    })
+
+    assert taxon_id == splitgill_uuid
+    assert state["state"] == "linked_unique_exact_external_id"
+    assert state["source_ids"] == ["5334"]
+
+
+def test_unique_crosswalk_without_source_name_is_withheld():
+    cursor = CrosswalkCursor([("c8814bf5-6317-4792-a8b2-5982404caa01", "Pleurotus ostreatus", "species")])
+
+    taxon_id, state = _resolve_taxon_link(cursor, {"source_taxon_ids": ["5322"]})
+
+    assert taxon_id is None
+    assert state["state"] == "source_name_missing_unverified"
 
 
 def test_taxon_link_keeps_empty_ambiguous_and_missing_states_distinct():
@@ -178,7 +224,7 @@ def test_genbank_importer_inserts_only_resolved_uuid_and_audits_source_identity(
     # The cursor supplies an explicit synthetic exact crosswalk. This tests the
     # importer contract; it does not claim NCBI 5322 is the splitgill taxon.
     resolved_fixture_uuid = "c8814bf5-6317-4792-a8b2-5982404caa01"
-    conn = ImportConnection(crosswalk_rows=[(UUID(resolved_fixture_uuid),)])
+    conn = ImportConnection(crosswalk_rows=[(UUID(resolved_fixture_uuid), "Pleurotus ostreatus", "species")])
 
     @contextmanager
     def fake_db_session():
@@ -215,7 +261,9 @@ def test_genbank_importer_inserts_only_resolved_uuid_and_audits_source_identity(
 def test_its_importer_uses_the_same_exact_taxon_crosswalk_and_updates_existing_accessions(monkeypatch):
     # As above, this synthetic crosswalk proves exact lookup behavior only.
     resolved_fixture_uuid = "c8814bf5-6317-4792-a8b2-5982404caa01"
-    conn = ImportConnection(existing_row=(1,), crosswalk_rows=[(UUID(resolved_fixture_uuid),)])
+    conn = ImportConnection(existing_row=(1,), crosswalk_rows=[(
+        UUID(resolved_fixture_uuid), "Pleurotus ostreatus", "species",
+    )])
 
     @contextmanager
     def fake_db_session():

@@ -4,7 +4,7 @@ import hashlib
 import json
 from uuid import UUID
 
-from mindex_etl.sources.inat import map_inat_taxon
+from mindex_etl.sources.inat import map_inat_taxon, normalize_inat_photo_candidate
 from mindex_etl.taxon_canonicalizer import upsert_taxon
 
 
@@ -35,6 +35,41 @@ def test_inaturalist_taxon_description_is_not_treated_as_a_licensed_species_desc
     assert candidate["source"] == "inaturalist_taxon"
     assert candidate["license_state"] == "not_assessed_for_taxon_description"
     assert candidate["stored_as_species_description"] is False
+
+
+def test_inat_photo_candidate_keeps_exact_provider_identity_rights_and_review_gate():
+    photo = {
+        "id": 998877,
+        "url": "https://static.inaturalist.org/photos/998877/medium.jpg",
+        "medium_url": "https://static.inaturalist.org/photos/998877/medium.jpg",
+        "attribution": "Photographer Name · CC BY-NC 4.0",
+        "license_code": "cc-by-nc",
+    }
+
+    candidate = normalize_inat_photo_candidate(photo, 5322)
+
+    assert candidate == {
+        "provider": "inaturalist",
+        "source_taxon_id": "5322",
+        "source_taxon_url": "https://www.inaturalist.org/taxa/5322",
+        "source_photo_id": "998877",
+        "source_photo_url": "https://www.inaturalist.org/photos/998877",
+        "image_url": "https://static.inaturalist.org/photos/998877/medium.jpg",
+        "medium_url": "https://static.inaturalist.org/photos/998877/medium.jpg",
+        "attribution": "Photographer Name · CC BY-NC 4.0",
+        "license_code": "cc-by-nc",
+        "normalization_state": "rights_metadata_recorded_review_required",
+        "published": False,
+    }
+
+
+def test_inat_photo_candidate_is_withheld_when_license_or_exact_identity_is_missing():
+    missing_license = normalize_inat_photo_candidate(
+        {"id": 998877, "attribution": "Photographer Name"}, 5322,
+    )
+    assert missing_license["normalization_state"] == "withheld_missing_attribution_or_license"
+    assert normalize_inat_photo_candidate({"id": 998877, "license_code": "cc-by"}, None) is None
+    assert normalize_inat_photo_candidate({"license_code": "cc-by"}, 5322) is None
 
 
 class Cursor:
