@@ -21,18 +21,23 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 FIRMS_API = "https://firms.modaps.eosdis.nasa.gov/api"
-FIRMS_MAP_KEY = getattr(settings, "nasa_firms_map_key", "")
+# Suomi NPP FIRMS delivery ends 2026-11-01; NOAA-20 and NOAA-21 carry VIIRS NRT.
+FIRMS_SOURCES = ("VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT")
+
+
+def _firms_map_key() -> str:
+    return (settings.nasa_firms_map_key or "").strip()
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def _fetch_firms_data(
     client: httpx.Client,
-    source: str = "VIIRS_SNPP_NRT",
+    source: str = FIRMS_SOURCES[0],
     area: str = "world",
     days: int = 1,
 ) -> list:
     """Fetch active fire data from FIRMS."""
-    url = f"{FIRMS_API}/area/csv/{FIRMS_MAP_KEY}/{source}/{area}/{days}"
+    url = f"{FIRMS_API}/area/csv/{_firms_map_key()}/{source}/{area}/{days}"
     resp = client.get(url, timeout=120, headers={
         "User-Agent": "MINDEX-ETL/2.0 (Mycosoft Earth Data Platform)",
     })
@@ -55,7 +60,10 @@ def map_fire_hotspot(record: dict) -> dict:
     """Map FIRMS CSV record to MINDEX wildfire format."""
     return {
         "source": "firms",
-        "source_id": f"firms_{record.get('latitude')}_{record.get('longitude')}_{record.get('acq_date')}",
+        "source_id": (
+            f"firms_{record.get('satellite', '')}_{record.get('latitude')}_{record.get('longitude')}"
+            f"_{record.get('acq_date')}_{record.get('acq_time', '0000')}"
+        ),
         "name": None,
         "lat": float(record.get("latitude", 0)),
         "lng": float(record.get("longitude", 0)),
@@ -77,17 +85,24 @@ def map_fire_hotspot(record: dict) -> dict:
 
 def iter_fire_hotspots(
     *,
-    source: str = "VIIRS_SNPP_NRT",
+    sources: tuple = FIRMS_SOURCES,
     area: str = "world",
     days: int = 1,
 ) -> Generator[Dict, None, None]:
     """Iterate through FIRMS fire hotspot data."""
-    if not (FIRMS_MAP_KEY or "").strip():
+    if not _firms_map_key():
+        logger.warning("NASA_FIRMS_MAP_KEY not set; skipping FIRMS hotspots")
         return
     with httpx.Client() as client:
-        records = _fetch_firms_data(client, source, area, days)
-        for record in records:
-            yield map_fire_hotspot(record)
+        for source in sources:
+            try:
+                records = _fetch_firms_data(client, source, area, days)
+            except Exception as e:
+                logger.warning("FIRMS %s fetch failed: %s", source, e)
+                continue
+            logger.info("FIRMS %s: %d hotspots", source, len(records))
+            for record in records:
+                yield map_fire_hotspot(record)
 
 
 NIFC_WFIGS_URL = (
