@@ -63,7 +63,11 @@ def _isolate(monkeypatch):
     async def members(db, taxon_ids):
         return {}, FungiPIndexAvailability(status="available")
 
+    async def search_ids(db, query_pattern):
+        return [], FungiPIndexAvailability(status="unavailable", reason="source_table_missing")
+
     monkeypatch.setattr(route, "load_public_fungip_members", members)
+    monkeypatch.setattr(route, "search_validated_fungip_taxon_ids", search_ids)
 
 
 async def call_list(db, **kwargs):

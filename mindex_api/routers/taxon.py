@@ -27,6 +27,7 @@ from ..services.ancestry_public_members import (
     load_validated_first40_associations,
     merge_source_values,
     project_fungip_identity,
+    search_validated_fungip_taxon_ids,
 )
 
 router = APIRouter(
@@ -688,7 +689,10 @@ async def list_taxa(
     pagination: PaginationParams = Depends(pagination_params),
     db: AsyncSession = Depends(get_db_session),
     ids: Optional[str] = Query(None, description="Comma-separated taxon UUIDs for batch lookup (e.g., ?ids=uuid1,uuid2)."),
-    q: Optional[str] = Query(None, description="Free-text search across canonical/common names."),
+    q: Optional[str] = Query(
+        None,
+        description="Free-text search across canonical/common names and exact linked FungiP ID, ticker, or DNA accession.",
+    ),
     rank: Optional[str] = Query(None, description="Rank filter; abbreviations match (species also matches 'sp.')."),
     source: Optional[str] = Query(None, description="Exact source filter (e.g., inat, gbif, mycobank)."),
     prefix: Optional[str] = Query(None, description="Prefix match on canonical_name (e.g., 'A' for A*)."),
@@ -718,8 +722,13 @@ async def list_taxa(
 
     if q and q.strip():
         q_pattern = f"%{_like_escape(q.strip())}%"
-        where_clauses.append("(canonical_name ILIKE :q_pattern OR common_name ILIKE :q_pattern)")
+        where_clauses.append("(canonical_name ILIKE :q_pattern OR common_name ILIKE :q_pattern")
         params["q_pattern"] = q_pattern
+        fungip_taxon_ids, _fungip_search_status = await search_validated_fungip_taxon_ids(db, q_pattern)
+        if fungip_taxon_ids:
+            where_clauses[-1] += " OR id = ANY(CAST(:fungip_taxon_ids AS uuid[]))"
+            params["fungip_taxon_ids"] = fungip_taxon_ids
+        where_clauses[-1] += ")"
     rank_variants = list(dict.fromkeys(v for value in _csv_values(rank) for v in _rank_variants(value)))
     if rank_variants:
         where_clauses.append("rank = ANY(:rank_variants)")

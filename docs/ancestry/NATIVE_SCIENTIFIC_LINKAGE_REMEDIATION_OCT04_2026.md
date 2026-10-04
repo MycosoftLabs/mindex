@@ -21,6 +21,12 @@ The corrected projector checks each positional ancestor UUID against its own `co
 
 The retained Fungi search capture supplies the selected `Schizophyllum commune` identity (`6db28640-67fb-4808-90de-956a856366f7`, kingdom `Fungi`, rank `species`) at `outputs/ancestry-continuation-oct04/independent-flow-review/review-20261004T023940Z/schizophyllum_search.raw.json` (SHA-256 `ef76f98bc4ed6dc2e65da2fb7a92694e28c21c8c9058ba149bfd6354f98b99f2`). That capture does not include a native lineage response; the regression uses its exact selected identity with local fixture lineage arrays and does not claim the fixture arrays reflect production state.
 
+## FungiP identifier search correction
+
+The dedicated `/api/mindex/taxa/collections/fungip` route already searches collection fields, but the Website-facing ordinary `/api/mindex/taxa?q=...` route filtered `q` only against core canonical/common names. That discarded a linked FungiP row before count/page and before post-page member enrichment. The ordinary route now resolves FungiP ID, ticker and DNA accession matches to core UUIDs before its existing core count and page query. Resolution uses the exact unique `core.taxon_external_id` crosswalk and rechecks the stored UUID, accepted name, kingdom and species rank; unresolved/conflicting source rows do not add taxa. Optional FungiP index errors remain nonfatal, and normal all-kingdom paging and the separate First40 launch association path are unchanged.
+
+The captured FungiP result for `Schizophyllum commune` includes FG032, ticker `SPLIT`, accession `PZ955173.1` and the linked UUID above. No First40 launch values were used to make these matches.
+
 ## Validation executed
 
 Project environment: Python 3.12.10; imports passed for psycopg 3.1.20, SQLAlchemy 2.0.49 and FastAPI 0.111.1.
@@ -30,7 +36,9 @@ Project environment: Python 3.12.10; imports passed for psycopg 3.1.20, SQLAlche
 - Independent SQL guard-contract regression: 4/4 passed, including six faulty guard mutations rejected.
 - Qualification-plan checks: 4/4 passed.
 - Phylogeny focused regressions: 3 passed, including the retained Animalia reproduction, the retained Fungi selected identity, verified ancestor rank/name checks and misaligned-array handling.
+- FungiP identifier-search regressions: 25 passed across the new parameterized ID/ticker/accession and pre-page tests, existing all-species listing/enrichment tests, and First40 snapshot projection tests (55 First40 cases skipped because local input bundles are absent).
 - Isolated API/DB qualification: the actual `/api/mindex/phylogeny` route returned HTTP 200 against PostgreSQL 17.11 on a task-owned loopback cluster at port 15911. The local `core.taxon` fixture used the exact selected Animalia and Fungi IDs/names/ranks from the retained captures, verified the Animalia UUID was not attached to the `Animalia` root, and verified both exact selected taxa were returned as tips. The Fungi lineage array was a local fixture because no native Fungi lineage capture was retained. Result SHA-256 `70c1a21b56d33ab203086006ae4166c59460bfd6f6010fcbce6eb5d887317c7d`; output and PostgreSQL logs are under `outputs/phylogeny-lineage-projection-oct04/`. The isolated server has been stopped.
+- Isolated FungiP search/API qualification: the actual `/api/mindex/taxa?q=...` route returned the exact linked FG032 taxon with total `1` for each of `FG032`, `SPLIT` and `PZ955173.1`. The task-owned PostgreSQL fixture used the exact selected UUID and captured identity/accession/ticker, with a locally seeded matching external-ID crosswalk. Result SHA-256 `e6c2775065950a26c75200bad1d32f2c81168b73f3d5809a4c482a32bb2ad7a5`; same isolated database and stopped server as above.
 - Exact PostgreSQL qualification: PASS on PostgreSQL 17.11 in a task-owned loopback-only cluster. Database `ancestry_pub_evidence_review_a4f1c842594f4f71a59167ee09b320a6`; port 15910. Migration SHA-256 `fc3e9389371c199b06baa1f5bb1ee0af2a4328a70ada08284292cc0311af1c15`. The pinned script verified reviewer guards, candidate-to-terminal updates, immutable source/evidence identities and rollback; it returned `PASS: exact migration guards, reviewed dispositions, immutable identity and rollback verified`. Its transaction rolled back, leaving no `core` or `bio` fixture schema. The task-owned server is stopped.
 - Qualification log SHA-256: `440d2d8fe6672f515eBAA10ABA22EDC9F421D26AD0973E056557BB7B31E3B547`.
 
