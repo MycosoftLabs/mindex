@@ -1,0 +1,173 @@
+{
+  "manifest_version": 1,
+  "packet_date": "2026-10-03",
+  "repository": "MINDEX/mindex",
+  "branch": "codex/ancestry-native-linkage-oct03-2026",
+  "base_commit": "ceec27005c81ab65b9ad9a8271c50aa041f3c56d",
+  "source_state": "local_commit_candidate_not_deployed",
+  "environment_state": "no_service_or_database_receipt",
+  "scope": "native scientific linkage and truthful schema/provenance projections",
+  "authority": {
+    "native_sources_and_associations": "MINDEX owner",
+    "website_bff_and_preview": "Website/Ancestry owner",
+    "research_tool_engines": "Research Tools/MAS owners",
+    "production_aws_infrastructure_schema_apply_and_deploy": "Cursor only"
+  },
+  "canonical_example": {
+    "taxon_id": "6db28640-67fb-4808-90de-956a856366f7",
+    "label": "splitgill / Schizophyllum commune",
+    "ncbi_taxon_id": "5334",
+    "crosswalk_state": "not_read_from_a_qualified_database"
+  },
+  "search_capabilities_source_inspection_only": {
+    "GET /taxa?q": {
+      "searches": ["canonical_name", "common_name"],
+      "supports": ["rank", "source", "prefix", "kingdom", "lineage_contains", "ids", "order", "pagination", "complete_match_total"],
+      "does_not_establish": ["accession_search", "collection_id_search", "ticker_or_token_search", "sequence_search"]
+    },
+    "GET /taxa/collections/fungip?q": {
+      "searches": ["FungiP collection names/IDs", "DNA accession", "qualified first40 ticker/launch values"],
+      "scope": "FungiP collection index only",
+      "availability": "depends_on_collection_tables_and_source_validation",
+      "does_not_establish": ["database_wide_collection_index", "canonical_taxon_identity_for_unlinked_collection_rows"]
+    },
+    "GET /genetics?search": {
+      "searches": ["sequence species_name", "gene", "accession"],
+      "exact_taxon_selector": "taxon_id UUID",
+      "exact_filter_returned_in_record": true,
+      "linkage_proof": "requires a stored exact taxon_id or exact source external-ID crosswalk"
+    }
+  },
+  "read_side_effect_contract_source_inspection_only": {
+    "GET /genetics?taxon_id": "stored exact list read; schema errors are typed 503 in this candidate",
+    "GET /genetics/accession/{accession}": "stored lookup; no provider fetch in the route",
+    "POST /genetics/ingest-accession": "explicit provider fetch and database write; source now resolves only a unique exact NCBI crosswalk; route was not executed",
+    "GET /taxa/{taxon_id}": "requires read_only=true; source default is false and can enqueue incomplete-taxon work",
+    "GET /unified-search": "version-dependent; do not assume it is side-effect-free",
+    "runtime_confirmation": "none; deployed commit/build and route behavior not provided"
+  },
+  "native_contracts": [
+    {
+      "domain": "genetics_and_ITS",
+      "source_files": ["mindex_etl/sources/genbank.py", "mindex_etl/jobs/sync_genbank_genomes.py", "mindex_api/routers/genetics.py"],
+      "association_rule": "unique core.taxon_external_id(source='ncbi', external_id=<numeric taxid>) only",
+      "unresolved_states": ["source_taxon_id_missing", "source_taxon_id_ambiguous_or_invalid", "unlinked_exact_external_id", "ambiguous_exact_external_id", "source_name_missing_unverified", "source_name_mismatch", "existing_link_preserved_unverified"],
+      "crosswalk_consistency": "unique exact numeric NCBI taxid plus exact case-insensitive trimmed source organism equals core.taxon.canonical_name; mismatch/missing name is withheld; rank is retained as evidence",
+      "schema_change": false,
+      "qualification": "parser verified against a bounded NCBI LT627806.1 record; exact MINDEX crosswalk and live stored rows unverified"
+    },
+    {
+      "domain": "genome_assemblies",
+      "source_files": ["mindex_api/routers/genomes.py"],
+      "selector": "exact taxon_id UUID supported",
+      "unavailable_behavior": "HTTP 503 for absent/incomplete schema or query failure; success marks schema/data available",
+      "qualification": "source/unit tests only; no live service/schema/assembly rows"
+    },
+    {
+      "domain": "compounds",
+      "source_files": ["mindex_api/routers/compounds.py", "mindex_api/schemas/compound.py"],
+      "selector": "exact taxon UUID through bio.taxon_compound",
+      "projected_evidence": ["PubChem ID", "compound source", "association source", "source URL", "DOI", "evidence level", "tissue"],
+      "unavailable_behavior": "HTTP 503 when exact taxon identity or association projection fails",
+      "qualification": "projection source/unit test; installed rich schema and source rows unverified"
+    },
+    {
+      "domain": "genetics_schema_readiness",
+      "source_files": ["mindex_api/routers/genetics.py"],
+      "unavailable_behavior": "HTTP 503 if the sequence relation cannot be verified or is absent",
+      "qualification": "source/unit test only"
+    },
+    {
+      "domain": "media_images",
+      "source_files": ["mindex_api/routers/all_life.py", "mindex_etl/sources/inat.py", "mindex_etl/sources/wikimedia_commons.py"],
+      "selector": "exact taxon UUID",
+      "required_provenance": ["source", "source_id", "source_url", "license", "attribution", "verified", "label_state", "content_hash"],
+      "media_pagination": "image, video and audio each include a bounded page and complete matched total",
+      "unavailable_behavior": "HTTP 503 for missing required columns or query failure",
+      "candidate_source_pin": {"provider": "Wikimedia Commons", "file_page_id": "3330811", "file_title": "File:Pleurotus ostreatus JPG7.jpg", "source_content_sha256": "3e911ca464c51d8934227648cd585949a31dae5df5f1f28dd1e2eef7fb74c276", "license": "CC BY 3.0", "attribution_state": "missing_creator_unresolved"},
+      "qualification": "one exact Commons response normalized; candidate withheld for missing attribution; iNat candidate path fixture-tested; no MINDEX media row or taxon crosswalk qualified"
+    },
+    {
+      "domain": "publications",
+      "source_files": ["mindex_api/routers/all_life.py", "mindex_etl/sources/publication_evidence.py", "mindex_etl/jobs/import_taxon_publication_evidence.py", "migrations/20261003_publication_taxon_evidence_OCT03_2026.sql"],
+      "selector": "exact taxon UUID through bio.publication_taxon",
+      "schema_gap": "current association table stores only publication ID, taxon ID, relevance score and created time; association source/method is not stored",
+      "candidate_contract": "separate bio.publication_taxon_evidence table; exact GenBank accession.version plus unique ncbi taxid crosswalk and organism/canonical-name equality; candidate evidence never writes bio.publication_taxon",
+      "migration_state": "authored_not_applied",
+      "candidate_source_pin": {
+        "provider": "NCBI EFetch nuccore",
+        "accession_version": "PZ955173.1",
+        "source_taxon_id": "5334",
+        "source_content_sha256": "bdc407ee4e1bf28042c4ee5395825c0b20014bff96dad2a33c3b9c558e5cccc2",
+        "reference_locator": "PZ955173.1#reference=1",
+        "reference_title": "Integrated Myochemical and Molecular Characterization of Selected Medicinal Mushrooms Using ITS rDNA Sequencing",
+        "source_state": "in_press_no_pubmed_or_doi_candidate"
+      },
+      "unavailable_behavior": "HTTP 503 for missing schema or query failure",
+      "qualification": "source fetch/parser validated; ETL staging only fixture-tested; no MINDEX crosswalk/database importer run or reviewed link qualified"
+    },
+    {
+      "domain": "interactions",
+      "source_files": ["mindex_api/routers/all_life.py"],
+      "selector": "exact UUID at source or target endpoint",
+      "projected_evidence": ["source taxon", "target taxon", "predicate", "evidence source", "evidence URL", "location"],
+      "unavailable_behavior": "HTTP 503 for missing schema or query failure",
+      "qualification": "source/unit test only; ingestion and live rows unverified"
+    },
+    {
+      "domain": "description_provenance",
+      "source_files": ["mindex_etl/sources/inat.py", "mindex_etl/sources/wikipedia.py", "mindex_etl/taxon_canonicalizer.py"],
+      "behavior": "exact Wikipedia page URL plus page ID pins a candidate to returned revision and content hash; license remains unset when provider response has no license field; candidate is not copied into core.taxon.description",
+      "source_pin": {"page_id": "1473803", "revision_id": "1366763686", "source_content_sha256": "d06dc56179de5f224124d7254f471e338653592ac20ffa46010b19bd8af65541", "content_sha256": "e97c9f466ffb413f630abd4724c9d29082f19759dacb3b2e52baaab169a1f2fe", "license_state": "revision_pinned_license_unverified"},
+      "qualification": "one exact provider response normalized; no text promoted"
+    }
+  ],
+  "real_input_check": {
+    "request": "read-only NCBI EFetch for nuccore LT627806.1",
+    "bytes": 4900,
+    "sha256": "f14eff4e61bdf34051ef380e1cccce0b18d2a3511b1055a78439d5127e314b7f",
+    "parsed": {
+      "accession": "LT627806",
+      "accession_version": "LT627806.1",
+      "organism": "Pleurotus ostreatus",
+      "ncbi_taxon_id": "5322"
+    },
+    "association": "none asserted; importer unit crosswalk is synthetic"
+  },
+  "publication_reference_check": {
+    "request": "exact NCBI EFetch nuccore accession.version PZ955173.1",
+    "decoded_utf8_bytes": 5730,
+    "sha256": "bdc407ee4e1bf28042c4ee5395825c0b20014bff96dad2a33c3b9c558e5cccc2",
+    "organism": "Schizophyllum commune",
+    "ncbi_taxon_id": "5334",
+    "source_reference_count": 1,
+    "ignored_direct_submission_count": 1,
+    "mindex_crosswalk_or_write": "none"
+  },
+  "description_reference_check": {
+    "request": "exact Wikipedia REST summary URL for an expected source page ID",
+    "page_id": "1473803",
+    "revision_id": "1366763686",
+    "source_content_sha256": "d06dc56179de5f224124d7254f471e338653592ac20ffa46010b19bd8af65541",
+    "content_sha256": "e97c9f466ffb413f630abd4724c9d29082f19759dacb3b2e52baaab169a1f2fe",
+    "license_state": "revision_pinned_license_unverified",
+    "published": false
+  },
+  "tests": {
+    "focused_pytest": "12 suites, 100 tests passed; publication migration contract and both exact media/description normalizers included",
+    "python_compile": "passed for changed routers, schema, ETL source/job and canonicalizer",
+    "full_suite": "not run",
+    "mindex_runtime_or_browser": "not run"
+  },
+  "prohibited_or_not_performed": [
+    "production189/AWS access or service restart",
+    "database read/write, schema migration apply, ETL database importer run",
+    "provider scheduler/enrichment run or broad harvesting",
+    "deployment or hosted browser qualification",
+    "Website source edits",
+    "FungiP first40 reserved source/data edits",
+    "name/genus/substr matching to manufacture associations"
+  ],
+  "operator_packet": "docs/ancestry/NATIVE_SCIENTIFIC_LINKAGE_OPERATOR_OCT03_2026.md",
+  "qualification_packet": "docs/ancestry/NATIVE_SCIENTIFIC_LINKAGE_QUALIFICATION_OCT03_2026.md"
+}

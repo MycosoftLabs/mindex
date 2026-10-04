@@ -1,0 +1,18 @@
+{
+  "schema": "mindex.ensembl-retained-capture-projection.v1",
+  "capture_source_sha256": "48baf827379a85f77d56e82e74fa1baecfb259e090c3a9d810561c1b6d6707d4",
+  "reference": {
+    "id": "ensembl-yeast-gene-oct03",
+    "version": "service-reported release 116; R64-1-1; source stable-ID version null"
+  },
+  "record": {
+    "id": "YAL001C",
+    "source": "Ensembl/SGD",
+    "source_url": "https://rest.ensembl.org/lookup/id/YAL001C",
+    "assembly": "R64-1-1",
+    "release_reported": 116,
+    "sequence_version": null,
+    "sequence_sha256": "eaa6315892b1bc99614326d70a0aae0b5d752300d44e2aa9c734e620b2bf676d",
+    "sequence_utf8_bytes": 3573
+  }
+}

@@ -1,13 +1,13 @@
 """
 Genome assemblies — read-only from bio.genome joined to core.taxon.
-No mock payloads: empty list when the table is empty or unavailable.
+Successful empty results remain distinct from schema/query unavailability.
 """
 from __future__ import annotations
 
 from typing import Any, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,9 +27,12 @@ async def _genome_table_ready(db: AsyncSession) -> bool:
             )
         )
         return bool(r.scalar())
-    except Exception:
+    except Exception as exc:
         await db.rollback()
-        return False
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "schema_check_unavailable", "message": "Genome schema readiness could not be verified"},
+        ) from exc
 
 
 @router.get("/genomes")
@@ -48,11 +51,10 @@ async def get_genomes(
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
     if not await _genome_table_ready(session):
-        return {
-            "genomes": [],
-            "pagination": {"limit": limit, "offset": offset, "total": 0},
-            "message": "bio.genome table missing; run genetics/fungidb ETL",
-        }
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "schema_unavailable", "message": "bio.genome is not installed in this environment"},
+        )
 
     where_parts: List[str] = ["TRUE"]
     params: dict = {"limit": limit, "offset": offset}
@@ -73,13 +75,12 @@ async def get_genomes(
             f"JOIN core.taxon t ON t.id = g.taxon_id WHERE {wh}"
         )
         total = int((await session.execute(count_sql, params)).scalar() or 0)
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        return {
-            "genomes": [],
-            "pagination": {"limit": limit, "offset": offset, "total": 0},
-            "message": "bio.genome query unavailable",
-        }
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "schema_or_query_unavailable", "message": "Genome count query could not be completed"},
+        ) from exc
 
     data_sql = text(
         f"""
@@ -104,13 +105,12 @@ async def get_genomes(
     )
     try:
         res = await session.execute(data_sql, params)
-    except Exception:
+    except Exception as exc:
         await session.rollback()
-        return {
-            "genomes": [],
-            "pagination": {"limit": limit, "offset": offset, "total": 0},
-            "message": "bio.genome query unavailable",
-        }
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "schema_or_query_unavailable", "message": "Genome records could not be read"},
+        ) from exc
     rows: List[dict[str, Any]] = []
     for row in res.mappings().all():
         r = dict(row)
@@ -121,4 +121,7 @@ async def get_genomes(
     return {
         "genomes": rows,
         "pagination": {"limit": limit, "offset": offset, "total": int(total)},
+        "data_state": "available",
+        "schema_state": "ready",
+        "scope": "exact_taxon" if taxon_id else "filtered_or_global",
     }

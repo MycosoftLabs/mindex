@@ -240,14 +240,65 @@ async def load_public_fungip_members(
         if not taxon_ids:
             return {}, FungiPIndexAvailability(status="available")
         result = await db.execute(_PUBLIC_MEMBER_SQL, {"taxon_ids": taxon_ids})
-        members = {
-            str(row["taxon_id"]): _public_member(dict(row))
-            for row in result.mappings().all()
-        }
+        members: dict[str, FungiPIndexMember] = {}
+        # The native family/image projection uses the same exact, validated link
+        # and selects the first source identity by species_id. Keep that member
+        # here too if duplicate valid source rows point at one canonical taxon.
+        for row in result.mappings().all():
+            members.setdefault(str(row["taxon_id"]), _public_member(dict(row)))
         return members, FungiPIndexAvailability(status="available")
     except Exception:
         await db.rollback()
         return {}, FungiPIndexAvailability(status="error", reason="query_failed")
+
+
+async def search_validated_fungip_taxon_ids(
+    db: AsyncSession, query_pattern: str,
+) -> tuple[list[UUID], FungiPIndexAvailability]:
+    """Resolve FungiP ID/ticker/accession searches to exact current taxon links.
+
+    This is used to include linked collection taxa before the ordinary taxa
+    route counts and pages. Source names alone never create canonical UUIDs.
+    """
+    try:
+        table = (await db.execute(text("SELECT to_regclass('fungip.species')"))).scalar_one_or_none()
+        if table is None:
+            return [], FungiPIndexAvailability(status="unavailable", reason="source_table_missing")
+        result = await db.execute(text("""
+            SELECT DISTINCT taxon.id
+            FROM fungip.species source
+            JOIN LATERAL (
+                SELECT COUNT(DISTINCT external_id.taxon_id)::int AS candidate_count,
+                       (ARRAY_AGG(DISTINCT external_id.taxon_id))[1] AS candidate_taxon_id
+                FROM jsonb_array_elements(
+                    CASE WHEN jsonb_typeof(source.external_ids) = 'array'
+                         THEN source.external_ids ELSE '[]'::jsonb END
+                ) AS source_identifier(value)
+                JOIN core.taxon_external_id external_id
+                  ON external_id.source = source_identifier.value->>'source'
+                 AND external_id.external_id = source_identifier.value->>'external_id'
+            ) matches ON TRUE
+            JOIN core.taxon taxon ON taxon.id = matches.candidate_taxon_id
+            WHERE (
+                source.species_id ILIKE :query_pattern
+                OR source.record->>'ticker' ILIKE :query_pattern
+                OR source.record->'dna'->>'accession_version' ILIKE :query_pattern
+            )
+              AND source.resolution_status = 'resolved'
+              AND source.taxon_id = matches.candidate_taxon_id
+              AND matches.candidate_count = 1
+              AND LOWER(taxon.rank) = 'species'
+              AND LOWER(taxon.kingdom) = 'fungi'
+              AND taxon.canonical_name = source.record->>'accepted_name'
+              AND source.accepted_name = source.record->>'accepted_name'
+        """), {"query_pattern": query_pattern})
+        return [UUID(str(row["id"])) for row in result.mappings().all()], FungiPIndexAvailability(status="available")
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return [], FungiPIndexAvailability(status="error", reason="query_failed")
 
 
 async def search_public_fungip(

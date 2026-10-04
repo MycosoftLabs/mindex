@@ -47,16 +47,17 @@ def genetic_query(session, **updates):
 
 
 def sequence():
-    return dict(id=7, accession="FIXTURE.1", taxon_id=TAXON,
+    return dict(id=7, accession="FIXTURE", version="FIXTURE.1", taxon_id=TAXON,
                 species_name="Fixture species", gene="ITS", region=None,
                 sequence="ACGTN", sequence_length=5, sequence_type="dna", source="fixture",
-                source_url=None, definition=None, organism=None, pubmed_id=None, doi=None)
+                source_url=None, definition=None, organism=None, pubmed_id=None, doi=None, metadata={})
 
 
 def test_genetics_filters_exact_uuid_in_count_and_page_and_returns_identity():
     session = Session(Result("bio.genetic_sequence"), Result(1), Result(rows=[sequence()]))
     result = genetic_query(session, taxon_id=TAXON)
     assert result.data[0].taxon_id == TAXON
+    assert result.data[0].accession_version == "FIXTURE.1"
     assert result.data[0].sequence == "ACGTN"
     assert result.pagination == dict(limit=25, offset=0, total=1)
     for sql, params in session.calls[1:]:
