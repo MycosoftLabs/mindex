@@ -16,8 +16,10 @@ from typing import Any, Dict, Generator, Optional
 import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed
 
+from .. import log_redaction
 from ..config import settings
 
+log_redaction.install()
 logger = logging.getLogger(__name__)
 
 FIRMS_API = "https://firms.modaps.eosdis.nasa.gov/api"

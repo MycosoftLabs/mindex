@@ -23,8 +23,10 @@ from typing import Any, Dict, Generator, List, Optional
 import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed
 
+from .. import log_redaction
 from ..config import settings
 
+log_redaction.install()
 logger = logging.getLogger(__name__)
 
 # ============================================================================
