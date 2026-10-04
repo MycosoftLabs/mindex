@@ -2,15 +2,15 @@
 Genetics Router
 
 API endpoints for genetic sequence data (GenBank, NCBI, etc.).
-On-demand ingest: when detail is requested for an accession not in MINDEX,
-fetch from GenBank and store so the user stays in-app.
+List and accession detail routes read stored records. Provider fetch and storage
+are available only through the explicit POST /ingest-accession route.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -29,7 +29,10 @@ class GeneticSequenceResponse(BaseModel):
     """Response model for a genetic sequence."""
     id: int
     accession: str
+    accession_version: Optional[str] = None
     taxon_id: Optional[UUID] = None
+    source_taxon_ids: List[str] = Field(default_factory=list)
+    taxon_linkage: Optional[dict[str, Any]] = None
     species_name: Optional[str] = None
     gene: Optional[str] = None
     region: Optional[str] = None
@@ -101,8 +104,66 @@ async def _genetic_sequence_table_exists(db: AsyncSession) -> bool:
     MINDEX environments can drift; this prevents 500s when the genetics
     schema/migrations have not been applied yet.
     """
-    result = await db.execute(text("SELECT to_regclass('bio.genetic_sequence')"))
-    return result.scalar_one_or_none() is not None
+    try:
+        result = await db.execute(text("SELECT to_regclass('bio.genetic_sequence')"))
+        return result.scalar_one_or_none() is not None
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "schema_check_unavailable", "message": "Genetic sequence schema readiness could not be verified"},
+        ) from exc
+
+
+async def _resolve_ncbi_taxon_link(db: AsyncSession, source_taxon_ids: object) -> tuple[Optional[UUID], dict]:
+    """Resolve a GenBank taxon only through a unique exact NCBI crosswalk."""
+    if source_taxon_ids is None:
+        normalized_ids: list[str] = []
+    elif isinstance(source_taxon_ids, (str, int)):
+        normalized_ids = [str(source_taxon_ids).strip()]
+    else:
+        normalized_ids = sorted({str(value).strip() for value in source_taxon_ids if str(value).strip()})
+    normalized_ids = sorted(set(normalized_ids))
+    if not normalized_ids:
+        return None, {"state": "source_taxon_id_missing", "source": "ncbi", "source_ids": []}
+    if len(normalized_ids) != 1 or not normalized_ids[0].isdigit():
+        return None, {
+            "state": "source_taxon_id_ambiguous_or_invalid", "source": "ncbi", "source_ids": normalized_ids,
+        }
+
+    result = await db.execute(
+        text(
+            "SELECT DISTINCT taxon_id FROM core.taxon_external_id "
+            "WHERE source = 'ncbi' AND external_id = :external_id LIMIT 2"
+        ),
+        {"external_id": normalized_ids[0]},
+    )
+    linked_ids = {UUID(str(row[0])) for row in result.fetchall() if row[0] is not None}
+    if len(linked_ids) == 1:
+        return next(iter(linked_ids)), {
+            "state": "linked_unique_exact_external_id", "source": "ncbi", "source_ids": normalized_ids,
+        }
+    if len(linked_ids) > 1:
+        return None, {
+            "state": "ambiguous_exact_external_id", "source": "ncbi",
+            "source_ids": normalized_ids, "candidate_count": len(linked_ids),
+        }
+    return None, {"state": "unlinked_exact_external_id", "source": "ncbi", "source_ids": normalized_ids}
+
+
+def _sequence_provenance_fields(metadata: object) -> dict[str, Any]:
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    source_taxon_ids = metadata.get("source_taxon_ids")
+    return {
+        "source_taxon_ids": source_taxon_ids if isinstance(source_taxon_ids, list) else [],
+        "taxon_linkage": metadata.get("taxon_linkage") if isinstance(metadata.get("taxon_linkage"), dict) else None,
+    }
 
 
 # =============================================================================
@@ -190,14 +251,12 @@ async def list_genetic_sequences(
         f"SELECT COUNT(*) FROM bio.genetic_sequence gs "
         f"LEFT JOIN core.taxon t ON t.id = gs.taxon_id WHERE {where_sql}"
     )
-    count_result = await db.execute(count_stmt, params)
-    total = count_result.scalar_one()
-    
     # Data query
     stmt = text(f"""
         SELECT
             gs.id,
             gs.accession,
+            gs.version,
             gs.taxon_id,
             gs.species_name,
             gs.gene,
@@ -210,7 +269,8 @@ async def list_genetic_sequences(
             gs.definition,
             gs.organism,
             gs.pubmed_id,
-            gs.doi
+            gs.doi,
+            gs.metadata
         FROM bio.genetic_sequence gs
         LEFT JOIN core.taxon t ON t.id = gs.taxon_id
         WHERE {where_sql}
@@ -218,13 +278,23 @@ async def list_genetic_sequences(
         LIMIT :limit OFFSET :offset
     """)
     
-    result = await db.execute(stmt, params)
-    rows = result.mappings().all()
+    try:
+        count_result = await db.execute(count_stmt, params)
+        total = count_result.scalar_one()
+        result = await db.execute(stmt, params)
+        rows = result.mappings().all()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "genetics_query_unavailable", "message": "Stored genetic sequences could not be read"},
+        ) from exc
     
     sequences = [
         GeneticSequenceResponse(
             id=row["id"],
             accession=row["accession"],
+            accession_version=row["version"],
             taxon_id=row["taxon_id"],
             species_name=row["species_name"],
             gene=row["gene"],
@@ -238,6 +308,7 @@ async def list_genetic_sequences(
             organism=row["organism"],
             pubmed_id=row["pubmed_id"],
             doi=row["doi"],
+            **_sequence_provenance_fields(row["metadata"]),
         )
         for row in rows
     ]
@@ -302,7 +373,7 @@ async def get_genetic_sequence(
     """Get a single genetic sequence by ID."""
     if not await _genetic_sequence_table_exists(db):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Genetic sequences are not available in this environment",
         )
 
@@ -310,6 +381,8 @@ async def get_genetic_sequence(
         SELECT
             id,
             accession,
+            version,
+            taxon_id,
             species_name,
             gene,
             region,
@@ -321,13 +394,21 @@ async def get_genetic_sequence(
             definition,
             organism,
             pubmed_id,
-            doi
+            doi,
+            metadata
         FROM bio.genetic_sequence
         WHERE id = :sequence_id
     """)
     
-    result = await db.execute(stmt, {"sequence_id": sequence_id})
-    row = result.mappings().one_or_none()
+    try:
+        result = await db.execute(stmt, {"sequence_id": sequence_id})
+        row = result.mappings().one_or_none()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "genetics_query_unavailable", "message": "Stored genetic sequence could not be read"},
+        ) from exc
     
     if not row:
         raise HTTPException(
@@ -338,6 +419,8 @@ async def get_genetic_sequence(
     return GeneticSequenceResponse(
         id=row["id"],
         accession=row["accession"],
+        accession_version=row["version"],
+        taxon_id=row["taxon_id"],
         species_name=row["species_name"],
         gene=row["gene"],
         region=row["region"],
@@ -350,6 +433,7 @@ async def get_genetic_sequence(
         organism=row["organism"],
         pubmed_id=row["pubmed_id"],
         doi=row["doi"],
+        **_sequence_provenance_fields(row["metadata"]),
     )
 
 
@@ -359,10 +443,17 @@ async def get_sequence_by_accession(
     db: AsyncSession = Depends(get_db_session),
 ) -> GeneticSequenceResponse:
     """Get a genetic sequence by its accession number."""
+    if not await _genetic_sequence_table_exists(db):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Genetic sequences are not available in this environment",
+        )
     stmt = text("""
         SELECT
             id,
             accession,
+            version,
+            taxon_id,
             species_name,
             gene,
             region,
@@ -374,13 +465,21 @@ async def get_sequence_by_accession(
             definition,
             organism,
             pubmed_id,
-            doi
+            doi,
+            metadata
         FROM bio.genetic_sequence
         WHERE accession = :accession
     """)
     
-    result = await db.execute(stmt, {"accession": accession})
-    row = result.mappings().one_or_none()
+    try:
+        result = await db.execute(stmt, {"accession": accession})
+        row = result.mappings().one_or_none()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "genetics_query_unavailable", "message": "Stored genetic sequence could not be read"},
+        ) from exc
     
     if not row:
         raise HTTPException(
@@ -391,6 +490,8 @@ async def get_sequence_by_accession(
     return GeneticSequenceResponse(
         id=row["id"],
         accession=row["accession"],
+        accession_version=row["version"],
+        taxon_id=row["taxon_id"],
         species_name=row["species_name"],
         gene=row["gene"],
         region=row["region"],
@@ -403,6 +504,7 @@ async def get_sequence_by_accession(
         organism=row["organism"],
         pubmed_id=row["pubmed_id"],
         doi=row["doi"],
+        **_sequence_provenance_fields(row["metadata"]),
     )
 
 
@@ -412,7 +514,7 @@ async def ingest_accession(
     db: AsyncSession = Depends(get_db_session),
 ) -> GeneticSequenceResponse:
     """
-    Ensure a GenBank record is in MINDEX by accession.
+    Explicitly request that a GenBank record be added to MINDEX by accession.
     If already present, returns it. If not, fetches from NCBI GenBank, stores in MINDEX, and returns.
     Keeps users in-app: no need to open GenBank externally.
     """
@@ -422,18 +524,23 @@ async def ingest_accession(
             detail="Genetic sequences table not available",
         )
     accession = body.accession.strip()
+    accession_lookup = accession.split(".", 1)[0]
+    requested_version = accession if accession != accession_lookup else None
     # Already in DB?
     stmt = text("""
-        SELECT id, accession, species_name, gene, region, sequence, sequence_length,
-               sequence_type, source, source_url, definition, organism, pubmed_id, doi
-        FROM bio.genetic_sequence WHERE accession = :accession
+        SELECT id, accession, version, taxon_id, species_name, gene, region, sequence, sequence_length,
+               sequence_type, source, source_url, definition, organism, pubmed_id, doi, metadata
+        FROM bio.genetic_sequence
+        WHERE accession = :accession AND (:requested_version IS NULL OR version = :requested_version)
     """)
-    result = await db.execute(stmt, {"accession": accession})
+    result = await db.execute(stmt, {"accession": accession_lookup, "requested_version": requested_version})
     row = result.mappings().one_or_none()
     if row:
         return GeneticSequenceResponse(
             id=row["id"],
             accession=row["accession"],
+            accession_version=row["version"],
+            taxon_id=row["taxon_id"],
             species_name=row["species_name"],
             gene=row["gene"],
             region=row["region"],
@@ -446,6 +553,7 @@ async def ingest_accession(
             organism=row["organism"],
             pubmed_id=row["pubmed_id"],
             doi=row["doi"],
+            **_sequence_provenance_fields(row["metadata"]),
         )
     # Fetch from GenBank (sync call in thread)
     try:
@@ -463,23 +571,43 @@ async def ingest_accession(
         )
     seq = genome.get("sequence") or ""
     sequence_length = len(seq.replace(" ", "").replace("\n", "")) or genome.get("sequence_length") or 0
-    source_url = f"https://www.ncbi.nlm.nih.gov/nuccore/{accession}"
+    record_accession = genome.get("accession") or accession_lookup
+    accession_version = genome.get("accession_version") or accession
+    source_url = genome.get("source_url") or f"https://www.ncbi.nlm.nih.gov/nuccore/{accession_version}"
+    source_taxon_ids = genome.get("source_taxon_ids")
+    if source_taxon_ids is None and genome.get("taxon_id") is not None:
+        source_taxon_ids = [genome["taxon_id"]]
+    try:
+        taxon_id, linkage = await _resolve_ncbi_taxon_link(db, source_taxon_ids)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "taxon_crosswalk_unavailable", "message": "Exact NCBI taxon crosswalk could not be checked"},
+        ) from exc
+    metadata = dict(genome.get("metadata") or {})
+    metadata.update({
+        "accession_version": accession_version,
+        "source_taxon_ids": linkage.get("source_ids", []),
+        "taxon_linkage": linkage,
+    })
     insert_stmt = text("""
         INSERT INTO bio.genetic_sequence (
-            accession, species_name, gene, region, sequence, sequence_length,
+            accession, version, taxon_id, species_name, gene, region, sequence, sequence_length,
             sequence_type, source, source_url, definition, organism, taxonomy, metadata
         ) VALUES (
-            :accession, :species_name, :gene, :region, :sequence, :sequence_length,
+            :accession, :version, :taxon_id, :species_name, :gene, :region, :sequence, :sequence_length,
             :sequence_type, :source, :source_url, :definition, :organism, :taxonomy, :metadata::jsonb
         )
-        RETURNING id, accession, species_name, gene, region, sequence, sequence_length,
-                  sequence_type, source, source_url, definition, organism, pubmed_id, doi
+        RETURNING id, accession, version, taxon_id, species_name, gene, region, sequence, sequence_length,
+                  sequence_type, source, source_url, definition, organism, pubmed_id, doi, metadata
     """)
-    metadata = genome.get("metadata") or {}
-    taxonomy = metadata.get("taxonomy") or ""
+    taxonomy = (genome.get("metadata") or {}).get("taxonomy") or ""
     try:
         result = await db.execute(insert_stmt, {
-            "accession": accession,
+            "accession": record_accession,
+            "version": accession_version,
+            "taxon_id": str(taxon_id) if taxon_id else None,
             "species_name": genome.get("organism") or "",
             "gene": None,
             "region": None,
@@ -498,6 +626,8 @@ async def ingest_accession(
         return GeneticSequenceResponse(
             id=row["id"],
             accession=row["accession"],
+            accession_version=row["version"],
+            taxon_id=row["taxon_id"],
             species_name=row["species_name"],
             gene=row["gene"],
             region=row["region"],
@@ -510,17 +640,23 @@ async def ingest_accession(
             organism=row["organism"],
             pubmed_id=row["pubmed_id"],
             doi=row["doi"],
+            **_sequence_provenance_fields(row["metadata"]),
         )
     except Exception as e:
         await db.rollback()
         if "duplicate key" in str(e).lower() or "unique" in str(e).lower():
             # Raced with another request; fetch and return
-            result = await db.execute(stmt, {"accession": accession})
+            result = await db.execute(stmt, {
+                "accession": record_accession,
+                "requested_version": requested_version or accession_version,
+            })
             row = result.mappings().one_or_none()
             if row:
                 return GeneticSequenceResponse(
                     id=row["id"],
                     accession=row["accession"],
+                    accession_version=row["version"],
+                    taxon_id=row["taxon_id"],
                     species_name=row["species_name"],
                     gene=row["gene"],
                     region=row["region"],
@@ -533,6 +669,7 @@ async def ingest_accession(
                     organism=row["organism"],
                     pubmed_id=row["pubmed_id"],
                     doi=row["doi"],
+                    **_sequence_provenance_fields(row["metadata"]),
                 )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

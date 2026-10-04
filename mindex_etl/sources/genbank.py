@@ -106,6 +106,7 @@ def _parse_genbank_xml(xml_content: str) -> List[Dict]:
             sequence = (seq_elem.text or "").replace(" ", "").replace("\n", "") if seq_elem is not None else ""
             record = {
                 "accession": gbseq.findtext("GBSeq_primary-accession", ""),
+                "accession_version": gbseq.findtext("GBSeq_accession-version", ""),
                 "locus": gbseq.findtext("GBSeq_locus", ""),
                 "length": int(gbseq.findtext("GBSeq_length", "0") or "0"),
                 "molecule_type": gbseq.findtext("GBSeq_moltype", ""),
@@ -116,6 +117,7 @@ def _parse_genbank_xml(xml_content: str) -> List[Dict]:
                 "update_date": gbseq.findtext("GBSeq_update-date", ""),
                 "sequence_length": int(gbseq.findtext("GBSeq_length", "0") or "0"),
                 "sequence": sequence,
+                "source_taxon_ids": [],
             }
             
             # Get source features
@@ -135,8 +137,14 @@ def _parse_genbank_xml(xml_content: str) -> List[Dict]:
                         elif qual_name == "host":
                             record["host"] = qual_value
                         elif qual_name == "db_xref":
-                            if "taxon:" in qual_value:
-                                record["taxon_id"] = qual_value.replace("taxon:", "")
+                            if qual_value.startswith("taxon:"):
+                                source_taxon_id = qual_value.removeprefix("taxon:").strip()
+                                if source_taxon_id.isdigit() and source_taxon_id not in record["source_taxon_ids"]:
+                                    record["source_taxon_ids"].append(source_taxon_id)
+
+            # Multiple source taxon identifiers can occur in malformed or composite
+            # records. Keep them for audit, but never choose the last one silently.
+            record["taxon_id"] = record["source_taxon_ids"][0] if len(record["source_taxon_ids"]) == 1 else None
             
             records.append(record)
     except ET.ParseError as e:
@@ -147,11 +155,16 @@ def _parse_genbank_xml(xml_content: str) -> List[Dict]:
 
 def map_genbank_to_genome(record: dict) -> dict:
     """Map GenBank record to MINDEX genome format."""
+    accession = record.get("accession")
+    accession_version = record.get("accession_version") or accession
     return {
-        "accession": record.get("accession"),
+        "accession": accession,
+        "accession_version": accession_version,
         "source": "genbank",
+        "source_url": f"https://www.ncbi.nlm.nih.gov/nuccore/{accession_version}" if accession_version else None,
         "organism": record.get("organism"),
         "taxon_id": record.get("taxon_id"),
+        "source_taxon_ids": list(record.get("source_taxon_ids") or ([record["taxon_id"]] if record.get("taxon_id") else [])),
         "strain": record.get("strain"),
         "sequence_length": record.get("sequence_length"),
         "molecule_type": record.get("molecule_type"),

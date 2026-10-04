@@ -9,10 +9,11 @@ Domain mode: "all" for all life, "fungi" for fungi-only (default).
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Generator, Optional
 
@@ -62,24 +63,53 @@ def sanitize_description(html: Optional[str]) -> Optional[str]:
 
 def map_inat_taxon(record: dict) -> dict:
     """Map iNaturalist record to MINDEX taxon format."""
-    raw_desc = record.get("wikipedia_summary") or record.get("description")
-    description = sanitize_description(raw_desc) if raw_desc else None
+    wiki_url = record.get("wikipedia_url")
+    wiki_summary = record.get("wikipedia_summary")
+    description = None
+    sanitized_wiki_summary = sanitize_description(wiki_summary) if wiki_summary and wiki_url else None
+    retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    description_candidate = None
+    if wiki_summary and wiki_url and sanitized_wiki_summary:
+        description_candidate = {
+            "source": "wikipedia_via_inaturalist_taxon",
+            "source_url": wiki_url,
+            "attribution": "Wikipedia contributors; linked article",
+            "license": None,
+            "license_state": "revision_specific_license_unverified",
+            "page_id": record.get("wikipedia_page_id"),
+            "retrieved_at": retrieved_at,
+            "content_sha256": hashlib.sha256(sanitized_wiki_summary.encode("utf-8")).hexdigest(),
+            "transformations": ["HTML markup removed", "whitespace normalized"],
+        }
+    elif record.get("description"):
+        description_candidate = {
+            "source": "inaturalist_taxon",
+            "source_url": f"https://www.inaturalist.org/taxa/{record.get('id')}" if record.get("id") else None,
+            "license": None,
+            "license_state": "not_assessed_for_taxon_description",
+            "retrieved_at": retrieved_at,
+            "content_sha256": hashlib.sha256(str(record["description"]).encode("utf-8")).hexdigest(),
+            "stored_as_species_description": False,
+        }
+    metadata = {
+        "inat_id": record.get("id"),
+        "parent_id": record.get("parent_id"),
+        "ancestry": record.get("ancestry"),
+        "observations_count": record.get("observations_count"),
+        "wikipedia_url": wiki_url,
+        "default_photo": record.get("default_photo"),
+        "iconic_taxon_name": record.get("iconic_taxon_name"),
+        "is_active": record.get("is_active"),
+    }
+    if description_candidate:
+        metadata["description_candidate"] = description_candidate
     return {
         "canonical_name": record.get("name"),
         "rank": record.get("rank") or "species",
         "common_name": record.get("preferred_common_name"),
         "description": description,
         "source": "inat",
-        "metadata": {
-            "inat_id": record.get("id"),
-            "parent_id": record.get("parent_id"),
-            "ancestry": record.get("ancestry"),
-            "observations_count": record.get("observations_count"),
-            "wikipedia_url": record.get("wikipedia_url"),
-            "default_photo": record.get("default_photo"),
-            "iconic_taxon_name": record.get("iconic_taxon_name"),
-            "is_active": record.get("is_active"),
-        },
+        "metadata": metadata,
     }
 
 

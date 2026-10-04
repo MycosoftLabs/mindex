@@ -411,8 +411,15 @@ async def get_compounds_for_taxon(
         FROM core.taxon
         WHERE id = :taxon_id
     """)
-    taxon_result = await session.execute(taxon_query, {"taxon_id": taxon_id})
-    taxon = taxon_result.fetchone()
+    try:
+        taxon_result = await session.execute(taxon_query, {"taxon_id": taxon_id})
+        taxon = taxon_result.fetchone()
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "taxon_query_unavailable", "message": "Exact taxon identity could not be read"},
+        ) from exc
     
     if not taxon:
         raise HTTPException(
@@ -428,15 +435,28 @@ async def get_compounds_for_taxon(
             c.formula,
             c.molecular_weight,
             c.chemspider_id,
+            c.pubchem_id,
+            c.source AS compound_source,
             tc.relationship_type,
             tc.evidence_level,
-            tc.tissue_location
+            tc.tissue_location,
+            tc.source AS association_source,
+            tc.source_url,
+            tc.doi
         FROM bio.taxon_compound tc
         JOIN bio.compound c ON c.id = tc.compound_id
         WHERE tc.taxon_id = :taxon_id
         ORDER BY c.name
     """)
-    compounds_result = await session.execute(compounds_query, {"taxon_id": taxon_id})
+    try:
+        compounds_result = await session.execute(compounds_query, {"taxon_id": taxon_id})
+        compound_rows = compounds_result.fetchall()
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "compound_schema_or_query_unavailable", "message": "Exact taxon compound evidence could not be read"},
+        ) from exc
     
     compounds = [
         CompoundForTaxonResponse(
@@ -445,11 +465,16 @@ async def get_compounds_for_taxon(
             formula=row.formula,
             molecular_weight=row.molecular_weight,
             chemspider_id=row.chemspider_id,
+            pubchem_id=row.pubchem_id,
             relationship_type=row.relationship_type,
             evidence_level=row.evidence_level,
             tissue_location=row.tissue_location,
+            compound_source=row.compound_source,
+            association_source=row.association_source,
+            source_url=row.source_url,
+            doi=row.doi,
         )
-        for row in compounds_result.fetchall()
+        for row in compound_rows
     ]
     
     return TaxonCompoundsResponse(

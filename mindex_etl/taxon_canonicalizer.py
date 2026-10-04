@@ -99,7 +99,7 @@ def upsert_taxon(
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT id FROM core.taxon
+            SELECT id, metadata FROM core.taxon
             WHERE canonical_name = %s AND rank = %s
             LIMIT 1
             """,
@@ -108,16 +108,29 @@ def upsert_taxon(
         row = cur.fetchone()
         if row:
             taxon_id = row["id"]
+            existing_metadata = row.get("metadata") if hasattr(row, "get") else None
+            if isinstance(existing_metadata, str):
+                try:
+                    existing_metadata = json.loads(existing_metadata)
+                except json.JSONDecodeError:
+                    existing_metadata = {}
+            if not isinstance(existing_metadata, dict):
+                existing_metadata = {}
+            merged_metadata = {**(existing_metadata or {}), **metadata}
             # Update existing record
             updates = {
                 "common_name": common_name,
                 "author": authority,  # DB column is 'author', not 'authority'
                 "description": description,
                 "source": source,
-                "metadata": json.dumps(metadata) if metadata else None,
+                "metadata": json.dumps(merged_metadata, sort_keys=True),
                 "kingdom": kingdom,
             }
-            set_parts = [f"{col} = %s" for col, value in updates.items() if value is not None]
+            set_parts = [
+                f"{col} = %s::jsonb" if col == "metadata" else f"{col} = %s"
+                for col, value in updates.items()
+                if value is not None
+            ]
             params = [value for value in updates.values() if value is not None]
             if set_parts:
                 set_clause = ", ".join(set_parts + ["updated_at = now()"])
@@ -153,7 +166,7 @@ def upsert_taxon(
             except Exception:
                 pass
 
-        placeholders = ", ".join(["%s"] * len(values))
+        placeholders = ", ".join("%s::jsonb" if col == "metadata" else "%s" for col in columns)
         cur.execute(
             f"""
             INSERT INTO core.taxon ({', '.join(columns)})

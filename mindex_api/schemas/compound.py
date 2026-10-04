@@ -162,9 +162,14 @@ class CompoundForTaxonResponse(BaseModel):
     formula: Optional[str] = None
     molecular_weight: Optional[float] = None
     chemspider_id: Optional[int] = None
+    pubchem_id: Optional[int] = None
     relationship_type: str
     evidence_level: str
     tissue_location: Optional[str] = None
+    compound_source: Optional[str] = None
+    association_source: Optional[str] = None
+    source_url: Optional[str] = None
+    doi: Optional[str] = None
 
 
 class TaxonCompoundsResponse(BaseModel):
@@ -173,6 +178,9 @@ class TaxonCompoundsResponse(BaseModel):
     canonical_name: str
     common_name: Optional[str] = None
     compounds: List[CompoundForTaxonResponse] = Field(default_factory=list)
+    data_state: str = "available"
+    schema_state: str = "ready"
+    scope: str = "exact_taxon"
 
 
 # =============================================================================
