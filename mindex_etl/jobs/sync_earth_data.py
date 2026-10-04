@@ -27,9 +27,15 @@ from typing import Any, Dict, List, Optional
 import psycopg
 from psycopg.types.json import Json
 
+from .. import log_redaction
 from ..config import settings
 
+log_redaction.install()
 logger = logging.getLogger(__name__)
+
+# The sync runs every 15 minutes; the USGS hour feed is often empty above M2.5, so
+# each run upserts the full day feed and catches late or revised events.
+EARTHQUAKE_WINDOW_HOURS = 24
 
 
 def _get_conn():
@@ -466,7 +472,7 @@ def run_realtime_sync():
 
     # Real-time feeds
     jobs = [
-        ("earthquakes", lambda: sync_earthquakes(hours=1)),
+        ("earthquakes", lambda: sync_earthquakes(hours=EARTHQUAKE_WINDOW_HOURS)),
         ("wildfires", sync_wildfires),
         ("solar_events", sync_solar_events),
         ("air_quality", lambda: sync_air_quality()),
