@@ -2,7 +2,9 @@
 
 ## Scope and source pins
 
-This additive compatibility report and exporter are on isolated branch `codex/research-identity-export-oct04`, based on MINDEX PR #34 head `a60f2f309c438f375313f8c843877dc9881aaf7b`. Producer and test implementation commit: `dd3f8e92ad1d6a1a4cdb78409565726d35dd8aa9`; a later commit only refreshes this report's handoff receipt pointers and hashes. PR #34 remains frozen. Static schema findings below pin its source files; the implementation section documents this branch's new producer and private-fixture validation. No shared/native database, provider, Website, first40/16, FG026, wallet, or live service was contacted.
+This additive compatibility report and exporter are on isolated branch `codex/research-identity-export-oct04`, based on MINDEX PR #34 head `a60f2f309c438f375313f8c843877dc9881aaf7b`. The producer and version-policy implementation is commit `e36a1294fc5084aa100802a841439d7835ce861a`; subsequent commits are documentation and qualification-receipt updates only. PR #34 remains frozen. Static schema findings below pin its source files; the implementation section documents this branch's new producer and private-fixture validation. No shared/native database, provider, Website, first40/16, FG026, wallet, or live service was contacted.
+
+The draft source PR is intentionally based on PR #34's head branch `codex/ancestry-scientific-evidence-oct04` at `a60f2f309c438f375313f8c843877dc9881aaf7b`, not `main`; this keeps the review diff limited to the additive producer and its compatibility evidence. After PR #34 merges, rebase or retarget this PR to `main` and review the resulting diff before merge.
 
 The pinned MAS consumer is `research_jobs/identity_snapshot.py` from the offline installed-package receipt for MAS PR #202 head `b886147511021672f1e1ac488ee5d883a75516be`; its SHA-256 is `a95d735d58051a13101e1537a42f88eb1d7381beb193e40346464adcac9b6979`. Its `research.identity-export.v1` validator requires each record to contain exactly `resource`, `accession`, `sequence_sha256`, `canonical_taxon_id`, `canonical_reference_id`, and `source_record_id`; all three identity fields must be canonical UUID strings. It also requires an authority URL, authority-response SHA-256, capture time, expiry, and one of `available|empty|partial|unavailable`. Duplicate `(resource, accession, sequence_sha256)` keys reject the entire export.
 
@@ -136,8 +138,9 @@ All paths are relative to the pinned MINDEX checkout unless stated otherwise.
 | `mindex_etl/research_identity_export.py` | additive fixed-query v2 producer; int4 row identity, UUID/null taxon link, exact-byte hash, provider-specific version namespaces (implementation commit `e36a1294fc5084aa100802a841439d7835ce861a`) | `7a29cd8e4b2fed7cc7f4a2b93ea8771e56c565c3e1962868547b5568e85b1c9a` |
 | `tests/test_research_identity_export.py` | offline contract, mapping, status and provider-version regressions | `975548bcea38b18ddf9a952803b1d240ed5221abff161a1bc842259fb078a2bd` |
 | `tests/test_research_identity_export_postgres.py` | opt-in private PostgreSQL integration regression, including v2 provider version evidence | `e028d54e7f9c608ecb998666c7ada49891a39107e416993183c3bcf137f1536e` |
-| `tests/fixtures/uniprot_p00549_capture.json` | minimal fields from retained UniProt source capture pinned above | `1e656d70ab7ae7f4a7c4b4c01c570b048b4d998ecfef87fcc0964bdec99e0d7b` |
-| `tests/test_research_identity_export_postgres.py` | opt-in private PostgreSQL integration regression | `39c9da348f69f65150357391adb51eaeeeb84b9e680063ef09d485a202a8e323` |
+| `tests/fixtures/uniprot_p00549_capture.json` | minimal fields from retained UniProt source capture pinned above; committed Git bytes | `2ea866f29e406dcc9ff1b0fc981fc54bedeec580d1436303945c3d1d0b597bff` |
+
+The source/test hashes above are SHA-256 of committed Git file bytes. At qualification time, the producer and both test files were byte-identical to their committed content. The fixture parsed by the tests had working-tree SHA-256 `1e656d70ab7ae7f4a7c4b4c01c570b048b4d998ecfef87fcc0964bdec99e0d7b`; its committed LF-normalized bytes hash to `2ea866f29e406dcc9ff1b0fc981fc54bedeec580d1436303945c3d1d0b597bff`. Only line endings differ; parsed fixture values are the same. The exact qualification receipt is `D:\Users\admin2\Desktop\MYCOSOFT\CODE\outputs\ancestry-continuation-oct04\research-identity-export-v2-pg\receipt-final.json`.
 
 ## Validation and custody
 
@@ -146,3 +149,10 @@ The final focused validation passed 33/33 tests (32 offline producer/contract/pr
 The integration case inserted and removed one synthetic taxon/sequence pair. It verified the `SERIAL` sequence-row ID as int4, the actual taxon UUID, exact accession/version/source/molecule/marker fields, hash of unnormalized UTF-8 sequence bytes, and the transaction read-only/repeatable-read receipt. The exporter returned no sequence content. Post-test counts found zero synthetic `ZZTEST%` sequences and zero synthetic taxa. The private PostgreSQL process stopped successfully; `pg_ctl` reports no server, port 55477 is closed, the PID file is absent, and the cluster data is retained at `outputs/ancestry-continuation-oct04/research-identity-export-v2-pg/data`.
 
 JUnit, test log, PostgreSQL logs and exact final run receipt are under `outputs/ancestry-continuation-oct04/research-identity-export-v2-pg/`; the handoff receipt pins their final hashes and the exact test head. These results qualify only the isolated schema fixture and static/offline producer behavior. No shared/native database, provider, deployment, Website, first40/16, FG026, wallet, or `.189` action occurred.
+
+## Remaining operator gates
+
+- The MAS consumer is still v1 and requires its own compatible v2 adaptation and review before it can consume this producer.
+- UniProt exact-version eligibility depends on the source capture being retained in `metadata.uniprot_source_record`; owner review must confirm that capture path and its provenance contract. Ensembl, BOLD, and UNITE remain ineligible for exact-version joins until their source-native version namespaces are established.
+- Any shared-database or production qualification requires a separately approved read-only authority, deployment/operations review, and explicit live qualification. This draft provides no live database/provider evidence and proposes no migration or backfill.
+- Because this PR depends on PR #34, confirm its target branch and re-review the final diff after that PR merges; do not merge either change solely from this fixture qualification.
