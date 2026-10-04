@@ -38,6 +38,10 @@ async def get_phylogeny(
     row = r.mappings().one_or_none()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Taxon not found")
+
+    def same_identity_name(left: Any, right: Any) -> bool:
+        return " ".join(str(left or "").split()).casefold() == " ".join(str(right or "").split()).casefold()
+
     names = [str(name) for name in (row["lineage"] or [])]
     raw_ids = list(row["lineage_ids"] or [])
     issues: list[dict[str, Any]] = []
@@ -64,6 +68,16 @@ async def get_phylogeny(
             except (ValueError, TypeError, AttributeError):
                 issues.append({"index": index, "reason": "invalid_lineage_uuid"})
 
+    # lineage is inclusive of the selected row in some stored records. Its
+    # exact terminal name/UUID pair is already verified by the selected-row
+    # lookup above; do not misclassify that self-link as an ancestor conflict.
+    inclusive_selected_tip = bool(
+        aligned
+        and names
+        and same_identity_name(names[-1], row["canonical_name"])
+        and ids_by_index.get(len(names) - 1) == taxon_id
+    )
+
     candidates = sorted(set(ids_by_index.values()), key=str)
     identity_by_id: dict[UUID, Any] = {}
     if candidates:
@@ -77,14 +91,12 @@ async def get_phylogeny(
         )
         identity_by_id = {UUID(str(item["id"])): item for item in identities.mappings().all()}
 
-    def same_identity_name(left: Any, right: Any) -> bool:
-        return " ".join(str(left or "").split()).casefold() == " ".join(str(right or "").split()).casefold()
-
     def same_kingdom(left: Any, right: Any) -> bool:
         return not left or not right or str(left).strip().casefold() == str(right).strip().casefold()
 
     ancestors: list[dict[str, Any]] = []
-    for index, name in enumerate(names):
+    ancestor_count = len(names) - 1 if inclusive_selected_tip else len(names)
+    for index, name in enumerate(names[:ancestor_count]):
         candidate_id = ids_by_index.get(index) if aligned else None
         candidate = identity_by_id.get(candidate_id) if candidate_id else None
         valid = bool(
@@ -120,7 +132,11 @@ async def get_phylogeny(
     # The exact selected row is authoritative for the selected tip. If an
     # inclusive lineage ends in the selected taxon, replace that position with
     # this separately verified row instead of duplicating it.
-    if ancestors and same_identity_name(ancestors[-1]["name"], row["canonical_name"]):
+    if (
+        not inclusive_selected_tip
+        and ancestors
+        and same_identity_name(ancestors[-1]["name"], row["canonical_name"])
+    ):
         ancestors.pop()
     selected = {
         "id": str(taxon_id),

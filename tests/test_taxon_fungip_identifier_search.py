@@ -130,3 +130,69 @@ async def test_linked_identifier_is_in_where_clause_before_count_and_page(monkey
     assert captured["params"]["limit"] == 500
     assert captured["params"]["offset"] == 500
     assert response.fungip_index.status == "unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("search_status", "expected_status"),
+    [
+        (FungiPIndexAvailability(status="error", reason="query_failed"), "error"),
+        (FungiPIndexAvailability(status="unavailable", reason="source_table_missing"), "unavailable"),
+    ],
+)
+async def test_identifier_lookup_status_survives_empty_page_enrichment(
+    monkeypatch, search_status, expected_status,
+):
+    page_called = False
+    ordinary_taxon_id = UUID("f70e8f95-bf95-4da6-9df5-93d4475b4b78")
+    ordinary_name_rows = (
+        [{
+            "id": ordinary_taxon_id,
+            "canonical_name": "Agaricus ordinaryus",
+            "rank": "species",
+            "created_at": "2026-10-03T00:00:00Z",
+            "updated_at": None,
+        }]
+        if search_status.status == "error" else []
+    )
+
+    async def failed_lookup(_db, _query_pattern):
+        return [], search_status
+
+    async def empty_core_page(_db, **_kwargs):
+        nonlocal page_called
+        page_called = True
+        return ordinary_name_rows, len(ordinary_name_rows)
+
+    async def successful_empty_enrichment(_db, ids):
+        assert ids == ([ordinary_taxon_id] if ordinary_name_rows else [])
+        return {}, FungiPIndexAvailability(status="available")
+
+    monkeypatch.setattr(taxon_router, "search_validated_fungip_taxon_ids", failed_lookup)
+    monkeypatch.setattr(taxon_router, "_list_taxa_core_page", empty_core_page)
+    monkeypatch.setattr(taxon_router, "load_public_fungip_members", successful_empty_enrichment)
+
+    response = await taxon_router.list_taxa(
+        pagination=PaginationParams(limit=120, offset=0),
+        db=object(),
+        ids=None,
+        q="FG032",
+        rank=None,
+        source=None,
+        prefix=None,
+        kingdom=None,
+        lineage_contains=None,
+        order_by="canonical_name",
+        order="asc",
+    )
+
+    assert page_called
+    if search_status.status == "error":
+        assert len(response.data) == 1
+        assert response.data[0].canonical_name == "Agaricus ordinaryus"
+        assert response.pagination.total == 1
+    else:
+        assert response.data == []
+        assert response.pagination.total == 0
+    assert response.fungip_index.status == expected_status
+    assert response.fungip_index.reason == search_status.reason

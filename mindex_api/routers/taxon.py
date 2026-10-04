@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_db_session, pagination_params, require_api_key, PaginationParams
 from ..contracts.v1.ancestry_index import (
+    FungiPIndexAvailability,
     FungiPIndexCounts,
     FungiPIndexMember,
     FungiPIndexPagination,
@@ -719,12 +720,13 @@ async def list_taxa(
         "limit": pagination.limit,
         "offset": pagination.offset,
     }
+    fungip_search_status: Optional[FungiPIndexAvailability] = None
 
     if q and q.strip():
         q_pattern = f"%{_like_escape(q.strip())}%"
         where_clauses.append("(canonical_name ILIKE :q_pattern OR common_name ILIKE :q_pattern")
         params["q_pattern"] = q_pattern
-        fungip_taxon_ids, _fungip_search_status = await search_validated_fungip_taxon_ids(db, q_pattern)
+        fungip_taxon_ids, fungip_search_status = await search_validated_fungip_taxon_ids(db, q_pattern)
         if fungip_taxon_ids:
             where_clauses[-1] += " OR id = ANY(CAST(:fungip_taxon_ids AS uuid[]))"
             params["fungip_taxon_ids"] = fungip_taxon_ids
@@ -884,6 +886,14 @@ async def list_taxa(
         except (KeyError, TypeError, ValueError):
             continue
     public_members, fungip_index = await load_public_fungip_members(db, taxon_uuids)
+    # Identifier lookup and page enrichment are separate optional reads. A
+    # successful empty-page enrichment must not erase a failed/unavailable
+    # identifier search that may have omitted canonical rows before paging.
+    if fungip_search_status is not None:
+        if fungip_search_status.status == "error":
+            fungip_index = fungip_search_status
+        elif fungip_search_status.status == "unavailable" and fungip_index.status == "available":
+            fungip_index = fungip_search_status
     for row in rows:
         row["fungip"] = public_members.get(str(row.get("id")))
 

@@ -467,12 +467,20 @@ async def get_sequence_by_accession(
     accession: str,
     db: AsyncSession = Depends(get_db_session),
 ) -> GeneticSequenceResponse:
-    """Get a genetic sequence by its accession number."""
+    """Read a stored sequence by accession or exact accession.version."""
     if not await _genetic_sequence_table_exists(db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Genetic sequences are not available in this environment",
         )
+    requested_accession = accession.strip()
+    base_accession, separator, version_suffix = requested_accession.rpartition(".")
+    if separator and base_accession and version_suffix:
+        accession_lookup = base_accession
+        requested_version: Optional[str] = requested_accession
+    else:
+        accession_lookup = requested_accession
+        requested_version = None
     stmt = text("""
         SELECT
             id,
@@ -494,10 +502,14 @@ async def get_sequence_by_accession(
             metadata
         FROM bio.genetic_sequence
         WHERE accession = :accession
+          AND (:requested_version IS NULL OR version = :requested_version)
     """)
     
     try:
-        result = await db.execute(stmt, {"accession": accession})
+        result = await db.execute(stmt, {
+            "accession": accession_lookup,
+            "requested_version": requested_version,
+        })
         row = result.mappings().one_or_none()
     except Exception as exc:
         await db.rollback()

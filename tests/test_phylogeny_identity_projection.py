@@ -133,3 +133,66 @@ async def test_verified_ancestor_uses_its_own_name_and_rank_and_misalignment_dro
     assert partial["lineage_provenance"]["alignment"] == "misaligned"
     assert partial["lineage_provenance"]["raw_lineage_ids"] == [str(ANCESTOR_ID)]
     assert partial["status"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_exact_inclusive_selected_tip_is_verified_without_a_false_partial_issue():
+    selected = {
+        "id": FUNGI_ID,
+        "kingdom": "Fungi",
+        "canonical_name": "Schizophyllum commune",
+        "rank": "species",
+        "lineage": ["Fungi", "Schizophyllum commune"],
+        "lineage_ids": [ANCESTOR_ID, FUNGI_ID],
+    }
+    root = {
+        "id": ANCESTOR_ID,
+        "kingdom": "Fungi",
+        "canonical_name": "Fungi",
+        "rank": "kingdom",
+    }
+    db = Session(
+        MappingsResult([selected]),
+        MappingsResult([selected, root]),
+    )
+
+    result = await get_phylogeny(taxon_id=FUNGI_ID, db=db)
+    nodes = flatten(result["tree"])
+
+    assert [node["taxon_id"] for node in nodes] == [str(ANCESTOR_ID), str(FUNGI_ID)]
+    assert [node["rank"] for node in nodes] == ["kingdom", "species"]
+    assert result["status"] == "available"
+    assert result["lineage_provenance"]["status"] == "available"
+    assert result["lineage_provenance"]["raw_lineage"] == ["Fungi", "Schizophyllum commune"]
+    assert result["lineage_provenance"]["raw_lineage_ids"] == [str(ANCESTOR_ID), str(FUNGI_ID)]
+    assert result["lineage_provenance"]["issues"] == []
+
+
+@pytest.mark.asyncio
+async def test_inclusive_selected_name_with_wrong_uuid_remains_partial():
+    wrong_id = UUID("fe11468f-e545-46be-b97d-3b1f5e4c86c6")
+    selected = {
+        "id": FUNGI_ID,
+        "kingdom": "Fungi",
+        "canonical_name": "Schizophyllum commune",
+        "rank": "species",
+        "lineage": ["Fungi", "Schizophyllum commune"],
+        "lineage_ids": [ANCESTOR_ID, wrong_id],
+    }
+    root = {
+        "id": ANCESTOR_ID,
+        "kingdom": "Fungi",
+        "canonical_name": "Fungi",
+        "rank": "kingdom",
+    }
+    result = await get_phylogeny(
+        taxon_id=FUNGI_ID,
+        db=Session(MappingsResult([selected]), MappingsResult([root])),
+    )
+
+    assert flatten(result["tree"])[-1]["taxon_id"] == str(FUNGI_ID)
+    assert result["status"] == "partial"
+    assert any(
+        issue == {"index": 1, "reason": "lineage_uuid_identity_mismatch"}
+        for issue in result["lineage_provenance"]["issues"]
+    )
