@@ -153,7 +153,7 @@ def sync_wildfires():
                     ST_MakePoint(%(lng)s, %(lat)s)::geography,
                     %(area_acres)s, %(containment_pct)s, %(status)s, %(detected_at)s,
                     %(brightness)s, %(frp)s, %(confidence)s, %(properties)s::jsonb)
-                ON CONFLICT (source_id) DO UPDATE SET
+                ON CONFLICT (source, source_id) DO UPDATE SET
                     status = EXCLUDED.status,
                     area_acres = EXCLUDED.area_acres,
                     containment_pct = EXCLUDED.containment_pct,
