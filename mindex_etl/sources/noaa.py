@@ -15,7 +15,9 @@ Also covers NASA data feeds:
 """
 from __future__ import annotations
 
+import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Generator, List, Optional
 
 import httpx
@@ -23,25 +25,70 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 from ..config import settings
 
+logger = logging.getLogger(__name__)
+
 # ============================================================================
 # SPACE WEATHER
 # ============================================================================
 
 SWPC_API = "https://services.swpc.noaa.gov"
-DONKI_API = "https://api.nasa.gov/DONKI"
+# api.nasa.gov/DONKI now 301s to a CCMC announcement page (HTML). CCMC serves the same
+# params and JSON schema here, no api_key required.
+DONKI_API = "https://ccmc.gsfc.nasa.gov/DONKI-API/get"
+
+DONKI_CACHE_TTL_S = 900
+DONKI_MAX_INLINE_WAIT_S = 30
+# Back off for an hour when a 429 carries no Retry-After.
+DONKI_DEFAULT_COOLDOWN_S = 3600
+# One entry per DONKI endpoint (FLR, CME, GST), so this stays bounded.
+_donki_cache: Dict[str, tuple] = {}
+_donki_cooldown_until = 0.0
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-def fetch_solar_flares(client: httpx.Client, days: int = 30) -> list:
-    """Fetch recent solar flare events from NASA DONKI."""
-    nasa_key = settings.nasa_api_key or "DEMO_KEY"
-    resp = client.get(
-        f"{DONKI_API}/FLR",
-        params={"api_key": nasa_key},
-        timeout=30,
-    )
+class DonkiRateLimited(RuntimeError):
+    pass
+
+
+def _donki_get(client: httpx.Client, endpoint: str, days: int) -> list:
+    """GET a DONKI endpoint with a bounded window, 429 backoff and a short cache."""
+    global _donki_cooldown_until
+    cached = _donki_cache.get(endpoint)
+    if cached and time.monotonic() - cached[0] < DONKI_CACHE_TTL_S:
+        return cached[1]
+    if time.monotonic() < _donki_cooldown_until:
+        raise DonkiRateLimited(f"DONKI {endpoint} in rate-limit cooldown")
+
+    end = datetime.now(timezone.utc).date()
+    params = {
+        "startDate": (end - timedelta(days=days)).isoformat(),
+        "endDate": end.isoformat(),
+    }
+    for attempt in range(2):
+        resp = client.get(f"{DONKI_API}/{endpoint}", params=params, timeout=30)
+        if resp.status_code != 429:
+            break
+        try:
+            wait_s = float(resp.headers.get("Retry-After", DONKI_DEFAULT_COOLDOWN_S))
+        except ValueError:
+            wait_s = DONKI_DEFAULT_COOLDOWN_S
+        if attempt == 0 and wait_s <= DONKI_MAX_INLINE_WAIT_S:
+            time.sleep(wait_s)
+            continue
+        _donki_cooldown_until = time.monotonic() + wait_s
+        raise DonkiRateLimited(
+            f"DONKI {endpoint} 429 (remaining={resp.headers.get('X-RateLimit-Remaining')}); cooling down {int(wait_s)}s"
+        )
     resp.raise_for_status()
-    return resp.json()
+    if "json" not in resp.headers.get("content-type", ""):
+        raise ValueError(f"DONKI {endpoint} returned {resp.headers.get('content-type')} from {resp.url}")
+    data = resp.json() if resp.content else []
+    _donki_cache[endpoint] = (time.monotonic(), data)
+    return data
+
+
+def fetch_solar_flares(client: httpx.Client, days: int = 7) -> list:
+    """Fetch recent solar flare events from NASA DONKI."""
+    return _donki_get(client, "FLR", days)
 
 
 def map_solar_flare(record: dict) -> dict:
@@ -63,17 +110,9 @@ def map_solar_flare(record: dict) -> dict:
     }
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-def fetch_cme_events(client: httpx.Client) -> list:
+def fetch_cme_events(client: httpx.Client, days: int = 7) -> list:
     """Fetch Coronal Mass Ejection events from NASA DONKI."""
-    nasa_key = settings.nasa_api_key or "DEMO_KEY"
-    resp = client.get(
-        f"{DONKI_API}/CME",
-        params={"api_key": nasa_key},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    return _donki_get(client, "CME", days)
 
 
 def map_cme(record: dict) -> dict:
@@ -96,17 +135,9 @@ def map_cme(record: dict) -> dict:
     }
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-def fetch_geomagnetic_storms(client: httpx.Client) -> list:
+def fetch_geomagnetic_storms(client: httpx.Client, days: int = 30) -> list:
     """Fetch geomagnetic storm events from NASA DONKI."""
-    nasa_key = settings.nasa_api_key or "DEMO_KEY"
-    resp = client.get(
-        f"{DONKI_API}/GST",
-        params={"api_key": nasa_key},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    return _donki_get(client, "GST", days)
 
 
 def map_geomagnetic_storm(record: dict) -> dict:
@@ -131,27 +162,21 @@ def map_geomagnetic_storm(record: dict) -> dict:
 
 def iter_solar_events() -> Generator[Dict, None, None]:
     """Iterate all solar/space weather events."""
+    feeds = (
+        ("FLR", fetch_solar_flares, map_solar_flare),
+        ("CME", fetch_cme_events, map_cme),
+        ("GST", fetch_geomagnetic_storms, map_geomagnetic_storm),
+    )
     with httpx.Client(follow_redirects=True) as client:
-        # Solar flares
-        try:
-            for flare in fetch_solar_flares(client):
-                yield map_solar_flare(flare)
-        except Exception:
-            pass
-
-        # CMEs
-        try:
-            for cme in fetch_cme_events(client):
-                yield map_cme(cme)
-        except Exception:
-            pass
-
-        # Geomagnetic storms
-        try:
-            for storm in fetch_geomagnetic_storms(client):
-                yield map_geomagnetic_storm(storm)
-        except Exception:
-            pass
+        for name, fetch, mapper in feeds:
+            try:
+                records = fetch(client)
+            except Exception as e:
+                logger.warning("DONKI %s fetch failed: %s", name, e)
+                continue
+            logger.info("DONKI %s: %d events", name, len(records))
+            for record in records:
+                yield mapper(record)
 
 
 # ============================================================================
