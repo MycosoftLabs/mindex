@@ -95,14 +95,27 @@ async def mirror_to_fusarium(
             :event_time,
             :event_time,
             CASE
-                WHEN :longitude IS NOT NULL AND :latitude IS NOT NULL
-                THEN ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography
+                WHEN CAST(:longitude AS double precision) IS NOT NULL AND CAST(:latitude AS double precision) IS NOT NULL
+                THEN ST_SetSRID(ST_MakePoint(CAST(:longitude AS double precision), CAST(:latitude AS double precision)), 4326)::geography
                 ELSE NULL
             END
         )
         RETURNING track_id
         """
     )
+    # Savepoint: a mirror failure must not abort the caller's transaction (it rolled back every
+    # telemetry sample in the same request while the endpoint still returned 200).
+    savepoint = await db.begin_nested()
+    try:
+        await _insert_fusarium_rows(db, track_stmt, source_id, payload, label, confidence, lat, lon, event_time)
+    except Exception:
+        await savepoint.rollback()
+        raise
+    await savepoint.commit()
+
+
+async def _insert_fusarium_rows(db: AsyncSession, track_stmt, source_id: str, payload: Dict[str, Any], label: str,
+                                confidence, lat, lon, event_time: datetime) -> None:
     track_res = await db.execute(
         track_stmt,
         {
@@ -121,10 +134,10 @@ async def mirror_to_fusarium(
             event_id, entity_id, domains, confidence, payload, created_at
         ) VALUES (
             gen_random_uuid(),
-            :entity_id::uuid,
-            :domains::text[],
+            CAST(:entity_id AS uuid),
+            CAST(:domains AS text[]),
             :confidence,
-            :payload::jsonb,
+            CAST(:payload AS jsonb),
             :created_at
         )
         """
