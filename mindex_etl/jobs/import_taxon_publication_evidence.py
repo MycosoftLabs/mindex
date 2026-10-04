@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from typing import Any, Callable
 
@@ -50,27 +51,54 @@ def _exact_taxon_crosswalk(cur, source_taxon_id: str) -> tuple[str | None, dict]
     return taxon_id, {"state": "unique", "canonical_name": identity["canonical_name"], "rank": identity["rank"]}
 
 
+def _genbank_source_identity(xml_content: str | bytes) -> dict[str, str]:
+    """Validate the record identity independently of whether citations exist."""
+    raw = xml_content if isinstance(xml_content, bytes) else xml_content.encode("utf-8")
+    records = ET.fromstring(raw).findall(".//GBSeq")
+    if len(records) != 1:
+        raise ValueError("exactly one GenBank record is required")
+    accession_version = " ".join((records[0].findtext("GBSeq_accession-version") or "").split())
+    if not re.fullmatch(r"[A-Za-z0-9_]+\.\d+", accession_version):
+        raise ValueError("a versioned GenBank accession is required")
+    return {
+        "accession_version": accession_version,
+        "source_content_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
 def stage_genbank_publication_evidence(
     conn,
     xml_content: str | bytes,
     *,
     expected_accession_version: str | None = None,
+    expected_source_sha256: str | None = None,
 ) -> dict:
     """Write publication and provenance candidates inside the caller's transaction.
 
     The operation never creates rows in ``bio.publication_taxon``. Reviewers may
     promote accepted evidence in a separately reviewed transaction. This makes
     text-search results and source-attested candidates distinct from stored links.
+    ``staged`` and ``inserted`` count only new evidence rows. Existing rows keep
+    their persisted review state, which is returned in per-evidence receipts.
     """
-    candidates = parse_genbank_publication_evidence(xml_content)
-    if not candidates:
-        return {"state": "no_citable_reference", "staged": 0}
-    accession_version = candidates[0]["accession_version"]
+    identity = _genbank_source_identity(xml_content)
+    accession_version = identity["accession_version"]
+    if expected_source_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_source_sha256):
+            raise ValueError("expected_source_sha256 must be a 64-character lowercase SHA-256 pin")
+        if identity["source_content_sha256"] != expected_source_sha256:
+            return {
+                "state": "source_hash_mismatch", "expected": expected_source_sha256,
+                "actual": identity["source_content_sha256"], "staged": 0,
+            }
     if expected_accession_version and accession_version != expected_accession_version:
         return {
             "state": "accession_version_mismatch", "requested": expected_accession_version,
             "returned": accession_version, "staged": 0,
         }
+    candidates = parse_genbank_publication_evidence(xml_content)
+    if not candidates:
+        return {"state": "no_citable_reference", **identity, "staged": 0}
     source_taxon_ids = sorted({taxon_id for c in candidates for taxon_id in c["source_taxon_ids"]})
     if len(source_taxon_ids) != 1:
         state = "source_taxon_id_missing" if not source_taxon_ids else "source_taxon_id_ambiguous_or_invalid"
@@ -93,7 +121,9 @@ def stage_genbank_publication_evidence(
                 "source_name": source_name, "canonical_name": canonical_name, "staged": 0,
             }
 
-        staged = 0
+        inserted = 0
+        existing = 0
+        evidence_receipts = []
         for candidate in candidates:
             provider = "ncbi_genbank_reference"
             external_id = (
@@ -151,6 +181,7 @@ def stage_genbank_publication_evidence(
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 ON CONFLICT (provider, provider_source_record_id, source_content_sha256, taxon_id)
                 DO NOTHING
+                RETURNING evidence_id, evidence_state
                 """,
                 (
                     resolved_publication_id, taxon_id, candidate["provider"], source_taxon_ids[0],
@@ -159,13 +190,46 @@ def stage_genbank_publication_evidence(
                     candidate["normalization_sha256"], json.dumps(evidence_metadata, sort_keys=True),
                 ),
             )
-            staged += 1
+            evidence_row = cur.fetchone()
+            write_state = "inserted"
+            if evidence_row is None:
+                cur.execute(
+                    """
+                    SELECT evidence_id, evidence_state FROM bio.publication_taxon_evidence
+                    WHERE provider = %s AND provider_source_record_id = %s
+                      AND source_content_sha256 = %s AND taxon_id = %s
+                    """,
+                    (candidate["provider"], candidate["provider_source_record_id"],
+                     candidate["source_content_sha256"], taxon_id),
+                )
+                evidence_row = cur.fetchone()
+                write_state = "existing"
+            evidence_id = _row_value(evidence_row, "evidence_id", 0)
+            review_state = _row_value(evidence_row, "evidence_state", 1)
+            if evidence_id is None or review_state not in {
+                "candidate_source_attested", "accepted_source_attested", "rejected",
+            }:
+                raise RuntimeError("evidence row and review state were not available after idempotent insert")
+            if write_state == "inserted":
+                inserted += 1
+            else:
+                existing += 1
+            evidence_receipts.append({
+                "evidence_id": str(evidence_id),
+                "provider_source_record_id": candidate["provider_source_record_id"],
+                "write_state": write_state,
+                "review_state": review_state,
+            })
+    review_states = {receipt["review_state"] for receipt in evidence_receipts}
     return {
-        "state": "candidate_source_attested",
+        "state": next(iter(review_states)) if len(review_states) == 1 else "mixed_evidence_review_states",
         "accession_version": accession_version,
         "source_taxon_id": source_taxon_ids[0],
         "taxon_id": taxon_id,
-        "staged": staged,
+        "staged": inserted,
+        "inserted": inserted,
+        "existing": existing,
+        "evidence_receipts": evidence_receipts,
     }
 
 
@@ -180,15 +244,7 @@ def fetch_and_stage_genbank_publication_evidence(
     if not re.fullmatch(r"[0-9a-f]{64}", expected_source_sha256 or ""):
         raise ValueError("expected_source_sha256 must be a 64-character lowercase SHA-256 pin")
     xml_content = fetcher(accession_version)
-    candidates = parse_genbank_publication_evidence(xml_content)
-    if not candidates:
-        return {"state": "no_citable_reference", "staged": 0}
-    actual_hash = candidates[0]["source_content_sha256"]
-    if actual_hash != expected_source_sha256:
-        return {
-            "state": "source_hash_mismatch", "expected": expected_source_sha256,
-            "actual": actual_hash, "staged": 0,
-        }
     return stage_genbank_publication_evidence(
         conn, xml_content, expected_accession_version=accession_version,
+        expected_source_sha256=expected_source_sha256,
     )

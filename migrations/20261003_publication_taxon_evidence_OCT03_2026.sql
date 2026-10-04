@@ -38,18 +38,38 @@ CREATE INDEX IF NOT EXISTS idx_publication_taxon_evidence_publication
 
 GRANT SELECT, INSERT, UPDATE ON bio.publication_taxon_evidence TO mindex;
 
+-- INSERT must have an attributed reviewer for a terminal disposition.
+-- A reviewed import may start terminal only with an attributed reviewer.
+CREATE OR REPLACE FUNCTION bio.guard_publication_taxon_evidence_insert_review()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.evidence_state IN ('accepted_source_attested', 'rejected')
+       AND (NEW.reviewed_by IS NULL OR NEW.reviewed_by !~ '[^[:space:]]') THEN
+        RAISE EXCEPTION 'a reviewer identity is required for evidence disposition';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_publication_taxon_evidence_insert_review ON bio.publication_taxon_evidence;
+CREATE TRIGGER trg_publication_taxon_evidence_insert_review
+BEFORE INSERT ON bio.publication_taxon_evidence
+FOR EACH ROW EXECUTE FUNCTION bio.guard_publication_taxon_evidence_insert_review();
+
 CREATE OR REPLACE FUNCTION bio.guard_publication_taxon_evidence_immutability()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
     IF ROW(
-        NEW.publication_id, NEW.taxon_id, NEW.provider, NEW.provider_taxon_id,
+        NEW.evidence_id, NEW.publication_id, NEW.taxon_id, NEW.provider, NEW.provider_taxon_id,
         NEW.provider_source_record_id, NEW.provider_source_url, NEW.association_method,
         NEW.source_content_sha256, NEW.normalization_sha256, NEW.license,
         NEW.attribution, NEW.recorded_at, NEW.metadata
     ) IS DISTINCT FROM ROW(
-        OLD.publication_id, OLD.taxon_id, OLD.provider, OLD.provider_taxon_id,
+        OLD.evidence_id, OLD.publication_id, OLD.taxon_id, OLD.provider, OLD.provider_taxon_id,
         OLD.provider_source_record_id, OLD.provider_source_url, OLD.association_method,
         OLD.source_content_sha256, OLD.normalization_sha256, OLD.license,
         OLD.attribution, OLD.recorded_at, OLD.metadata
@@ -60,7 +80,8 @@ BEGIN
        OR NEW.evidence_state NOT IN ('candidate_source_attested', 'accepted_source_attested', 'rejected') THEN
         RAISE EXCEPTION 'publication taxon evidence review state is terminal';
     END IF;
-    IF NEW.evidence_state <> OLD.evidence_state AND NULLIF(BTRIM(NEW.reviewed_by), '') IS NULL THEN
+    IF NEW.evidence_state <> OLD.evidence_state
+       AND (NEW.reviewed_by IS NULL OR NEW.reviewed_by !~ '[^[:space:]]') THEN
         RAISE EXCEPTION 'a reviewer identity is required for evidence disposition';
     END IF;
     IF NEW.evidence_state = OLD.evidence_state AND NEW.reviewed_by IS DISTINCT FROM OLD.reviewed_by THEN
