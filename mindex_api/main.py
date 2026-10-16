@@ -71,6 +71,7 @@ from .routers import (
     meshtastic_internal_router,
     biobank_events_router,
 )
+from .routers.integrations import mycodao_fungi_router
 from .routers.worldview import (
     worldview_search_router,
     worldview_earth_router,
@@ -234,6 +235,8 @@ def create_app() -> FastAPI:
     # These keep the old /api/mindex/... paths working during the migration window
     # so MAS, CREP, and device consumers don't break.
     app.include_router(taxon_router, prefix=prefix, dependencies=internal_deps)
+    # MycoDAO fungi-only licensed export (purpose-scoped key; not treasury authority)
+    app.include_router(mycodao_fungi_router, prefix=prefix)
     app.include_router(telemetry_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(devices_router, prefix=prefix, dependencies=internal_deps)
     app.include_router(meshtastic_internal_router, prefix=prefix, dependencies=internal_deps)
