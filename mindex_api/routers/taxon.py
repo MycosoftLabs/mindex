@@ -1599,7 +1599,11 @@ async def get_taxon(
     data = dict(row)
     data["traits"] = data.get("traits") or []
     public_members, fungip_index = await load_public_fungip_members(db, [taxon_id])
-    data["fungip"] = public_members.get(str(data["id"]))
+    member = public_members.get(str(data["id"]))
+    # Keep list-to-detail navigation consistent, including source evidence and credits.
+    _project_family(data, member)
+    data["image_selection"] = _project_image_selection(data, member)
+    data["fungip"] = member
     data["fungip_index"] = fungip_index
     # Read-only detail still includes optional FungiP data, but schedules no enrichment.
     if not read_only and data.get("rank") == "species":
