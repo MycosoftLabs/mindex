@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 > Superseded Oct 3, 2026: no local/on-prem GPU (Legions 241/249, node 190) exists anymore; all GPU workloads run on AWS. See `CODE/docs/NO_LOCAL_GPU_ALL_GPU_ON_AWS_OCT03_2026.md`.
 
 # SINE Real-AI Backend — Complete (June 11, 2026)

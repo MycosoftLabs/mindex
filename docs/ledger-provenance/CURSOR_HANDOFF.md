@@ -1,3 +1,5 @@
+> AWS topology correction 2026-11-27: local production servers, LAN addresses and VM/Proxmox/NAS deployment instructions are retired. Use [AWS_INFRA_REFERENCE.md](../../AWS_INFRA_REFERENCE.md). Preserve historical evidence and optional device/external connectors.
+
 # Cursor handoff: private provenance feature
 
 Date: 2026-10-03 (America/Los_Angeles)

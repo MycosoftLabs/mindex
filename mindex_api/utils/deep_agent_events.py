@@ -1,3 +1,4 @@
+# AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
 """
 Best-effort Deep Agent domain event dispatch to MAS.
 """
@@ -20,7 +21,7 @@ def _enabled() -> bool:
 
 
 def _mas_base_url() -> str:
-    return (os.getenv("MAS_API_URL") or "http://192.168.0.188:8001").rstrip("/")
+    return (os.getenv("MAS_API_URL") or "http://mas-internal.mycosoft.com:8001").rstrip("/")
 
 
 async def submit_domain_event(

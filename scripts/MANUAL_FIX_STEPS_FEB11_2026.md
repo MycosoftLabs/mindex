@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # Manual MINDEX Fix Steps - February 11, 2026
 
 ## Current Status
@@ -167,7 +169,7 @@ cd /home/mycosoft/mindex
 docker compose run --rm mindex-etl python -m mindex_etl.jobs.sync_gbif_taxa --limit 1000
 
 # Or use the API sync endpoint from local machine:
-curl -X POST http://192.168.0.189:8000/api/sync/gbif
+curl -X POST http://mindex-internal.mycosoft.com:8000/api/sync/gbif
 ```
 
 ### Issue 4: Wrong Docker Network
@@ -188,13 +190,13 @@ docker compose up -d
 
 ```powershell
 # Health check
-Invoke-RestMethod http://192.168.0.189:8000/api/mindex/health | ConvertTo-Json
+Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/api/mindex/health | ConvertTo-Json
 
 # Stats (should work after fix)
-Invoke-RestMethod http://192.168.0.189:8000/api/mindex/stats | ConvertTo-Json
+Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/api/mindex/stats | ConvertTo-Json
 
 # Observations (should work after fix)
-Invoke-RestMethod "http://192.168.0.189:8000/api/mindex/observations?limit=3" | ConvertTo-Json -Depth 3
+Invoke-RestMethod "http://mindex-internal.mycosoft.com:8000/api/mindex/observations?limit=3" | ConvertTo-Json -Depth 3
 
 # Website integration
 Invoke-RestMethod http://localhost:3010/api/natureos/mindex/stats | ConvertTo-Json

@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # SINE Acoustic Backend — Full Stack (May 27, 2026)
 
 **Status:** Implemented (MINDEX API + website BFF + player)  
@@ -75,8 +77,8 @@ Or manually:
 
 ```powershell
 $h = @{ "X-Internal-Token" = $env:MINDEX_INTERNAL_TOKEN }
-Invoke-RestMethod http://192.168.0.189:8000/api/mindex/sine/status -Headers $h
-Invoke-RestMethod http://192.168.0.189:8000/api/mindex/sine/detectors -Headers $h
+Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/api/mindex/sine/status -Headers $h
+Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/api/mindex/sine/detectors -Headers $h
 ```
 
 Browser: open `http://localhost:3010/sensing/sine/player`, select a library clip, **Run full SINE analysis**.

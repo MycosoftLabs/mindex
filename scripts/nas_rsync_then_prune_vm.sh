@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
 # Run ON MINDEX VM 189 after CIFS is mounted. Copies Library to NAS, deletes local backup, starts API.
 set -euo pipefail
 

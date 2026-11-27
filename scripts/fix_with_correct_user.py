@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
+# AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
 """Fix MINDEX with correct PostgreSQL user: mycosoft"""
+
+if __name__ == "__main__":
+    raise SystemExit('Retired on-prem utility: use the AWS release/SSM procedure in AWS_INFRA_REFERENCE.md; no local production servers exist.')
+
 import os
 import paramiko
 import sys
@@ -122,6 +127,6 @@ print("\n" + "="*70)
 print("  [COMPLETE] MINDEX Fix Done!")
 print("="*70)
 print("\nVerify from Windows:")
-print("  Invoke-RestMethod http://192.168.0.189:8000/api/mindex/stats")
+print("  Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/api/mindex/stats")
 print("\nTest website:")
 print("  http://localhost:3010/natureos/mindex")

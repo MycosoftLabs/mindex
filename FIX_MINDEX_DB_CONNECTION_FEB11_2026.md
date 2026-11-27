@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # Fix MINDEX Database Connection - February 11, 2026
 
 ## Current Issue
@@ -163,12 +165,12 @@ From **local machine**:
 
 ```powershell
 # 1. Check API is reachable
-Invoke-RestMethod http://192.168.0.189:8000/api/mindex/health | ConvertTo-Json
+Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/api/mindex/health | ConvertTo-Json
 
 # Expected: "db": "ok"
 
 # 2. Test observations endpoint
-Invoke-RestMethod "http://192.168.0.189:8000/api/mindex/observations?limit=3" | ConvertTo-Json -Depth 3
+Invoke-RestMethod "http://mindex-internal.mycosoft.com:8000/api/mindex/observations?limit=3" | ConvertTo-Json -Depth 3
 
 # Should return array of observations
 

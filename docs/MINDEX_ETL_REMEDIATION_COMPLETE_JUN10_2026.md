@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # MINDEX ETL Remediation Complete — Phases A–C (VM 189)
 
 **Date:** June 10, 2026  
@@ -83,7 +85,7 @@ sudo docker exec mindex-postgres psql -U mycosoft -d mindex -c "
   UNION ALL SELECT 'publications', count(*) FROM core.publications
   UNION ALL SELECT 'taxa_fungi', count(*) FROM core.taxon WHERE kingdom='Fungi';"
 
-curl -s http://192.168.0.189:8000/api/mindex/health
+curl -s http://mindex-internal.mycosoft.com:8000/api/mindex/health
 ```
 
 ---

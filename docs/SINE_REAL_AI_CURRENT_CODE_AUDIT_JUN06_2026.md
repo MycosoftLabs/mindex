@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # SINE Real AI Current Code Audit
 
 Date: June 6, 2026
@@ -1252,7 +1254,7 @@ Final live API proof:
 
 ```powershell
 python scripts\verify_sine_real_ai_e2e.py `
-  --api-base http://192.168.0.189:8000 `
+  --api-base http://mindex-internal.mycosoft.com:8000 `
   --query esc `
   --write-report /mnt/nas/mindex/models/acoustic/sine-esc50-cnn-p0-v1/e2e_real_ai_report.json
 ```

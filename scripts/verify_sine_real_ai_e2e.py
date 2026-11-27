@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
 """Verify SINE real-AI evidence through the live MINDEX API.
 
 This is the final proof gate after model/prototype registration. It calls the
@@ -344,7 +345,7 @@ def run_e2e(
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--api-base", default=os.environ.get("MINDEX_API_URL", "http://192.168.0.189:8000"))
+    parser.add_argument("--api-base", default=os.environ.get("MINDEX_API_URL", "http://mindex-internal.mycosoft.com:8000"))
     parser.add_argument("--token", default=os.environ.get("MINDEX_INTERNAL_TOKEN") or os.environ.get("MINDEX_INTERNAL_TOKENS"))
     parser.add_argument("--blob-id")
     parser.add_argument("--query", default="esc")

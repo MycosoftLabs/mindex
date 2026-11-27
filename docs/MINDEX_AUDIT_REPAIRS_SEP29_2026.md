@@ -1,3 +1,5 @@
+> AWS topology correction 2026-11-27: local production servers, LAN addresses and VM/Proxmox/NAS deployment instructions are retired. Use [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md). Preserve historical evidence and optional device/external connectors.
+
 # MINDEX audit repair release — September 30, 2026
 
 This release repairs data ingestion, search and snapshot contracts that could skip records, reuse results for different filters, report failed writes as successful, or label corrupt device frames valid. It combines seven independently reviewed repair packages on upstream `b1137e9ba7eeabacbbd4f28a2e022dbeffbf3a2e` for `codex/audit-ingestion-and-data-contracts`. Publication and deployment are separate steps; this document records source qualification, not evidence that a VM has been updated.

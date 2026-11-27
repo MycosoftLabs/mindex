@@ -1,9 +1,11 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # Quick Fix MINDEX Database - February 11, 2026
 
 ## 🔴 Problem
 
 MINDEX API is running but **PostgreSQL is not connected**:
-- API reachable at http://192.168.0.189:8000
+- API reachable at http://mindex-internal.mycosoft.com:8000
 - Database status: `"db": "error"`
 - All data endpoints returning 500 errors
 
@@ -60,13 +62,13 @@ After restart, check these endpoints:
 # From local machine:
 
 # 1. Health check (should show "db": "ok")
-Invoke-RestMethod http://192.168.0.189:8000/api/mindex/health | ConvertTo-Json
+Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/api/mindex/health | ConvertTo-Json
 
 # 2. Stats (should show taxa count)
-Invoke-RestMethod http://192.168.0.189:8000/api/mindex/stats | ConvertTo-Json
+Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/api/mindex/stats | ConvertTo-Json
 
 # 3. Observations (should return data)
-Invoke-RestMethod "http://192.168.0.189:8000/api/mindex/observations?limit=3" | ConvertTo-Json -Depth 3
+Invoke-RestMethod "http://mindex-internal.mycosoft.com:8000/api/mindex/observations?limit=3" | ConvertTo-Json -Depth 3
 
 # 4. Website integration (should work)
 Invoke-RestMethod http://localhost:3010/api/natureos/mindex/health | ConvertTo-Json
