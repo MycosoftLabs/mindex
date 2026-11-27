@@ -29,3 +29,6 @@ Makefile text eol=lf
 *.exe binary
 *.so binary
 *.dylib binary
+
+# Preserve the licensed source CSV byte-for-byte for its SHA-256 pin.
+data/magnetoreception/davidson2026/MASTER-species.csv -text
