@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # BLOCKS Scheduler — MINDEX Integration Scope
 
 **Date:** June 11, 2026  
@@ -23,7 +25,7 @@ Phase 2 scheduler integrations do **not** read or write MINDEX API (`192.168.0.1
 
 During deploy verification (June 11, 2026):
 
-- `GET http://192.168.0.189:8000/health` → `{"status":"healthy"}` (MINDEX unaffected, available for other apps)
+- `GET http://mindex-internal.mycosoft.com:8000/health` → `{"status":"healthy"}` (MINDEX unaffected, available for other apps)
 
 ## Future MINDEX touchpoints (not built)
 

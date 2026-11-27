@@ -1,4 +1,5 @@
-# Deploy MINDEX API to VM 189 — build in CI, VM pull + restart only.
+# AWS topology correction 2026-11-27: production runs on AWS; local server/VM/Proxmox/NAS deployment instructions are retired. Use AWS_INFRA_REFERENCE.md and verified AWS metadata. Physical devices and loopback development are separate.
+# Deploy MINDEX API to AWS (MINDEX) — build in CI, VM pull + restart only.
 # Same pattern as website deploy-sandbox-production and MAS deploy-mas-production.
 #
 # Secrets (Settings → Secrets and variables → Actions):
@@ -6,13 +7,13 @@
 #   VM_SSH_PRIVATE_KEY   - SSH private key for mycosoft user
 #   GHCR_PULL_TOKEN      - (Optional) PAT with read:packages for VM to pull image
 #
-# On VM 189: ensure .env (or env passed to container) has POSTGRES/Redis/Qdrant URLs as required by mindex_api.
+# On AWS (MINDEX): ensure .env (or env passed to container) has POSTGRES/Redis/Qdrant URLs as required by mindex_api.
 #
 # GitHub-hosted runners cannot reach RFC1918 LAN addresses (e.g. 192.168.0.189). The deploy job is OFF by default.
 # Enable VM SSH deploy from Actions by setting repo variable MINDEX_ENABLE_GITHUB_SSH_DEPLOY=true when using a
 # self-hosted runner on the LAN, a public jump host in MINDEX_HOST, or Tailscale/WireGuard IP reachable from GitHub.
 
-name: Deploy MINDEX to VM 189
+name: Deploy MINDEX to AWS (MINDEX)
 
 on:
   push:
@@ -71,16 +72,16 @@ jobs:
           network: host
 
   deploy:
-    name: Deploy to MINDEX VM (189)
+    if: ${{ false }} # Retired local deployment; retained for historical review.
+    name: Deploy to MINDEX (AWS) (189)
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ vars.MINDEX_ENABLE_GITHUB_SSH_DEPLOY == 'true' }}
     environment: production
     steps:
       - name: Set image for deploy (GHCR uses lowercase)
         run: echo "IMAGE_FULL=${{ env.REGISTRY }}/$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]'):mindex-latest" >> $GITHUB_ENV
 
-      - name: Deploy to MINDEX VM
+      - name: Deploy to MINDEX (AWS)
         uses: appleboy/ssh-action@v1.0.3
         env:
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

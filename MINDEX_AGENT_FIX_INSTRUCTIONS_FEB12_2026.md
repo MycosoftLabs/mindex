@@ -1,10 +1,12 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # MINDEX Agent Fix Instructions - February 12, 2026
 
 ## Current Status
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| MINDEX API | ✅ Running | `http://192.168.0.189:8000` |
+| MINDEX API | ✅ Running | `http://mindex-internal.mycosoft.com:8000` |
 | Database Connection | ✅ Connected | PostgreSQL responding |
 | Taxa Data | ✅ Has Data | 35,000 taxa (25K iNaturalist + 10K GBIF) |
 | Observations | ❌ EMPTY | 0 observations - **THIS NEEDS FIXING** |

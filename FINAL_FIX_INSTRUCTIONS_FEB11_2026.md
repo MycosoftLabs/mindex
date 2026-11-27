@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # FINAL MINDEX Fix Instructions - February 11, 2026
 
 ## ✅ ALL WEBSITE CODE FIXED (100% COMPLETE)
@@ -62,7 +64,7 @@ After running the SSH commands above, test from your Windows machine:
 
 ```powershell
 # 1. Direct API test
-Invoke-RestMethod http://192.168.0.189:8000/api/mindex/stats | ConvertTo-Json
+Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/api/mindex/stats | ConvertTo-Json
 
 # Should show:
 # {
@@ -75,7 +77,7 @@ Invoke-RestMethod http://192.168.0.189:8000/api/mindex/stats | ConvertTo-Json
 Invoke-RestMethod http://localhost:3010/api/natureos/mindex/stats | ConvertTo-Json
 
 # 3. Test observations
-Invoke-RestMethod "http://192.168.0.189:8000/api/mindex/observations?limit=3" | ConvertTo-Json -Depth 3
+Invoke-RestMethod "http://mindex-internal.mycosoft.com:8000/api/mindex/observations?limit=3" | ConvertTo-Json -Depth 3
 ```
 
 ## 🎯 Pages to Test After Fix

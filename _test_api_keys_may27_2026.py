@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
 import os
 import httpx
 
@@ -14,7 +15,7 @@ for p in [
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
-base = "http://192.168.0.189:8000/api/mindex/observations"
+base = "http://mindex-internal.mycosoft.com:8000/api/mindex/observations"
 params = {
     "bbox": "-117.45,32.45,-116.85,33.35",
     "kingdom": "Fungi",

@@ -1,3 +1,7 @@
+REM AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
+@echo off
+echo Retired on-prem utility: use the AWS release/SSM procedure in AWS_INFRA_REFERENCE.md; no local production servers exist. 1>&2
+exit /b 64
 @echo off
 REM Fix MINDEX Database Connection - Feb 11, 2026
 REM Simple batch script to restart MINDEX services on VM 189
@@ -18,7 +22,7 @@ echo [OK] VM is reachable
 echo.
 
 echo [2/10] Checking current API health...
-curl -s http://192.168.0.189:8000/api/mindex/health
+curl -s http://mindex-internal.mycosoft.com:8000/api/mindex/health
 echo.
 echo.
 
@@ -34,7 +38,7 @@ echo   Verifying from local machine...
 echo ============================================================
 timeout /t 3 >nul 2>&1
 
-curl -s http://192.168.0.189:8000/api/mindex/health
+curl -s http://mindex-internal.mycosoft.com:8000/api/mindex/health
 echo.
 echo.
 

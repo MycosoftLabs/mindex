@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # MINDEX all-species ingest and ancestry database API — October 3, 2026
 
 **Date:** October 3, 2026
@@ -82,7 +84,7 @@ To smoke-test first, add `--max-batches 1`.
 ```bash
 docker logs --tail 20 mindex-taxonomy-ingest-gbif
 cat ~/taxonomy-ingest/checkpoint_gbif.json   # last_source_id / max_source_id / totals / status
-curl -s -H "X-API-Key: $MINDEX_API_KEY" http://192.168.0.189:8000/api/mindex/taxa/stats
+curl -s -H "X-API-Key: $MINDEX_API_KEY" http://mindex-internal.mycosoft.com:8000/api/mindex/taxa/stats
 ```
 
 `status` in the checkpoint is `running`, `paused` (stopped by `--max-batches`) or `complete`.

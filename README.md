@@ -1,11 +1,16 @@
+> AWS topology correction 2026-11-27: local production servers, LAN addresses and VM/Proxmox/NAS deployment instructions are retired. Use [AWS_INFRA_REFERENCE.md](AWS_INFRA_REFERENCE.md). Preserve historical evidence and optional device/external connectors.
+
 # MINDEX - Mycological Index
+
+> **Infrastructure update:** Mycosoft has NO local servers or local systems (Morgan, 2026-11-27). MINDEX, MAS, the website, databases and n8n all run on AWS (inside the VPC: MINDEX API `http://mindex-internal.mycosoft.com:8000`, MAS `http://mas-internal.mycosoft.com:8001`; verify against the current AWS task definitions). The garage LAN, its VMs (sandbox .187, MAS .188, MINDEX .189, MYCA .191), Proxmox, NAS/UNAS and UniFi gear are retired (per Morgan, 2026-11-27). Never SSH to, probe, or default to any 192.168.0.x address. The only local machine is Morgan's personal dev PC (DESKTOP-JQR4TAV), which is not a server.
+
 
 > **The World's Comprehensive Mycological Data Platform**
 
 > **Version**: 2.1.0  
 > **Last Updated**: 2026-02-10  
 > **Port**: 8000  
-> **VM**: 192.168.0.189
+> **Host**: AWS (internal `mindex-internal.mycosoft.com:8000`)
 
 ---
 
@@ -103,7 +108,7 @@ python -m mindex_api.db migrate
 uvicorn mindex_api.main:app --host 0.0.0.0 --port 8000
 ```
 
-## 🐳 Docker (VM 189)
+## 🐳 Docker
 
 ```bash
 # Start all MINDEX services
@@ -417,8 +422,8 @@ GBIF_API_KEY=your_gbif_key
 NOMINATIM_URL=https://nominatim.openstreetmap.org
 
 # MAS Integration
-MAS_API_URL=http://192.168.0.188:8001
-MYCORRHIZAE_API_URL=http://192.168.0.188:8002
+MAS_API_URL=http://mas-internal.mycosoft.com:8001
+MYCORRHIZAE_API_URL=http://internal-mycosoft-core-int-21300503.us-east-1.elb.amazonaws.com:8002
 ```
 
 ---

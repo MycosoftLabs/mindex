@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
+# AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
 """Restart MINDEX API with rebuilt image - connect to existing DB containers"""
+
+if __name__ == "__main__":
+    raise SystemExit('Retired on-prem utility: use the AWS release/SSM procedure in AWS_INFRA_REFERENCE.md; no local production servers exist.')
+
 import paramiko
 import os
 import time
@@ -66,7 +71,7 @@ run_cmd(ssh, f"""docker run -d \\
     -e MINDEX_DB_USER=mycosoft \\
     -e MINDEX_DB_PASSWORD='{db_pass_escaped}' \\
     -e MINDEX_DB_NAME=mindex \\
-    -e API_CORS_ORIGINS='[\"http://localhost:3000\",\"http://localhost:3010\",\"http://192.168.0.187:3000\",\"http://192.168.0.172:3010\"]' \\
+    -e API_CORS_ORIGINS='[\"http://localhost:3000\",\"http://localhost:3010\",\"https://mycosoft.com\",\"http://192.168.0.172:3010\"]' \\
     mindex-api:latest 2>&1""")
 print("  Container started")
 

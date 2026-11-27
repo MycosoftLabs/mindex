@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
+# AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
 """Fix MINDEX deployment by cleaning up and restarting properly"""
+
+if __name__ == "__main__":
+    raise SystemExit('Retired on-prem utility: use the AWS release/SSM procedure in AWS_INFRA_REFERENCE.md; no local production servers exist.')
+
 import paramiko
 import os
 import time

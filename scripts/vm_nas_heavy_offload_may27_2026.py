@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
+# AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
 """
 Move heavy MINDEX library/backups off VM root disk onto NAS (189).
 Keeps Postgres/Redis/Qdrant on VM; all Library/acoustic files on CIFS only.
 """
 from __future__ import annotations
+
+if __name__ == "__main__":
+    raise SystemExit('Retired on-prem utility: use the AWS release/SSM procedure in AWS_INFRA_REFERENCE.md; no local production servers exist.')
+
 
 import base64
 import os

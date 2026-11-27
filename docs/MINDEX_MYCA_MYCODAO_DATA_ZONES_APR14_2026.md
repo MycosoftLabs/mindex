@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # MINDEX MYCODAO vs Mycosoft data zones — Apr 14, 2026
 
 ## Purpose
@@ -27,7 +29,7 @@ Returns:
 
 Example (after deploy):
 
-`GET http://192.168.0.189:8000/api/mindex/internal/meta/myca-data-catalog`  
+`GET http://mindex-internal.mycosoft.com:8000/api/mindex/internal/meta/myca-data-catalog`  
 (headers: `X-Internal-Token: <from env>`)
 
 ## MYCODAO read/write routes

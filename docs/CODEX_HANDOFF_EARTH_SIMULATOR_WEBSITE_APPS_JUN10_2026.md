@@ -1,3 +1,5 @@
+> **AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See [AWS_INFRA_REFERENCE.md](../AWS_INFRA_REFERENCE.md) for its replacement and disposition. Loopback development and physical-device fixtures are separate.**
+
 # Codex Handoff — Earth Simulator & Website Apps (Post-MINDEX ETL Remediation)
 
 **Date:** June 10, 2026  
@@ -17,7 +19,7 @@ MINDEX taxonomy is **production-usable** (**414K+** taxa with `kingdom='Fungi'`)
 
 1. Wire website apps to **real MINDEX APIs** (never mock arrays).
 2. Use real compound/sequence/publication endpoints — show empty states only when API returns zero rows, not mock fallbacks.
-3. Prefer **website BFF proxies** (`/api/mindex/*`) from the browser; server routes use `resolveMindexServerBaseUrl()` → `http://192.168.0.189:8000`.
+3. Prefer **website BFF proxies** (`/api/mindex/*`) from the browser; server routes use `resolveMindexServerBaseUrl()` → `http://mindex-internal.mycosoft.com:8000`.
 4. **Do not** change marketing/copy/layout unless Morgan explicitly requests it (website hard rule).
 
 ---
@@ -34,11 +36,11 @@ MINDEX taxonomy is **production-usable** (**414K+** taxa with `kingdom='Fungi'`)
 ### Website `.env.local` (dev PC)
 
 ```env
-MINDEX_API_URL=http://192.168.0.189:8000
-MINDEX_API_BASE_URL=http://192.168.0.189:8000
-NEXT_PUBLIC_MINDEX_API_URL=http://192.168.0.189:8000
-MAS_API_URL=http://192.168.0.188:8001
-NEXT_PUBLIC_MAS_API_URL=http://192.168.0.188:8001
+MINDEX_API_URL=http://mindex-internal.mycosoft.com:8000
+MINDEX_API_BASE_URL=http://mindex-internal.mycosoft.com:8000
+NEXT_PUBLIC_MINDEX_API_URL=http://mindex-internal.mycosoft.com:8000
+MAS_API_URL=http://mas-internal.mycosoft.com:8001
+NEXT_PUBLIC_MAS_API_URL=http://mas-internal.mycosoft.com:8001
 ```
 
 Server-side code **must not** use `http://localhost:8000` for MINDEX on the Sandbox VM unless `ALLOW_LOOPBACK_MINDEX=1`. See `WEBSITE/website/lib/mindex-base-url.ts`.
@@ -154,7 +156,7 @@ Earth Simulator map (client)
 
 ### Direct MINDEX API (server-side or docs)
 
-Base: `http://192.168.0.189:8000`
+Base: `http://mindex-internal.mycosoft.com:8000`
 
 | Endpoint area | Router | Use when |
 |---------------|--------|----------|
@@ -229,7 +231,7 @@ const markers = [{ id: 1, name: "Demo Mushroom", lat: 32.7, lng: -117.1 }];
 
 ```powershell
 # MINDEX reachable from dev machine
-Invoke-RestMethod http://192.168.0.189:8000/health
+Invoke-RestMethod http://mindex-internal.mycosoft.com:8000/health
 
 # Species proxy (replace bounds as needed)
 Invoke-RestMethod "http://localhost:3010/api/mindex/proxy/species?lat_min=32&lat_max=34&lng_min=-118&lng_max=-116&limit=10"
@@ -241,8 +243,8 @@ Invoke-RestMethod "http://localhost:3010/api/mindex/taxa?limit=5"
 **After MINDEX ETL smokes:**
 
 ```powershell
-Invoke-RestMethod "http://192.168.0.189:8000/api/mindex/compounds?limit=5"
-Invoke-RestMethod "http://192.168.0.189:8000/api/mindex/genetics?limit=5"
+Invoke-RestMethod "http://mindex-internal.mycosoft.com:8000/api/mindex/compounds?limit=5"
+Invoke-RestMethod "http://mindex-internal.mycosoft.com:8000/api/mindex/genetics?limit=5"
 ```
 
 **Earth Simulator:** Open `http://localhost:3010/natureos/earth-simulator`, zoom to San Diego bbox, confirm fungal markers or explicit empty state (not fake data).

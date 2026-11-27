@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# AWS topology correction 2026-11-27: production is AWS-only; this file's legacy on-prem references are not deployment authority. See AWS_INFRA_REFERENCE.md for its replacement and disposition. Loopback development and physical-device fixtures are separate.
 """
 MINDEX Cell Tower ETL — Load OpenCellID bulk data into signals.antennas
 
@@ -13,6 +14,10 @@ Usage:
   python etl_celltowers.py --limit 1000000    # Load first 1M
   python etl_celltowers.py --country US       # Load only US towers (MCC 310-316)
 """
+
+if __name__ == "__main__":
+    raise SystemExit('Retired on-prem utility: use the AWS release/SSM procedure in AWS_INFRA_REFERENCE.md; no local production servers exist.')
+
 
 import asyncio
 import csv
