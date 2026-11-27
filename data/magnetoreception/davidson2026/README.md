@@ -20,3 +20,7 @@ publication links. The publication metadata may be refreshed without adding rows
 
 Six focused offline tests pass. Production dry-run/commit receipts are separate;
 this source document is not a claim that ingestion has happened.
+
+The original CSV includes two whitespace-only source lines. They are intentionally
+retained; source bytes must not be reformatted. The narrow Git attribute prevents
+line-ending normalization from breaking the published source checksum.
